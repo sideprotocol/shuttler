@@ -31,8 +31,6 @@ hex = "0.4.3"
 
 [dev-dependencies]
 criterion = "0.5"
-frost-core = { git="https://github.com/ZcashFoundation/frost.git", branch = "main",  version = "1.0.0-rc.0", features = ["test-impl"] }
-frost-rerandomized = {git="https://github.com/ZcashFoundation/frost.git", branch = "main", version = "1.0.0-rc.0", features = ["test-impl"] }
 insta = { version = "1.31.0", features = ["yaml"] }
 
 lazy_static = "1.4"
