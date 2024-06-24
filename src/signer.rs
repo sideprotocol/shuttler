@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
-use libp2p::gossipsub;
+use frost_core::Ciphersuite;
+use libp2p::{gossipsub, PeerId};
 use sha256::Sha256Digest;
 
 use crate::messages::{DKGRound2Message, DKGRoundMessage, SignMessage, SigningBehaviour, SigningSteps};
@@ -7,7 +8,7 @@ use bitcoin::PublicKey;
 use frost_secp256k1 as frost;
 
 use rand::thread_rng;
-use log::{debug, error};
+use log::{debug, error, info};
 
 
 pub struct Signer {
@@ -27,8 +28,9 @@ pub struct Signer {
 }
 
 impl Signer {
-    pub fn new(party_id: u16, max_signer: usize, min_signer: usize) -> Self {
-        let identifier: frost::Identifier = party_id.try_into().expect("should be nonzero");
+    pub fn new(peer_id: PeerId, max_signer: usize, min_signer: usize) -> Self {
+        let identifier: frost::Identifier = frost::Identifier::new(frost::Secp256K1Sha256::H1(peer_id.to_bytes().as_slice())).unwrap();
+        info!("identifier: {:?}", identifier);
         Self {
             max_signers: max_signer,
             min_signers: min_signer,
@@ -101,7 +103,7 @@ impl Signer {
 
                 let new_msg = serde_json::to_string(&round2_message).expect("msg not serialized");
                 behave.gossipsub
-                    .publish(gossipsub::IdentTopic::new("round2"), new_msg.as_bytes())
+                    .publish(SigningSteps::DkgRound2.topic(), new_msg.as_bytes())
                     .expect("msg not published");
             }
         }
@@ -138,10 +140,10 @@ impl Signer {
             debug!("text: {:?}, {}", &text, &text.len());
             match PublicKey::from_slice(&text[..]) {
                 Ok(pk) => {
-                    println!("pk: {:?}", pk);
+                    debug!("pk: {:?}", pk);
                 }
                 Err(e) => {
-                    println!("Error: {:?}", e);
+                    error!("Error: {:?}", e);
                 }
             };
         }
@@ -166,7 +168,7 @@ impl Signer {
         let new_msg = serde_json::to_string(&sign_message).expect("msg not serialized");
         behave.gossipsub
             .publish(
-                gossipsub::IdentTopic::new("sign_round1"),
+                SigningSteps::SignRound1.topic(),
                 new_msg.as_bytes(),
             )
             .expect("msg not published");
@@ -215,7 +217,7 @@ impl Signer {
             let new_msg = serde_json::to_string(&sign_message).unwrap();
             behave.gossipsub
                 .publish(
-                    gossipsub::IdentTopic::new("sign_round2"),
+                    SigningSteps::SignRound2.topic(),
                     new_msg.as_bytes(),
                 )
                 .expect("msg not published");

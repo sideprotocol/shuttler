@@ -7,8 +7,10 @@ use libp2p::{gossipsub, mdns, noise, tcp, yamux, PeerId};
 use tokio::io::AsyncReadExt;
 
 use crate::commands::Cli;
+use crate::signer::{self, Signer};
 use crate::messages::{ SigningBehaviour, SigningBehaviourEvent, SigningSteps};
 use std::error::Error;
+use std::hash::Hash;
 use std::time::Duration;
 use tokio::{io,  select, time};
 
@@ -77,6 +79,8 @@ pub async fn execute(cli: &Cli) {
     // let mut buf = [0; 1024];
     let listener = TcpListener::bind(conf.message_server).await.expect("Failed to bind");
 
+    let mut signer = Signer::new(local_peer_id, 3, 2);
+
     // let (mut socket, _) = listener.accept().await.expect("Failed to accept");
     // Run the swarm
     loop {
@@ -84,7 +88,7 @@ pub async fn execute(cli: &Cli) {
         select! {
             swarm_event = swarm.select_next_some() => match swarm_event {
                 SwarmEvent::Behaviour(evt) => {
-                    event_handler(evt, swarm.behaviour_mut());
+                    event_handler(evt, swarm.behaviour_mut(), &mut signer);
                 },
                 SwarmEvent::NewListenAddr { address, .. } => {
                     info!("Local node is listening on {address}");
@@ -149,7 +153,7 @@ async fn tasks_fetcher(behave: &mut SigningBehaviour) {
 }
 
 // handle events from the swarm
-fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehaviour) {
+fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehaviour, signer: &mut Signer) {
     match event {
         SigningBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, _multiaddr) in list {
@@ -169,6 +173,7 @@ fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehaviour) {
             message,
         }) => {
             debug!("Received: {:?}", String::from_utf8_lossy(&message.data));
+            topic_handler(message, behave, signer).expect("topic processing failed");
         }
         _ => {}
     }
@@ -192,10 +197,20 @@ fn subscribes(behave: &mut SigningBehaviour) {
     }
 }
 
-fn topic_handler(message: Message) -> Result<(), Box<dyn Error>> {
+fn topic_handler(message: Message, behave: &mut SigningBehaviour, signer: &mut Signer) -> Result<(), Box<dyn Error>> {
     let topic = message.topic;
     if topic == SigningSteps::DkgInit.topic().into() {
-
+        signer.dkg_init(behave);
+    } else if topic == SigningSteps::DkgRound1.topic().into() {
+        signer.dkg_round1(behave, &message.data);
+    } else if topic == SigningSteps::DkgRound2.topic().into() {
+        signer.dkg_round2(&message.data);
+    } else if topic == SigningSteps::SignInit.topic().into() {
+        signer.sign_init(behave, &message.data);
+    } else if topic == SigningSteps::SignRound1.topic().into() {
+        signer.sign_round1(behave, &message.data);
+    } else if topic == SigningSteps::SignRound2.topic().into() {
+        signer.sign_round2(&message.data);
     }
     Ok(())
 }
