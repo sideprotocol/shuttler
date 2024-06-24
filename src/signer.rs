@@ -2,11 +2,12 @@ use std::collections::BTreeMap;
 use libp2p::gossipsub;
 use sha256::Sha256Digest;
 
-use crate::messages::{DKGRound2Message, DKGRoundMessage, SignMessage, SigningBehaviour};
+use crate::messages::{DKGRound2Message, DKGRoundMessage, SignMessage, SigningBehaviour, SigningSteps};
 use bitcoin::PublicKey;
 use frost_secp256k1 as frost;
 
 use rand::thread_rng;
+use log::{debug, error};
 
 
 pub struct Signer {
@@ -54,7 +55,7 @@ impl Signer {
             &mut rng,
         )
         .expect("Error in DKG round 1");
-        println!(
+        debug!(
             "round1_secret_package: {:?}, {:?}",
             &round1_secret_package, &round1_package
         );
@@ -66,14 +67,14 @@ impl Signer {
 
         let new_msg = serde_json::to_string(&round1_message).expect("msg not serialized");
         behave.gossipsub
-            .publish(gossipsub::IdentTopic::new("round1"), new_msg.as_bytes())
+            .publish(SigningSteps::DkgRound1.topic(), new_msg.as_bytes())
             .expect("msg not published");
     }
 
     pub fn dkg_round1(&mut self, behave: &mut SigningBehaviour, msg: &Vec<u8>) {
         let round1_package: DKGRoundMessage<frost::keys::dkg::round1::Package> =
             serde_json::from_slice(msg).expect("msg not deserialized");
-        println!("round1_package: {:?}", round1_package);
+        debug!("round1_package: {:?}", round1_package);
         self.received_round1_packages
             .insert(round1_package.party_id, round1_package.packet);
 
@@ -84,8 +85,8 @@ impl Signer {
             )
             .expect("error in DKG round 2");
 
-            println!("**********\n");
-            println!(
+            debug!("**********\n");
+            debug!(
                 "round2_secret_package: {:?}, {:?}",
                 &round2_secret_package, &round2_packages
             );
@@ -109,7 +110,7 @@ impl Signer {
     pub fn dkg_round2(&mut self, msg: &Vec<u8>) {
         let round2_package: DKGRound2Message =
             serde_json::from_slice(msg).expect("msg not deserialized");
-        println!("round2_package: {:?}", String::from_utf8_lossy(msg));
+        debug!("round2_package: {:?}", String::from_utf8_lossy(msg));
 
         if round2_package.receiver_party_id != self.participant_identifier {
             return;
@@ -125,8 +126,8 @@ impl Signer {
                 &self.received_round2_packages,
             )
             .expect("msg not deserialized");
-            println!("**********");
-            println!("round3_secret_package: {:?},\n\n {:?}", &key, &pubkey);
+            debug!("**********");
+            debug!("round3_secret_package: {:?},\n\n {:?}", &key, &pubkey);
             self.local_key.push(key);
             self.public_key_package.push(pubkey.clone());
 
@@ -134,7 +135,7 @@ impl Signer {
                 .verifying_key()
                 .serialize()
                 .expect("msg not serialized");
-            println!("text: {:?}, {}", &text, &text.len());
+            debug!("text: {:?}, {}", &text, &text.len());
             match PublicKey::from_slice(&text[..]) {
                 Ok(pk) => {
                     println!("pk: {:?}", pk);
@@ -178,7 +179,7 @@ impl Signer {
 
         self.sign_commitment_store
             .insert(sign_message.party_id, sign_message.packet);
-        println!("commitment_store: {:?}", self.sign_commitment_store.len());
+        debug!("commitment_store: {:?}", self.sign_commitment_store.len());
 
         if self.sign_commitment_store.len() >= self.max_signers as usize {
             // let signing_package = frost::SigningPackage::new(commitment_store.clone(), sign_message.message.clone().as_bytes());
@@ -188,7 +189,7 @@ impl Signer {
                 &sign_message.message.as_bytes(),
             );
 
-            println!("sign_message: {:?}", sign_message);
+            debug!("sign_message: {:?}", sign_message);
             self.sign_package_store.insert(
                 sign_message.message.clone().digest(),
                 signing_package.clone(),
@@ -201,7 +202,7 @@ impl Signer {
             let signature_shares =
                 frost::round2::sign(&signing_package, &nonces, &self.local_key[0])
                     .expect("signing error in round 2");
-            println!("signature_shares: {:?}", signature_shares);
+            debug!("signature_shares: {:?}", signature_shares);
 
             let sign_message = SignMessage {
                 party_id: self.participant_identifier,
@@ -224,14 +225,14 @@ impl Signer {
     pub fn sign_round2(&mut self, msg: &Vec<u8>) {
         let sign_message: SignMessage<frost::round2::SignatureShare> =
             serde_json::from_slice(msg).expect("msg not deserialized");
-        println!("sign_message: {:?}", &sign_message);
+        debug!("sign_message: {:?}", &sign_message);
 
         self.sign_shares_store
             .insert(sign_message.party_id, sign_message.packet.clone());
-        println!("sign_shares_store: {:?}", self.sign_shares_store.len());
+        debug!("sign_shares_store: {:?}", self.sign_shares_store.len());
 
         if self.sign_shares_store.len() == self.max_signers as usize {
-            println!("=============================");
+            debug!("=============================");
             let signing_package = self
                 .sign_package_store
                 .get(&sign_message.message.to_string())
@@ -244,13 +245,13 @@ impl Signer {
             ) {
                 Ok(signature) => {
                     // println!("public key: {:?}", pub)
-                    println!("signature: {:?}", signature.serialize());
+                    debug!("signature: {:?}", signature.serialize());
 
                     let is_signature_valid = &self.public_key_package[0]
                         .verifying_key()
                         .verify(sign_message.message.as_bytes(), &signature)
                         .is_ok();
-                    println!("is_signature_valid: {:?}", is_signature_valid);
+                    debug!("is_signature_valid: {:?}", is_signature_valid);
 
                     // let text = public_key_package[0]
                     //     .verifying_key().serialize();
@@ -260,10 +261,10 @@ impl Signer {
                         .verifying_key()
                         .serialize()
                         .expect("msg not serialized");
-                    println!("verify key: {:?}, {}", &text, &text.len());
+                    debug!("verify key: {:?}, {}", &text, &text.len());
                     match PublicKey::from_slice(&text[..]) {
                         Ok(pk) => {
-                            println!("pk: {:?}", pk);
+                            debug!("pk: {:?}", pk);
 
                             // println!("messege: {:?}", &text_bytes);
 
@@ -276,12 +277,12 @@ impl Signer {
                             // };
                         }
                         Err(e) => {
-                            println!("Error: {:?}", e);
+                            error!("Error: {:?}", e);
                         }
                     };
                 }
                 Err(e) => {
-                    println!("Error: {:?}", e);
+                    error!("Error: {:?}", e);
                 }
             };
         }

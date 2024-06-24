@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 use crate::config;
+use log::{info, error};
 
 
 #[derive(Parser)]
@@ -36,13 +37,13 @@ pub async fn publish(conf: &config::Config, task: crate::messages::Task) {
         Ok(mut stream) => {
             let message = serde_json::to_string(&task).unwrap();
             if let Err(e) = stream.write_all(message.as_bytes()).await {
-                println!("Failed to send message: {}", e);
+                error!("Failed to send message: {}", e);
                 return;
             }
-            println!("Sent: {}", message);
+            info!("Sent: {}", message);
         }
         Err(e) => {
-            println!("Failed to connect: {}", e);
+            error!("Failed to connect: {}", e);
         }
     }
 }

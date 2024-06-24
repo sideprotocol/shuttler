@@ -1,8 +1,9 @@
 use crate::config;
 
 use super::Cli;
+use log::info;
 
 pub fn execute(cli: &Cli) {
-    println!("init config to: {}", &cli.home);
+    info!("init config to: {}", &cli.home);
     config::Config::default().save(&cli.home).unwrap();
 }

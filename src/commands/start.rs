@@ -3,7 +3,7 @@ use futures::StreamExt;
 use libp2p::gossipsub::{IdentTopic, Message};
 use libp2p::identity::Keypair;
 use libp2p::swarm::SwarmEvent;
-use libp2p::{gossipsub, mdns, noise, tcp, yamux};
+use libp2p::{gossipsub, mdns, noise, tcp, yamux, PeerId};
 use tokio::io::AsyncReadExt;
 
 use crate::commands::Cli;
@@ -12,8 +12,8 @@ use std::error::Error;
 use std::time::Duration;
 use tokio::{io,  select, time};
 
-use libp2p::{identity, PeerId};
 use tokio::net::TcpListener;
+use log::{debug, info, error};
 
 pub async fn execute(cli: &Cli) {
 
@@ -24,7 +24,7 @@ pub async fn execute(cli: &Cli) {
     // let local_key = identity::Keypair::generate_ed25519();
     // local_key.
     let local_peer_id = PeerId::from(local_key.public());
-    println!("Local peer id: {:?}", local_peer_id);
+    info!("Local peer id: {:?}", local_peer_id);
 
     let mut swarm: libp2p::Swarm<SigningBehaviour> = libp2p::SwarmBuilder::with_new_identity()
         .with_tokio()
@@ -87,24 +87,24 @@ pub async fn execute(cli: &Cli) {
                     event_handler(evt, swarm.behaviour_mut());
                 },
                 SwarmEvent::NewListenAddr { address, .. } => {
-                    println!("Local node is listening on {address}");
+                    info!("Local node is listening on {address}");
                 },
                 _ => {
-                    println!("Swarm event: {:?}", swarm_event);
+                    // debug!("Swarm event: {:?}", swarm_event);
                 },
             },
 
             socket = listener.accept() => {
                 match socket {
                     Ok((mut socket, _)) => {
-                        println!("Accepted connection from: {:?}", socket.peer_addr().unwrap());
+                        debug!("Accepted connection from: {:?}", socket.peer_addr().unwrap());
                         let mut buf = [0; 1024];
                         let result = socket.read(&mut buf).await;
 
                         match result {
                             Ok(0) => {
                                 // Connection closed
-                                println!("Connection closed");
+                                error!("Connection closed");
                                 break;
                             }
                             Ok(n) => {
@@ -114,21 +114,21 @@ pub async fn execute(cli: &Cli) {
                                 // publish_message(swarm.behaviour_mut()).await;
                                 match swarm.behaviour_mut().gossipsub.publish(task.step.topic(), task.message.as_bytes()) {
                                     Ok(_) => {
-                                        println!("Published message to gossip: {:?}", message);
+                                        info!("Published message to gossip: {:?}", message);
                                     }
                                     Err(e) => {
-                                        println!("Failed to publish message to gossip: {:?}", e);
+                                        error!("Failed to publish message to gossip: {:?}", e);
                                     }
                                 } 
                             }
                             Err(e) => {
-                                println!("Failed to read from socket: {}", e);
+                                error!("Failed to read from socket: {}", e);
                                 break;
                             }
                         }
                     }
                     Err(e) => {
-                        println!("Failed to accept connection: {:?}", e);
+                        error!("Failed to accept connection: {:?}", e);
                     }
                 }
             }
@@ -144,7 +144,7 @@ async fn tasks_fetcher(behave: &mut SigningBehaviour) {
         let message = format!("Hello at {:?}", time::Instant::now());
 
         behave.gossipsub.publish(IdentTopic::new("test"), message.as_bytes()).unwrap();
-        println!("Published message to gossip: {:?}", message);
+        error!("Published message to gossip: {:?}", message);
     }
 }
 
@@ -153,13 +153,13 @@ fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehaviour) {
     match event {
         SigningBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, _multiaddr) in list {
-                println!("mDNS discovered a new peer: {peer_id}");
+                debug!("mDNS discovered a new peer: {peer_id}");
                 behave.gossipsub.add_explicit_peer(&peer_id);
             }
         }
         SigningBehaviourEvent::Mdns(mdns::Event::Expired(list)) => {
             for (peer_id, _multiaddr) in list {
-                println!("mDNS discover peer has expired: {peer_id}");
+                debug!("mDNS discover peer has expired: {peer_id}");
                 behave.gossipsub.remove_explicit_peer(&peer_id);
             }
         }
@@ -168,7 +168,7 @@ fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehaviour) {
             message_id: _id,
             message,
         }) => {
-            println!("Received: {:?}", String::from_utf8_lossy(&message.data));
+            debug!("Received: {:?}", String::from_utf8_lossy(&message.data));
         }
         _ => {}
     }
@@ -193,9 +193,9 @@ fn subscribes(behave: &mut SigningBehaviour) {
 }
 
 fn topic_handler(message: Message) -> Result<(), Box<dyn Error>> {
-    let topic = message.topic.as_str();
-    if topic.starts_with("sign") {
-        println!("message topic: {}", topic);
+    let topic = message.topic;
+    if topic == SigningSteps::DkgInit.topic().into() {
+
     }
     Ok(())
 }
