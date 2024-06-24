@@ -1,23 +1,15 @@
 use std::collections::BTreeMap;
-use std::error::Error;
-use std::time::Duration;
-use tokio::{io, select};
-
+use libp2p::gossipsub;
 use sha256::Sha256Digest;
 
-use crate::messages::{DKGRound2Message, DKGRoundMessage, SignMessage};
+use crate::messages::{DKGRound2Message, DKGRoundMessage, SignMessage, SigningBehaviour};
 use bitcoin::PublicKey;
 use frost_secp256k1 as frost;
-use futures::StreamExt;
-use k256::ecdsa::signature::Keypair;
-use libp2p::swarm::{NetworkBehaviour, Swarm, SwarmEvent};
-use libp2p::{gossipsub, mdns, noise, tcp, yamux};
+
 use rand::thread_rng;
-use crate::messages::SignerBehaviour;
 
 
 pub struct Signer {
-    pub swarm: libp2p::Swarm<SignerBehaviour>,
     max_signers: usize,
     min_signers: usize,
     participant_identifier: frost::Identifier,
@@ -33,107 +25,10 @@ pub struct Signer {
     round1_secret_package: Vec<frost::keys::dkg::round1::SecretPackage>,
 }
 
-fn init_swarm() -> Swarm<SignerBehaviour> {
-    let mut swarm = libp2p::SwarmBuilder::with_new_identity()
-        .with_tokio()
-        .with_tcp(
-            tcp::Config::default(),
-            noise::Config::new,
-            yamux::Config::default,
-        )
-        .expect("msg not published")
-        .with_quic()
-        .with_behaviour(|key| {
-            // To content-address message, we can take the hash of message and use it as an ID.
-            let message_id_fn = |message: &gossipsub::Message| {
-                // let mut s = DefaultHasher::new();
-                // message.data.hash(&mut s);
-                // gossipsub::MessageId::from(s.finish().to_string())
-                // hash_msg(String::from_utf8(message.data)?.to_string())
-                gossipsub::MessageId::from(String::from_utf8_lossy(&message.data).to_string())
-            };
-
-            // Set a custom gossipsub configuration
-            let gossipsub_config = gossipsub::ConfigBuilder::default()
-                .heartbeat_interval(Duration::from_secs(10)) // This is set to aid debugging by not cluttering the log space
-                .validation_mode(gossipsub::ValidationMode::Strict) // This sets the kind of message validation. The default is Strict (enforce message signing)
-                .message_id_fn(message_id_fn) // content-address messages. No two messages of the same content will be propagated.
-                .build()
-                .map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?; // Temporary hack because `build` does not return a proper `std::error::Error`.
-
-            // build a gossipsub network behaviour
-            let gossipsub = gossipsub::Behaviour::new(
-                gossipsub::MessageAuthenticity::Signed(key.clone()),
-                gossipsub_config,
-            )?;
-
-            let mdns =
-                mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?;
-            Ok(SignerBehaviour { gossipsub, mdns })
-        })
-        .expect("unable to initialize swarm")
-        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
-        .build();
-
-    // Create a Gossipsub topic
-    let topic = gossipsub::IdentTopic::new("test-net");
-    let topic1 = gossipsub::IdentTopic::new("round1");
-    let topic2 = gossipsub::IdentTopic::new("round2");
-    let topic3 = gossipsub::IdentTopic::new("sign");
-    let topic4 = gossipsub::IdentTopic::new("sign_round1");
-    let topic5 = gossipsub::IdentTopic::new("sign_round2");
-    // subscribes to our topic
-    swarm
-        .behaviour_mut()
-        .gossipsub
-        .subscribe(&topic)
-        .expect("failed to subscribed to topic");
-    swarm
-        .behaviour_mut()
-        .gossipsub
-        .subscribe(&topic1)
-        .expect("failed to subscribed to topic");
-    swarm
-        .behaviour_mut()
-        .gossipsub
-        .subscribe(&topic2)
-        .expect("failed to subscribed to topic");
-    swarm
-        .behaviour_mut()
-        .gossipsub
-        .subscribe(&topic3)
-        .expect("failed to subscribed to topic");
-    swarm
-        .behaviour_mut()
-        .gossipsub
-        .subscribe(&topic4)
-        .expect("failed to subscribed to topic");
-    swarm
-        .behaviour_mut()
-        .gossipsub
-        .subscribe(&topic5)
-        .expect("failed to subscribed to topic");
-
-    // Listen on all interfaces and whatever port the OS assigns
-    swarm
-        .listen_on(
-            "/ip4/0.0.0.0/udp/0/quic-v1"
-                .parse()
-                .expect("address parser error"),
-        )
-        .expect("unable to listen on quic");
-    swarm
-        .listen_on("/ip4/0.0.0.0/tcp/0".parse().expect("address parser error"))
-        .expect("unable to listen on tcp");
-
-    swarm
-}
-
 impl Signer {
     pub fn new(party_id: u16, max_signer: usize, min_signer: usize) -> Self {
         let identifier: frost::Identifier = party_id.try_into().expect("should be nonzero");
         Self {
-            swarm: init_swarm(),
             max_signers: max_signer,
             min_signers: min_signer,
             participant_identifier: identifier,
@@ -150,79 +45,7 @@ impl Signer {
         }
     }
 
-    // async fn start(&mut self) {
-    //     // Kick it off
-    //     loop {
-    //         select! {
-    //             // Ok(Some(line)) = stdin.next_line() => {
-    //             //     let to_topic = if line.starts_with("sign") {
-    //             //         signer.publish_message("sign".to_owned(), line.clone())
-    //             //     } else {
-    //             //         signer.publish_message("dkg".to_owned(), line.clone())
-    //             //     };
-    //             // }
-    //             event = &self.swarm.select_next_some() => match event {
-    //                 SwarmEvent::Behaviour(SignerBehaviour::Mdns(mdns::Event::Discovered(list))) => {
-    //                     for (peer_id, _multiaddr) in list {
-    //                         println!("mDNS discovered a new peer: {peer_id}");
-    //                         signer.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-    //                     }
-    //                 },
-    //                 SwarmEvent::Behaviour(SignerBehaviour::Mdns(mdns::Event::Expired(list))) => {
-    //                     for (peer_id, _multiaddr) in list {
-    //                         println!("mDNS discover peer has expired: {peer_id}");
-    //                         signer.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
-    //                     }
-    //                 },
-    //                 SwarmEvent::Behaviour(SignerBehaviour::Gossipsub(gossipsub::Event::Message {
-    //                     propagation_source: _peer_id,
-    //                     message_id: _id,
-    //                     message,
-    //                 })) => {
-    //                     if local_party_id > 1000u16 {
-    //                         continue;
-    //                     }
-    //                     let msg = String::from_utf8_lossy(&message.data);
-
-    //                     // Sign Messages, support parallel signing
-    //                     if &message.topic.to_string() == "sign" {
-    //                         signer.sign_init(&message.data);
-    //                     }
-    //                     if &message.topic.to_string() == "sign_round1" {
-    //                         signer.sign_round1(&message.data);
-    //                     }
-    //                     if &message.topic.to_string() == "sign_round2" {
-    //                         signer.sign_round2(&message.data);
-    //                     }
-
-    //                     // DKG, Does not support parallel DKG
-    //                     if msg.starts_with("generate") {
-    //                         signer.dkg_init();
-    //                     }
-    //                     if &message.topic.to_string() == "round1" {
-    //                         signer.dkg_round1(&message.data);
-    //                     }
-    //                     if &message.topic.to_string() == "round2" {
-    //                         signer.dkg_round2(&message.data);
-    //                     }
-    //                 },
-    //                 SwarmEvent::NewListenAddr { address, .. } => {
-    //                     println!("Local node is listening on {address}");
-    //                 }
-    //                 _ => {}
-    //             }
-    //         }
-    //     }
-    // }
-
-    pub fn publish_message(&mut self, topic: String, msg: String) {
-        let to_topic = gossipsub::IdentTopic::new(topic);
-        if let Err(e) = self.swarm.behaviour_mut().gossipsub.publish(to_topic, msg) {
-            println!("Publish error: {e:?}");
-        }
-    }
-
-    pub fn dkg_init(&mut self) {
+    pub fn dkg_init(&mut self, behave: &mut SigningBehaviour) {
         let mut rng = thread_rng();
         let (round1_secret_package, round1_package) = frost::keys::dkg::part1(
             self.participant_identifier.clone(),
@@ -242,14 +65,12 @@ impl Signer {
         };
 
         let new_msg = serde_json::to_string(&round1_message).expect("msg not serialized");
-        self.swarm
-            .behaviour_mut()
-            .gossipsub
+        behave.gossipsub
             .publish(gossipsub::IdentTopic::new("round1"), new_msg.as_bytes())
             .expect("msg not published");
     }
 
-    pub fn dkg_round1(&mut self, msg: &Vec<u8>) {
+    pub fn dkg_round1(&mut self, behave: &mut SigningBehaviour, msg: &Vec<u8>) {
         let round1_package: DKGRoundMessage<frost::keys::dkg::round1::Package> =
             serde_json::from_slice(msg).expect("msg not deserialized");
         println!("round1_package: {:?}", round1_package);
@@ -278,9 +99,7 @@ impl Signer {
                 };
 
                 let new_msg = serde_json::to_string(&round2_message).expect("msg not serialized");
-                self.swarm
-                    .behaviour_mut()
-                    .gossipsub
+                behave.gossipsub
                     .publish(gossipsub::IdentTopic::new("round2"), new_msg.as_bytes())
                     .expect("msg not published");
             }
@@ -327,7 +146,7 @@ impl Signer {
         }
     }
 
-    pub fn sign_init(&mut self, msg: &Vec<u8>) {
+    pub fn sign_init(&mut self, behave: &mut SigningBehaviour, msg: &Vec<u8>) {
         let mut rng = thread_rng();
         let (nonces, commitments) =
             frost::round1::commit(self.local_key[0].signing_share(), &mut rng);
@@ -344,9 +163,7 @@ impl Signer {
             .insert(sign_message.party_id, sign_message.packet);
 
         let new_msg = serde_json::to_string(&sign_message).expect("msg not serialized");
-        self.swarm
-            .behaviour_mut()
-            .gossipsub
+        behave.gossipsub
             .publish(
                 gossipsub::IdentTopic::new("sign_round1"),
                 new_msg.as_bytes(),
@@ -355,7 +172,7 @@ impl Signer {
         // Ok(())
     }
 
-    pub fn sign_round1(&mut self, msg: &Vec<u8>) {
+    pub fn sign_round1(&mut self, behave: &mut SigningBehaviour, msg: &Vec<u8>) {
         let sign_message: SignMessage<frost::round1::SigningCommitments> =
             serde_json::from_slice(&msg).expect("Error in sign_round1");
 
@@ -395,9 +212,7 @@ impl Signer {
                 .insert(sign_message.party_id, sign_message.packet.clone());
 
             let new_msg = serde_json::to_string(&sign_message).unwrap();
-            self.swarm
-                .behaviour_mut()
-                .gossipsub
+            behave.gossipsub
                 .publish(
                     gossipsub::IdentTopic::new("sign_round2"),
                     new_msg.as_bytes(),
@@ -493,79 +308,4 @@ impl Signer {
 //     }
 
 //     Ok(psbt)
-// }
-
-// async fn start_libp2p_node() -> Result<(), Box<dyn Error>> {
-//     let local_party_id: u16 = 1;
-//     println!("party_id: {}", local_party_id);
-
-//     let signer = Signer::new(local_party_id, 3, 2);
-
-//     let text_bytes = [
-//         181, 121, 244, 3, 218, 122, 170, 51, 38, 102, 122, 153, 179, 167, 118, 242, 174, 45, 157,
-//         135, 155, 177, 158, 39, 134, 66, 84, 1, 56, 169, 227, 164,
-//     ];
-
-//     // Kick it off
-//     loop {
-//         select! {
-//             // Ok(Some(line)) = stdin.next_line() => {
-//             //     let to_topic = if line.starts_with("sign") {
-//             //         signer.publish_message("sign".to_owned(), line.clone())
-//             //     } else {
-//             //         signer.publish_message("dkg".to_owned(), line.clone())
-//             //     };
-//             // }
-//             event = &signer.swarm.select_next_some() => match event {
-//                 SwarmEvent::Behaviour(SignerBehaviour::Mdns(mdns::Event::Discovered(list))) => {
-//                     for (peer_id, _multiaddr) in list {
-//                         println!("mDNS discovered a new peer: {peer_id}");
-//                         signer.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-//                     }
-//                 },
-//                 SwarmEvent::Behaviour(SignerBehaviour::Mdns(mdns::Event::Expired(list))) => {
-//                     for (peer_id, _multiaddr) in list {
-//                         println!("mDNS discover peer has expired: {peer_id}");
-//                         signer.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
-//                     }
-//                 },
-//                 SwarmEvent::Behaviour(SignerBehaviour::Gossipsub(gossipsub::Event::Message {
-//                     propagation_source: _peer_id,
-//                     message_id: _id,
-//                     message,
-//                 })) => {
-//                     if local_party_id > 1000u16 {
-//                         continue;
-//                     }
-//                     let msg = String::from_utf8_lossy(&message.data);
-
-//                     // Sign Messages, support parallel signing
-//                     if &message.topic.to_string() == "sign" {
-//                         signer.sign_init(&message.data);
-//                     }
-//                     if &message.topic.to_string() == "sign_round1" {
-//                         signer.sign_round1(&message.data);
-//                     }
-//                     if &message.topic.to_string() == "sign_round2" {
-//                         signer.sign_round2(&message.data);
-//                     }
-
-//                     // DKG, Does not support parallel DKG
-//                     if msg.starts_with("generate") {
-//                         signer.dkg_init();
-//                     }
-//                     if &message.topic.to_string() == "round1" {
-//                         signer.dkg_round1(&message.data);
-//                     }
-//                     if &message.topic.to_string() == "round2" {
-//                         signer.dkg_round2(&message.data);
-//                     }
-//                 },
-//                 SwarmEvent::NewListenAddr { address, .. } => {
-//                     println!("Local node is listening on {address}");
-//                 }
-//                 _ => {}
-//             }
-//         }
-//     }
 // }

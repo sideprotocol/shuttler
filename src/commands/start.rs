@@ -4,9 +4,10 @@ use libp2p::gossipsub::{IdentTopic, Message};
 use libp2p::identity::Keypair;
 use libp2p::swarm::SwarmEvent;
 use libp2p::{gossipsub, mdns, noise, tcp, yamux};
+use tokio::io::AsyncReadExt;
 
 use crate::commands::Cli;
-use crate::messages::{ SigningBehaviour, SigningBehaviourEvent};
+use crate::messages::{ SigningBehaviour, SigningBehaviourEvent, SigningSteps};
 use std::error::Error;
 use std::time::Duration;
 use tokio::{io,  select, time};
@@ -67,14 +68,14 @@ pub async fn execute(cli: &Cli) {
         .build();
 
     // subscribes to topics
-    // subscribes(swarm.behaviour_mut());
+    subscribes(swarm.behaviour_mut());
 
     // Listen on all interfaces and whatever port the OS assigns
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse().expect("address parser error")).expect("failed to listen on all interfaces");
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().expect("Address parse error")).expect("failed to listen on all interfaces");
 
     // let mut buf = [0; 1024];
-    // let listener = TcpListener::bind(conf.message_server).await.expect("Failed to bind");
+    let listener = TcpListener::bind(conf.message_server).await.expect("Failed to bind");
 
     // let (mut socket, _) = listener.accept().await.expect("Failed to accept");
     // Run the swarm
@@ -92,33 +93,51 @@ pub async fn execute(cli: &Cli) {
                     println!("Swarm event: {:?}", swarm_event);
                 },
             },
-            // result = socket.read(&mut buf) => {
-            //     match result {
-            //         Ok(0) => {
-            //             // Connection closed
-            //             println!("Connection closed");
-            //             break;
-            //         }
-            //         Ok(n) => {
-            //             // Print the received message
-            //             let message = String::from_utf8_lossy(&buf[..n]);
-            //             println!("Received: {}", message);
-            //             // publish_message(swarm.behaviour_mut()).await;
 
-            //             swarm.behaviour_mut().gossipsub.publish(IdentTopic::new("test"), message.as_bytes()).unwrap(); 
-            //         }
-            //         Err(e) => {
-            //             println!("Failed to read from socket: {}", e);
-            //             break;
-            //         }
-            //     }
-            // }
+            socket = listener.accept() => {
+                match socket {
+                    Ok((mut socket, _)) => {
+                        println!("Accepted connection from: {:?}", socket.peer_addr().unwrap());
+                        let mut buf = [0; 1024];
+                        let result = socket.read(&mut buf).await;
+
+                        match result {
+                            Ok(0) => {
+                                // Connection closed
+                                println!("Connection closed");
+                                break;
+                            }
+                            Ok(n) => {
+                                // Print the received message
+                                let message = String::from_utf8_lossy(&buf[..n]);
+                                let task = serde_json::from_str::<crate::messages::Task>(&message).unwrap();
+                                // publish_message(swarm.behaviour_mut()).await;
+                                match swarm.behaviour_mut().gossipsub.publish(task.step.topic(), task.message.as_bytes()) {
+                                    Ok(_) => {
+                                        println!("Published message to gossip: {:?}", message);
+                                    }
+                                    Err(e) => {
+                                        println!("Failed to publish message to gossip: {:?}", e);
+                                    }
+                                } 
+                            }
+                            Err(e) => {
+                                println!("Failed to read from socket: {}", e);
+                                break;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        println!("Failed to accept connection: {:?}", e);
+                    }
+                }
+            }
         }
     }
 }
 
 
-async fn publish_message(behave: &mut SigningBehaviour) {
+async fn tasks_fetcher(behave: &mut SigningBehaviour) {
     let mut interval = time::interval(Duration::from_secs(5));
     loop {
         interval.tick().await;
@@ -131,7 +150,6 @@ async fn publish_message(behave: &mut SigningBehaviour) {
 
 // handle events from the swarm
 fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehaviour) {
-    println!("Event: {:?}", event);
     match event {
         SigningBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, _multiaddr) in list {
@@ -156,20 +174,21 @@ fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehaviour) {
     }
 }
 
+
+
 fn subscribes(behave: &mut SigningBehaviour) {
 
     let topics = vec![
-        "test",
-        "test-net",
-        "round1",
-        "round2",
-        "sign",
-        "sign_round1",
-        "sign_round2",
+        SigningSteps::DkgInit,
+        SigningSteps::DkgRound1,
+        SigningSteps::DkgRound2,
+        SigningSteps::SignInit,
+        SigningSteps::SignRound1,
+        SigningSteps::SignRound2,
     ];
     
     for topic in topics {
-        behave.gossipsub.subscribe(&IdentTopic::new(topic)).expect("Failed to subscribe to topic");
+        behave.gossipsub.subscribe(&topic.topic()).expect("Failed to subscribe to topic");
     }
 }
 

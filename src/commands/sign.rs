@@ -1,7 +1,10 @@
-use super::Cli;
+use crate::messages::Task;
+
+use super::{publish, Cli};
 
 
-pub fn execute(cli : &Cli, pbst : String) {
-    println!("Sign with pbst: {}, {}", cli.home, pbst);
-    // Add your logic here
+pub async fn execute(cli : &Cli, pbst : String) {
+    let conf = crate::config::Config::from_file(&cli.home).unwrap();
+    let task = Task::new(crate::messages::SigningSteps::SignInit, pbst);
+    publish(&conf, task).await;
 }

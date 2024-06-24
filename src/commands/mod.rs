@@ -1,4 +1,7 @@
 use clap::{Parser, Subcommand};
+use tokio::{io::AsyncWriteExt, net::TcpStream};
+
+use crate::config;
 
 
 #[derive(Parser)]
@@ -27,3 +30,19 @@ pub mod init;
 pub mod dkg;
 pub mod sign;
 pub mod start;
+
+pub async fn publish(conf: &config::Config, task: crate::messages::Task) {
+    match TcpStream::connect(conf.message_server.clone()).await {
+        Ok(mut stream) => {
+            let message = serde_json::to_string(&task).unwrap();
+            if let Err(e) = stream.write_all(message.as_bytes()).await {
+                println!("Failed to send message: {}", e);
+                return;
+            }
+            println!("Sent: {}", message);
+        }
+        Err(e) => {
+            println!("Failed to connect: {}", e);
+        }
+    }
+}
