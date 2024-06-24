@@ -9,7 +9,7 @@ use libp2p::{gossipsub, mdns};
 use frost_secp256k1 as frost;
 
 #[derive(NetworkBehaviour)]
-pub struct SignerBehaviour {
+pub struct SigningBehaviour {
     pub gossipsub: gossipsub::Behaviour,
     pub mdns: mdns::tokio::Behaviour,
 }

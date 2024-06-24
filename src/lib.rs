@@ -1,4 +1,7 @@
 pub mod participant;
-#[cfg(test)]
-pub mod test;
-pub mod taproot;
+pub mod config;
+pub mod commands;
+pub mod messages;
+// #[cfg(test)]
+// pub mod test;
+// pub mod taproot;
