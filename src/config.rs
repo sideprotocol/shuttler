@@ -8,8 +8,8 @@ const CONFIG_FILE: &str = "config.toml";
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
     pub message_server: String,
-    pub signer: Signer,
     pub p2p: P2P,
+    pub signer: Signer,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

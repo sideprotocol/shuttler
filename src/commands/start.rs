@@ -4,7 +4,7 @@ use libp2p::gossipsub::{IdentTopic, Message};
 
 use libp2p::identity::Keypair;
 use libp2p::swarm::SwarmEvent;
-use libp2p::{gossipsub, mdns, noise, tcp, yamux, PeerId};
+use libp2p::{gossipsub, mdns, noise, tcp, yamux};
 use tokio::io::AsyncReadExt;
 
 use crate::commands::Cli;
@@ -153,7 +153,7 @@ pub async fn execute(cli: &Cli) {
 }
 
 
-async fn tasks_fetcher(behave: &mut SigningBehaviour) {
+pub async fn tasks_fetcher(behave: &mut SigningBehaviour) {
     let mut interval = time::interval(Duration::from_secs(5));
     loop {
         interval.tick().await;
