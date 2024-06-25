@@ -1,8 +1,8 @@
-use bitcoin::{ Address, PublicKey, secp256k1::{Message, Secp256k1}};
+use std::time;
+use std::time::SystemTime;
 
 use frost_core::serde::{Serialize, Deserialize};
-use futures::StreamExt;
-use libp2p::{gossipsub::IdentTopic, swarm::{NetworkBehaviour, SwarmEvent}};
+use libp2p::{gossipsub::IdentTopic, swarm::NetworkBehaviour};
 use libp2p::{gossipsub, mdns};
 
 
@@ -26,34 +26,43 @@ pub enum SigningSteps {
 
 impl SigningSteps {
     pub fn topic(&self) -> IdentTopic {
-        IdentTopic::new(format!("sign_round {:?}", self))
+        IdentTopic::new(format!("{:?}", self))
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
+    pub id: String,
     pub step: SigningSteps,
     pub message: String,
 }
 
 impl Task {
     pub fn new(step: SigningSteps, message: String) -> Self {
+        let id = SystemTime::now()
+            .duration_since(time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+            .to_string();
         Self {
+            id: id,
             step,
             message,
         }
-    }
-    
+    }    
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DKGRoundMessage<T> {
-    pub party_id: frost::Identifier,
+    pub task_id: String,
+    pub from_party_id: frost::Identifier,
+    pub to_party_id: Option<frost::Identifier>,
     pub packet: T,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DKGRound2Message {
+    pub task_id: String,
     pub sender_party_id: frost::Identifier,
     pub receiver_party_id: frost::Identifier,
     pub packet: frost::keys::dkg::round2::Package,
@@ -61,6 +70,7 @@ pub struct DKGRound2Message {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignMessage<T> {
+    pub task_id: String,
     pub party_id: frost::Identifier,
     pub message: String,
     pub packet: T,

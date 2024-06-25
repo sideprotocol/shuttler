@@ -8,4 +8,5 @@ pub async fn execute(cli: &Cli) {
     let conf = crate::config::Config::from_file(&cli.home).unwrap();
     let task = Task::new(crate::messages::SigningSteps::DkgInit, "".to_string());
     publish(&conf, task).await;
+    
 }

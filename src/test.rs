@@ -13,6 +13,9 @@ use bitcoin::sign_message::MessageSignature;
 use bitcoin::{
  transaction, Address, Amount, Network, OutPoint, Script, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness, XOnlyPublicKey
 };
+use clap::Id;
+use frost_core::{Ciphersuite, Field};
+use frost_secp256k1::Identifier;
 
 // #[test]
 // fn test_taproot_update() {
@@ -118,8 +121,8 @@ fn test_key_bitcoin() {
     let signature = secp.sign_schnorr(&msg, &tweaked.to_inner());
 
     // Update the witness stack.
-    let signature = bitcoin::taproot::Signature { sig: signature, hash_ty: sighash_type };
-    println!("{:?}", signature);
+    // let signature = bitcoin::taproot::Signature { sig: signature, hash_ty: sighash_type };
+    // println!("{:?}", signature);
 
    // Verifies the signature.
     // let pubkey = kp.x_only_public_key().0;
@@ -147,6 +150,31 @@ pub fn receivers_address() -> Address {
         .expect("valid address for mainnet")
 }
 
+#[test]
+fn test_indentifier() {
+
+    let zero = frost_secp256k1::Secp256K1ScalarField::serialize(&frost_secp256k1::Secp256K1ScalarField::one());
+    println!("zero: {:?}", zero);
+
+    let zero1 = frost_secp256k1::Secp256K1ScalarField::deserialize(&zero).unwrap();
+    println!("zero1: {:?}", zero1);
+
+    let privkey = x25519_dalek::StaticSecret::from(zero);
+    println!("privkey: {:?}", hex::encode(privkey.as_bytes()));
+    
+    let pubkey = x25519_dalek::PublicKey::from(&privkey);
+
+    println!("pubkey: {:?}", hex::encode(pubkey.to_bytes()));
+    println!("bytes: {:?}", pubkey.as_bytes());
+
+    let ident = Identifier::new(frost_secp256k1::Secp256K1ScalarField::deserialize(&pubkey.as_bytes()).unwrap()).unwrap();
+    println!("{:?}", ident);
+
+    let byt = frost_secp256k1::Secp256K1ScalarField::serialize(&ident.to_scalar());
+    println!("{:?}", byt);
+
+    
+}
 #[test]
 fn test_verification() {
     let msg = "bc877d681dff63a2195b9179f39f05ac1fb0fc709389c9e79804ceb952cdb95d";

@@ -1,16 +1,16 @@
 use bitcoincore_rpc::jsonrpc::base64;
 use futures::StreamExt;
 use libp2p::gossipsub::{IdentTopic, Message};
+
 use libp2p::identity::Keypair;
 use libp2p::swarm::SwarmEvent;
 use libp2p::{gossipsub, mdns, noise, tcp, yamux, PeerId};
 use tokio::io::AsyncReadExt;
 
 use crate::commands::Cli;
-use crate::signer::{self, Signer};
-use crate::messages::{ SigningBehaviour, SigningBehaviourEvent, SigningSteps};
+use crate::signer::Signer;
+use crate::messages::{ SigningBehaviour, SigningBehaviourEvent, SigningSteps, Task};
 use std::error::Error;
-use std::hash::Hash;
 use std::time::Duration;
 use tokio::{io,  select, time};
 
@@ -21,11 +21,10 @@ pub async fn execute(cli: &Cli) {
 
     let conf = crate::config::Config::from_file(&cli.home).unwrap();
     // Generate a random peer ID
-    let encoded = base64::decode(&conf.p2p.local_key).unwrap();
-    let local_key = Keypair::from_protobuf_encoding(&encoded).expect("failed to decode key from config.toml");
-    // let local_key = identity::Keypair::generate_ed25519();
-    // local_key.
-    let local_peer_id = PeerId::from(local_key.public());
+    let b = base64::decode(&conf.p2p.local_key).unwrap();
+    let kb = Keypair::ed25519_from_bytes(b).expect("Failed to create keypair from bytes");
+    let local_peer_id = kb.public().to_peer_id();
+
     info!("Local peer id: {:?}", local_peer_id);
 
     let mut swarm: libp2p::Swarm<SigningBehaviour> = libp2p::SwarmBuilder::with_new_identity()
@@ -77,9 +76,19 @@ pub async fn execute(cli: &Cli) {
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().expect("Address parse error")).expect("failed to listen on all interfaces");
 
     // let mut buf = [0; 1024];
-    let listener = TcpListener::bind(conf.message_server).await.expect("Failed to bind");
+    let listener = match TcpListener::bind(&conf.message_server).await {
+        Ok(listener) => {
+            info!("Listening on: {:?}", listener.local_addr().unwrap());
+            listener
+        }
+        Err(e) => {
+            error!("Failed to bind: {:?}", e);
+            return;
+        }
+    
+    };
 
-    let mut signer = Signer::new(local_peer_id, 3, 2);
+    let mut signer = Signer::new(conf);
 
     // let (mut socket, _) = listener.accept().await.expect("Failed to accept");
     // Run the swarm
@@ -115,8 +124,11 @@ pub async fn execute(cli: &Cli) {
                                 // Print the received message
                                 let message = String::from_utf8_lossy(&buf[..n]);
                                 let task = serde_json::from_str::<crate::messages::Task>(&message).unwrap();
+
+                                signer.dkg_init(swarm.behaviour_mut(), &task);
+
                                 // publish_message(swarm.behaviour_mut()).await;
-                                match swarm.behaviour_mut().gossipsub.publish(task.step.topic(), task.message.as_bytes()) {
+                                match swarm.behaviour_mut().gossipsub.publish(task.step.topic(), &buf[..n]) {
                                     Ok(_) => {
                                         info!("Published message to gossip: {:?}", message);
                                     }
@@ -157,13 +169,13 @@ fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehaviour, si
     match event {
         SigningBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, _multiaddr) in list {
-                debug!("mDNS discovered a new peer: {peer_id}");
-                behave.gossipsub.add_explicit_peer(&peer_id);
+                info!("mDNS discovered a new peer: {peer_id}");
+                behave.gossipsub.add_explicit_peer(&peer_id); 
             }
         }
         SigningBehaviourEvent::Mdns(mdns::Event::Expired(list)) => {
             for (peer_id, _multiaddr) in list {
-                debug!("mDNS discover peer has expired: {peer_id}");
+                info!("mDNS discover peer has expired: {peer_id}");
                 behave.gossipsub.remove_explicit_peer(&peer_id);
             }
         }
@@ -173,7 +185,7 @@ fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehaviour, si
             message,
         }) => {
             debug!("Received: {:?}", String::from_utf8_lossy(&message.data));
-            topic_handler(message, behave, signer).expect("topic processing failed");
+            topic_handler(&message, behave, signer).expect("topic processing failed");
         }
         _ => {}
     }
@@ -197,20 +209,23 @@ fn subscribes(behave: &mut SigningBehaviour) {
     }
 }
 
-fn topic_handler(message: Message, behave: &mut SigningBehaviour, signer: &mut Signer) -> Result<(), Box<dyn Error>> {
-    let topic = message.topic;
+fn topic_handler(message: &Message, behave: &mut SigningBehaviour, signer: &mut Signer) -> Result<(), Box<dyn Error>> {
+    let topic = message.topic.clone();
     if topic == SigningSteps::DkgInit.topic().into() {
-        signer.dkg_init(behave);
+        let json = String::from_utf8_lossy(&message.data);
+        debug!("json: {:?}", &json);
+        let task: Task = serde_json::from_str(&json).expect("msg not deserialized");
+        signer.dkg_init(behave, &task);
     } else if topic == SigningSteps::DkgRound1.topic().into() {
-        signer.dkg_round1(behave, &message.data);
+        signer.dkg_round1(behave, message);
     } else if topic == SigningSteps::DkgRound2.topic().into() {
-        signer.dkg_round2(&message.data);
-    } else if topic == SigningSteps::SignInit.topic().into() {
-        signer.sign_init(behave, &message.data);
-    } else if topic == SigningSteps::SignRound1.topic().into() {
-        signer.sign_round1(behave, &message.data);
-    } else if topic == SigningSteps::SignRound2.topic().into() {
-        signer.sign_round2(&message.data);
+        signer.dkg_round2(message);
+    // } else if topic == SigningSteps::SignInit.topic().into() {
+    //     signer.sign_init(behave, message);
+    // } else if topic == SigningSteps::SignRound1.topic().into() {
+    //     signer.sign_round1(behave, message);
+    // } else if topic == SigningSteps::SignRound2.topic().into() {
+    //     signer.sign_round2(message);
     }
     Ok(())
 }
