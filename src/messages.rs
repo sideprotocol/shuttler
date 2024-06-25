@@ -60,13 +60,13 @@ pub struct DKGRoundMessage<T> {
     pub packet: T,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DKGRound2Message {
-    pub task_id: String,
-    pub sender_party_id: frost::Identifier,
-    pub receiver_party_id: frost::Identifier,
-    pub packet: frost::keys::dkg::round2::Package,
-}
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct DKGRound2Message {
+//     pub task_id: String,
+//     pub sender_party_id: frost::Identifier,
+//     pub receiver_party_id: frost::Identifier,
+//     pub packet: frost::keys::dkg::round2::Package,
+// }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignMessage<T> {

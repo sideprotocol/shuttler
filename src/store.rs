@@ -72,4 +72,15 @@ pub fn set_dkg_round2_packets(task_id: &str, party_id: Identifier, packet: round
     }
 }
 
+pub fn clear_dkg_variables(task_id: &str) {
+    let mut map = DkgRound1SecretPacket.lock().unwrap();
+    map.remove(task_id);
+    let mut map = DkgRound2SecretPacket.lock().unwrap();
+    map.remove(task_id);
+    let mut map = DkgRound1Packets.lock().unwrap();
+    map.remove(task_id);
+    let mut map = DkgRound2Packets.lock().unwrap();
+    map.remove(task_id);
+}
+
 

@@ -6,11 +6,9 @@ use sha256::Sha256Digest;
 use std::collections::BTreeMap;
 
 use crate::{
-    config::Config,
-    messages::{
-        DKGRound2Message, DKGRoundMessage, SignMessage, SigningBehaviour, SigningSteps, Task,
-    },
-    store,
+    cipher::{decrypt, encrypt}, config::Config, messages::{
+        DKGRoundMessage, SignMessage, SigningBehaviour, SigningSteps, Task,
+    }, store
 };
 use frost::Identifier;
 use frost_secp256k1 as frost;
@@ -19,6 +17,7 @@ use log::{debug, error, info};
 use rand::thread_rng;
 pub struct Signer {
     config: Config,
+    msg_key: x25519_dalek::StaticSecret,
     max_signers: usize,
     min_signers: usize,
     participant_identifier: Identifier,
@@ -44,6 +43,7 @@ impl Signer {
         info!("identifier: {:?}", identifier);
         Self {
             config: conf,
+            msg_key: local_key,
             max_signers: 3,
             min_signers: 2,
             participant_identifier: identifier,
@@ -121,11 +121,21 @@ impl Signer {
                         );
 
                         for (receiver_identifier, round2_package) in round2_packages {
-                            let round2_message = DKGRound2Message {
+
+                            let bz = receiver_identifier.serialize();
+                            let sized: [u8; 32] = bz.try_into().unwrap();
+                            let target = x25519_dalek::PublicKey::from(sized);
+
+                            let share_key = self.msg_key.diffie_hellman(&target);
+                            
+                            let byte = round2_package.serialize().unwrap();
+                            let packet = encrypt(byte.as_slice(), share_key.as_bytes());
+
+                            let round2_message = DKGRoundMessage {
                                 task_id: round1_package.task_id.clone(),
-                                sender_party_id: self.participant_identifier.clone(),
-                                receiver_party_id: receiver_identifier.clone(),
-                                packet: round2_package.clone(),
+                                from_party_id: self.participant_identifier.clone(),
+                                to_party_id: Some(receiver_identifier.clone()),
+                                packet: packet,
                             };
 
                             let new_msg =
@@ -145,23 +155,33 @@ impl Signer {
     }
 
     pub fn dkg_round2(&mut self, msg: &Message) {
-        let round2_package: DKGRound2Message =
+        let round2_package: DKGRoundMessage<Vec<u8>> =
             serde_json::from_slice(&msg.data).expect("msg not deserialized");
         debug!("round2_package: {:?}", String::from_utf8_lossy(&msg.data));
 
-        if round2_package.receiver_party_id != self.participant_identifier {
-            return;
+        if let Some(to) = round2_package.to_party_id {
+            if to != self.participant_identifier {
+                return;
+            }
         }
-        // self.received_round2_packages
-        //     .insert(round2_package.sender_party_id, round2_package.packet);
+
+        let bz = round2_package.from_party_id.serialize();
+        let sized: [u8; 32] = bz.try_into().unwrap();
+        let source = x25519_dalek::PublicKey::from(sized);
+
+        let share_key = self.msg_key.diffie_hellman(&source);
+        
+        let packet = decrypt(round2_package.packet.as_slice(), share_key.as_bytes());
+        let received_round2_package = frost::keys::dkg::round2::Package::deserialize(&packet).unwrap();
+
         store::set_dkg_round2_packets(
             &round2_package.task_id,
-            round2_package.sender_party_id,
-            round2_package.packet,
+            round2_package.from_party_id.clone(),
+            received_round2_package,
         );
 
         if let Some(received_round2_packages) = store::get_dkg_round2_packets(&round2_package.task_id) {
-            if received_round2_packages.len() == &self.max_signers - 1 {
+            if received_round2_packages.len() == self.min_signers {
                 let round2_secret_package = store::get_dkg_round2_secret_packet(&round2_package.task_id);
                 match round2_secret_package {
                     Some(secret_package) => {
@@ -181,6 +201,9 @@ impl Signer {
                         )
                         .expect("msg not deserialized");
 
+                        // clean caches
+                        store::clear_dkg_variables(&round2_package.task_id);
+
                         // info!("Generated Signing Key: {:?}", &key);
                         // info!("Generated Public Key: {:?}", &pubkey.serialize().unwrap());
 
@@ -194,6 +217,7 @@ impl Signer {
 
                         self.config.signer.keys.insert(hex::encode(&bytes), hex::encode(&value));
                         self.config.save().expect("Failed to save generated keys");
+
                         // match PublicKey::from_slice(&text[..]) {
                         //     Ok(pk) => {
                         //         debug!("pk: {:?}", pk);
