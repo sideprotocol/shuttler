@@ -1,3 +1,4 @@
+use bitcoin::Network;
 use bitcoincore_rpc::jsonrpc::base64;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
@@ -7,6 +8,7 @@ const CONFIG_FILE: &str = "config.toml";
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
+    pub network: Network,
     pub command_server: String,
     pub log_level: String,
     pub p2p: P2P,
@@ -44,12 +46,13 @@ impl Config {
         Ok(config)
     }
 
-    pub fn default(port: u16) -> Self {
+    pub fn default(port: u16, network: Network) -> Self {
         let privkey = x25519_dalek::StaticSecret::random_from_rng(&mut rand::thread_rng());
         let encoded = base64::encode(privkey.to_bytes());
         let pubkey = hex::encode(x25519_dalek::PublicKey::from(&privkey).to_bytes());
 
         Self {
+            network,
             command_server: format!("localhost:{}", port),
             log_level: "debug".to_string(),
             keys: BTreeMap::new(),

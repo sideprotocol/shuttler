@@ -7,9 +7,9 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug",
-            "program": "${workspaceFolder}/<executable file>",
-            "args": [],
+            "name": "Start Network",
+            "program": "${workspaceFolder}/target/debug/tssigner",
+            "args": ["--home", ".tss1", "start"],
             "cwd": "${workspaceFolder}"
         }
     ]

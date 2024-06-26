@@ -7,8 +7,8 @@ async fn main() {
     let cli = Cli::parse();
     env_logger::init();
     match &cli.command {
-        Commands::Init { port } => {
-            init::execute(&cli, port.to_owned());
+        Commands::Init { port, network } => {
+            init::execute(&cli, port.to_owned(), network.to_owned());
         }
         Commands::DKG => {
             dkg::execute(&cli).await;

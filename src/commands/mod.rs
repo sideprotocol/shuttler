@@ -1,3 +1,4 @@
+use bitcoin::Network;
 use clap::{Parser, Subcommand};
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 
@@ -19,7 +20,9 @@ pub struct Cli {
 pub enum Commands {
     Init {
         #[clap(long, default_value = "5121")]
-        port: u16,    
+        port: u16,
+        #[clap(long, default_value = "bitcoin")]
+        network: Network    
     },
     /// Remove an item
     DKG,

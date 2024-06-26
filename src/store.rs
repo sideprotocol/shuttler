@@ -21,6 +21,9 @@ lazy_static! {
     static ref SigningTasks: Mutex<BTreeMap<String, Psbt>> = {
         Mutex::new(BTreeMap::new())
     };
+    static ref SigningGroupTasks: Mutex<BTreeMap<String, String>> = {
+        Mutex::new(BTreeMap::new())
+    };
     static ref SignNonces: Mutex<BTreeMap<String, round1::SigningNonces>> = {
         Mutex::new(BTreeMap::new())
     };
@@ -170,6 +173,21 @@ pub fn clear_signing_variables(task_id: &str) {
     let mut map = SignPackage.lock().unwrap();
     map.remove(task_id);
     let mut map = SignShares.lock().unwrap();
+    map.remove(task_id);
+}
+
+pub fn get_signing_group_task(task_id: &str) -> Option<String> {
+    let map = SigningGroupTasks.lock().unwrap();
+    map.get(task_id).cloned()
+}
+
+pub fn set_signing_group_task(task_id: &str, group_task_id: String) {
+    let mut map = SigningGroupTasks.lock().unwrap();
+    map.insert(task_id.to_string(), group_task_id);
+}
+
+pub fn clear_signing_group_task(task_id: &str) {
+    let mut map = SigningGroupTasks.lock().unwrap();
     map.remove(task_id);
 }
 

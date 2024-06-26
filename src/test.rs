@@ -1,21 +1,24 @@
 
 use std::str::FromStr;
 
+use bitcoin::absolute::LockTime;
 use bitcoin::hashes::Hash;
 use bitcoin::hex::DisplayHex;
 use bitcoin::key::{Keypair, TapTweak, TweakedKeypair};
 use bitcoin::locktime::absolute;
+use bitcoin::psbt::Input;
 use bitcoin::secp256k1::schnorr::Signature;
 use bitcoin::secp256k1::{ecdsa, schnorr, PublicKey};
 use bitcoin::secp256k1::{Message, Secp256k1, SecretKey, rand};
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::sign_message::MessageSignature;
 use bitcoin::{
- transaction, Address, Amount, Network, OutPoint, Script, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness, XOnlyPublicKey
+ transaction, Address, Amount, CompressedPublicKey, Network, OutPoint, Psbt, Script, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, WPubkeyHash, Witness, XOnlyPublicKey
 };
 use clap::Id;
 use frost_core::{Ciphersuite, Field};
 use frost_secp256k1::Identifier;
+use serde::Deserialize;
 
 // #[test]
 // fn test_taproot_update() {
@@ -39,6 +42,72 @@ use frost_secp256k1::Identifier;
 // }
 
 #[test]
+fn test_psbt() {
+
+    let pubkey = CompressedPublicKey::from_str("0299e126bfd58a7dad478ad21cf7467d2927362ea8fd4a58dc7ac8f5fdfb218fab").expect("parse pubkey");
+    let address = Address::p2wpkh(&pubkey, bitcoin::network::Network::Bitcoin);
+
+    // Create a new transaction
+    let mut unsigned_tx = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::ZERO,
+        input: vec![],
+        output: vec![],
+    };
+
+    // Add an input (previously funded UTXO)
+    let prev_txid = bitcoin::Txid::from_str("4d3b1e3caa0f3c4bbd3d8b51b52d2f5b6769d14d9a72db9d9f5b2b3a4d2e8c1b").unwrap();
+    let prev_vout = 0;
+    let prev_outpoint = OutPoint {
+        txid: prev_txid,
+        vout: prev_vout,
+    };
+    let prev_txout = TxOut {
+        value: Amount::from_sat(50000), // Value in satoshis
+        script_pubkey: address.script_pubkey(),
+    };
+    let script_sig = ScriptBuf::default();
+    unsigned_tx.input.push(TxIn {
+        previous_output: prev_outpoint,
+        script_sig ,
+        sequence: Sequence::ZERO,
+        witness: Witness::default(),
+    });
+
+    // Add an output
+    let recipient_txout = TxOut {
+        value: Amount::from_sat(40000), // Value in satoshis
+        script_pubkey: address.script_pubkey(),
+    };
+    unsigned_tx.output.push(recipient_txout);
+
+    // Add a change output
+    let change_txout = TxOut {
+        value: Amount::from_sat(9000), // Value in satoshis (assuming 1000 satoshis fee)
+        script_pubkey: address.script_pubkey(),
+    };
+    unsigned_tx.output.push(change_txout);
+
+    // Create the PSBT
+    let mut psbt = Psbt::from_unsigned_tx(unsigned_tx).expect("failed to create PSBT");
+
+    // Add the previous transaction output to the PSBT input
+    psbt.inputs[0] = Input {
+        witness_utxo: Some(prev_txout),
+        sighash_type: Some(bitcoin::psbt::PsbtSighashType::from_str("SIGHASH_ALL").unwrap()),
+        ..Default::default()
+    };
+
+   // Serialize the PSBT to a base64 string
+    let psbt_bytes = psbt.serialize();
+    let psbt_base64 = base64::encode(&psbt_bytes); 
+
+    // Print the PSBT
+    println!("PSBT (base64): {}", psbt_base64);
+
+}
+
+#[test]
 fn test_key_generation() {
     let secp = Secp256k1::new();
     let keypair = Keypair::new(&secp, &mut rand::thread_rng());
@@ -54,9 +123,7 @@ fn test_key_bitcoin() {
     const SPEND_AMOUNT: Amount = Amount::from_sat(5_000_000);
     const CHANGE_AMOUNT: Amount = Amount::from_sat(14_999_000); // 1000 sat fee.
 
-
     let secp = Secp256k1::new();
-
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     println!("{:?}", secret_key);
 
@@ -72,13 +139,14 @@ fn test_key_bitcoin() {
     };
 
     let utxo = TxOut { value: DUMMY_UTXO_AMOUNT, script_pubkey };
-    
+    let witness =  Witness::default();
+
     // The input for the transaction we are constructing.
     let input = TxIn {
         previous_output: out_point, // The dummy output we are spending.
         script_sig: ScriptBuf::default(), // For a p2tr script_sig is empty.
         sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
-        witness: Witness::default(), // Filled in after signing.
+        witness, // Filled in after signing.
     };
 
     // Get an address to send to.
@@ -167,11 +235,11 @@ fn test_indentifier() {
     println!("pubkey: {:?}", hex::encode(pubkey.to_bytes()));
     println!("bytes: {:?}", pubkey.as_bytes());
 
-    let ident = Identifier::new(frost_secp256k1::Secp256K1ScalarField::deserialize(&pubkey.as_bytes()).unwrap()).unwrap();
-    println!("{:?}", ident);
+    // let ident = Identifier::new(frost_secp256k1::Secp256K1ScalarField::deserialize(&pubkey.as_bytes()).unwrap()).unwrap();
+    // println!("{:?}", ident);
 
-    let byt = frost_secp256k1::Secp256K1ScalarField::serialize(&ident.to_scalar());
-    println!("{:?}", byt);
+    // let byt = frost_secp256k1::Secp256K1ScalarField::serialize(&ident.to_scalar());
+    // println!("{:?}", byt);
 
     
 }
@@ -179,27 +247,35 @@ fn test_indentifier() {
 fn test_verification() {
     let msg = "bc877d681dff63a2195b9179f39f05ac1fb0fc709389c9e79804ceb952cdb95d";
     println!("msg: {:?}", msg);
-    let raw = hex::decode(msg).unwrap();
+    // let raw = hex::decode(msg).unwrap();
+    let raw = [62, 162, 82, 27, 173, 124, 142, 221, 180, 230, 209, 237, 25, 178, 167, 37, 94, 168, 190, 180, 72, 239, 214, 130, 163, 127, 91, 247, 66, 58, 106, 188];
     // let raw = msg.as_bytes();
-    let key_raw = [3, 89, 45, 57, 186, 157, 236, 137, 193, 213, 172, 135, 123, 131, 192, 196, 71, 6, 50, 9, 173, 90, 191, 38, 213, 117, 146, 254, 92, 152, 120, 235, 116];
-    let signature_raw = [3, 116, 153, 75, 147, 122, 191, 104, 238, 71, 102, 193, 112, 114, 147, 46, 184, 244, 47, 202, 116, 100, 223, 84, 20, 113, 141, 153, 30, 24, 8, 92, 241, 172, 22, 159, 134, 129, 254, 113, 203, 185, 239, 92, 185, 158, 184, 215, 249, 136, 255, 159, 198, 151, 211, 88, 83, 20, 224, 229, 186, 193, 137, 179, 74];
+    let key_raw = [2, 153, 225, 38, 191, 213, 138, 125, 173, 71, 138, 210, 28, 247, 70, 125, 41, 39, 54, 46, 168, 253, 74, 88, 220, 122, 200, 245, 253, 251, 33, 143, 171];
+    let signature_raw: [u8; 65] = [3, 41, 127, 214, 45, 77, 55, 14, 100, 209, 74, 255, 112, 240, 103, 107, 87, 62, 170, 202, 120, 138, 102, 19, 245, 66, 227, 2, 93, 228, 17, 154, 197, 65, 127, 196, 205, 207, 167, 203, 233, 102, 195, 1, 102, 90, 209, 87, 195, 75, 133, 225, 53, 73, 3, 168, 245, 179, 42, 252, 186, 49, 29, 11, 108];
     
-    let msgb = Message::from_digest_slice(&raw).unwrap();
-    
-    let sig_ecdsa = ecdsa::Signature::from_compact(&signature_raw[1..]).unwrap();
-    let pk = PublicKey::from_slice(&key_raw).unwrap();
-    let scep = Secp256k1::new();
-    match scep.verify_ecdsa(&msgb, &sig_ecdsa, &pk) {
-        Ok(_) => println!("Signature is valid"),
-        Err(e) => println!("Signature is invalid: {:?}", e),
-    };
 
-    let sig = schnorr::Signature::from_slice(&signature_raw[1..]).unwrap();
+    println!("raw: {:?}", hex::encode(raw));
+    println!("key: {:?}", hex::encode(key_raw));
+    println!("sig: {:?}", hex::encode(signature_raw));
+
+    let msgb = Message::from_digest_slice(&raw).expect("Invalid message");
+    println!("msgb: {:?}", msgb.as_ref());
+    
+    // let sig_ecdsa = ecdsa::Signature::from_str(&hex::encode(&signature_raw[..64])).unwrap();
+    // let pk = PublicKey::from_slice(&key_raw).unwrap();
+    // println!("pk: {:?}", pk.serialize());
+    let scep = Secp256k1::new();
+    // match scep.verify_ecdsa(&msgb, &sig_ecdsa, &pk) {
+    //     Ok(_) => println!("Signature is valid"),
+    //     Err(e) => println!("Signature is invalid: {:?}", e),
+    // };
+
+    let sig = schnorr::Signature::from_slice(&signature_raw[..]).unwrap();
     let pubkey = XOnlyPublicKey::from_slice(&key_raw[1..]).unwrap();
-    match scep.verify_schnorr(&sig, &msgb, &pubkey) {
-        Ok(_) => println!("Signature is valid"),
-        Err(e) => println!("Signature is invalid: {:?}", e),
-    };
+
+    assert_eq!(scep.verify_schnorr(&sig, &msgb, &pubkey), Ok(()));
+
+    
 }
 
 // We can use the following code to generate a transaction and sign it using the secp256k1 library.

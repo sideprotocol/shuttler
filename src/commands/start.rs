@@ -189,7 +189,7 @@ fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehaviour, si
             message_id: _id,
             message,
         }) => {
-            debug!("Received: {:?}", String::from_utf8_lossy(&message.data));
+            // debug!("Received: {:?}", String::from_utf8_lossy(&message.data));
             topic_handler(&message, behave, signer).expect("topic processing failed");
         }
         _ => {}
@@ -218,7 +218,6 @@ fn topic_handler(message: &Message, behave: &mut SigningBehaviour, signer: &mut 
     let topic = message.topic.clone();
     if topic == SigningSteps::DkgInit.topic().into() {
         let json = String::from_utf8_lossy(&message.data);
-        debug!("json: {:?}", &json);
         let task: Task = serde_json::from_str(&json).expect("msg not deserialized");
         signer.dkg_init(behave, &task);
     } else if topic == SigningSteps::DkgRound1.topic().into() {
@@ -227,7 +226,6 @@ fn topic_handler(message: &Message, behave: &mut SigningBehaviour, signer: &mut 
         signer.dkg_round2(message);
     } else if topic == SigningSteps::SignInit.topic().into() {
         let json = String::from_utf8_lossy(&message.data);
-        debug!("json: {:?}", &json);
         let task: Task = serde_json::from_str(&json).expect("msg not deserialized");
         signer.sign_init(behave, &task);
     } else if topic == SigningSteps::SignRound1.topic().into() {
