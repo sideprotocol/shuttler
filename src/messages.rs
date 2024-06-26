@@ -34,11 +34,15 @@ impl SigningSteps {
 pub struct Task {
     pub id: String,
     pub step: SigningSteps,
+    pub pubkey: String,
     pub message: String,
 }
 
 impl Task {
     pub fn new(step: SigningSteps, message: String) -> Self {
+        Self::new_with_pubkey(step, "".to_string(), message)
+    }
+    pub fn new_with_pubkey(step: SigningSteps, pubkey: String, message: String) -> Self {
         let id = SystemTime::now()
             .duration_since(time::UNIX_EPOCH)
             .unwrap()
@@ -47,6 +51,7 @@ impl Task {
         Self {
             id: id,
             step,
+            pubkey,
             message,
         }
     }    
@@ -72,6 +77,7 @@ pub struct DKGRoundMessage<T> {
 pub struct SignMessage<T> {
     pub task_id: String,
     pub party_id: frost::Identifier,
+    pub pubkey: String,
     pub message: String,
     pub packet: T,
 }

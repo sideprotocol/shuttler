@@ -76,7 +76,7 @@ pub async fn execute(cli: &Cli) {
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().expect("Address parse error")).expect("failed to listen on all interfaces");
 
     // let mut buf = [0; 1024];
-    let listener = match TcpListener::bind(&conf.message_server).await {
+    let listener = match TcpListener::bind(&conf.command_server).await {
         Ok(listener) => {
             info!("Listening on: {:?}", listener.local_addr().unwrap());
             listener
@@ -125,9 +125,14 @@ pub async fn execute(cli: &Cli) {
                                 let message = String::from_utf8_lossy(&buf[..n]);
                                 let task = serde_json::from_str::<crate::messages::Task>(&message).unwrap();
 
-                                signer.dkg_init(swarm.behaviour_mut(), &task);
+                                // process the task 
+                                match task.step {
+                                    SigningSteps::DkgInit => signer.dkg_init(swarm.behaviour_mut(), &task),
+                                    SigningSteps::SignInit => signer.sign_init(swarm.behaviour_mut(), &task),
+                                    _ => {}
+                                }
 
-                                // publish_message(swarm.behaviour_mut()).await;
+                                // publish the message to gossip to enable other nodes to process
                                 match swarm.behaviour_mut().gossipsub.publish(task.step.topic(), &buf[..n]) {
                                     Ok(_) => {
                                         info!("Published message to gossip: {:?}", message);
@@ -220,12 +225,15 @@ fn topic_handler(message: &Message, behave: &mut SigningBehaviour, signer: &mut 
         signer.dkg_round1(behave, message);
     } else if topic == SigningSteps::DkgRound2.topic().into() {
         signer.dkg_round2(message);
-    // } else if topic == SigningSteps::SignInit.topic().into() {
-    //     signer.sign_init(behave, message);
-    // } else if topic == SigningSteps::SignRound1.topic().into() {
-    //     signer.sign_round1(behave, message);
-    // } else if topic == SigningSteps::SignRound2.topic().into() {
-    //     signer.sign_round2(message);
+    } else if topic == SigningSteps::SignInit.topic().into() {
+        let json = String::from_utf8_lossy(&message.data);
+        debug!("json: {:?}", &json);
+        let task: Task = serde_json::from_str(&json).expect("msg not deserialized");
+        signer.sign_init(behave, &task);
+    } else if topic == SigningSteps::SignRound1.topic().into() {
+        signer.sign_round1(behave, message);
+    } else if topic == SigningSteps::SignRound2.topic().into() {
+        signer.sign_round2(message);
     }
     Ok(())
 }

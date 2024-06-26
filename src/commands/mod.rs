@@ -17,7 +17,10 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    Init,
+    Init {
+        #[clap(long, default_value = "5121")]
+        port: u16,    
+    },
     /// Remove an item
     DKG,
     Sign {
@@ -33,7 +36,7 @@ pub mod sign;
 pub mod start;
 
 pub async fn publish(conf: &config::Config, task: crate::messages::Task) {
-    match TcpStream::connect(conf.message_server.clone()).await {
+    match TcpStream::connect(conf.command_server.clone()).await {
         Ok(mut stream) => {
             let message = serde_json::to_string(&task).unwrap();
             if let Err(e) = stream.write_all(message.as_bytes()).await {
