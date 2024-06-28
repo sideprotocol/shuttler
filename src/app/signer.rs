@@ -1,19 +1,16 @@
-use base64::{engine::general_purpose::STANDARD, Engine as _};
-use bitcoin::{sighash::SighashCache, Address, CompressedPublicKey, EcdsaSighashType, Psbt, PublicKey};
+use bitcoin::{key::{TapTweak as _, UntweakedPublicKey}, secp256k1::{self, ecdsa::Signature}, sighash::{self, SighashCache}, Address, EcdsaSighashType, Psbt, PublicKey, Script, TxOut};
+use frost_core::Field;
 use libp2p::gossipsub::Message;
+use toml::de;
 
-use crate::{
-    cipher::{decrypt, encrypt},
-    config::Config,
-    messages::{DKGRoundMessage, SignMessage, SigningBehaviour, SigningSteps, Task},
-    store,
+use crate::{app::config::{self, Config}, helper::{messages::now, pbst::{self, get_group_address}}};
+use crate::helper::{
+    cipher::{decrypt, encrypt}, encoding::{self, from_base64}, messages::{DKGRoundMessage, SignMessage, SigningBehaviour, SigningSteps, Task}, store
 };
 use frost::Identifier;
-use frost_secp256k1 as frost;
-use frost_secp256k1::{
-    keys::{KeyPackage, PublicKeyPackage},
-    Field,
-};
+use frost_secp256k1_tr as frost;
+
+use ::bitcoin::secp256k1::schnorr::{Signature as SchnorrSignature};
 
 use log::{debug, error, info};
 use rand::thread_rng;
@@ -27,15 +24,14 @@ pub struct Signer {
 
 impl Signer {
     pub fn new(conf: Config) -> Self {
-        let b = STANDARD.decode(&conf.p2p.local_key).unwrap();
+        let b = encoding::from_base64(&conf.p2p.local_key).unwrap();
         let sized: [u8; 32] = b.try_into().unwrap();
         let local_key = x25519_dalek::StaticSecret::from(sized);
-
         let pubkey = x25519_dalek::PublicKey::from(&local_key);
         // frost::Secp256K1Sha256::H1(m).to_bytes();
-        let id = frost_secp256k1::Secp256K1ScalarField::deserialize(pubkey.as_bytes()).unwrap();
-
-        let identifier = frost::Identifier::derive(pubkey.as_bytes()).unwrap();
+        let id = frost::Secp256K1ScalarField::deserialize(pubkey.as_bytes()).unwrap();
+        let identifier = frost_core::Identifier::new(id).unwrap(); 
+        // let identifier = frost::Identifier::derive(&[0; 32]).expect("Error in identifier");
         info!("identifier: {:?}", identifier);
         Self {
             config: conf,
@@ -195,43 +191,27 @@ impl Signer {
                         // clean caches
                         store::clear_dkg_variables(&round2_package.task_id);
 
-                        // info!("Generated Signing Key: {:?}", &key);
-                        // info!("Generated Public Key: {:?}", &pubkey.serialize().unwrap());
-
-                        let store_key_bytes = &pubkey
-                            .verifying_key()
-                            .serialize();
-                            // .expect("msg not serialized");
-                        let store_key_hex = hex::encode(store_key_bytes);
-
-                        let pk = CompressedPublicKey::from_slice(store_key_bytes).unwrap();
-                        let address = Address::p2wpkh(&pk, self.config.network);
+                        let address = get_group_address(pubkey.verifying_key(), self.config.network);
+                        info!(
+                            "DKG Completed: {:?}, {:?}",
+                            address.to_string(),
+                            &pubkey,
+                        );
 
                         let privkey_bytes = key.serialize().expect("key not serialized");
                         let pubkey_bytes = pubkey.serialize().expect("pubkey not serialized");
+                        
+                        config::add_sign_key(&address.to_string(), key);
+                        config::add_pub_key(&address.to_string(), pubkey);
 
                         self.config
                             .keys
-                            .insert(address.to_string(), STANDARD.encode(&privkey_bytes));
+                            .insert(address.to_string(), encoding::to_base64(&privkey_bytes));
                         self.config
                             .pubkeys
-                            .insert(address.to_string(), STANDARD.encode(&pubkey_bytes));
+                            .insert(address.to_string(), encoding::to_base64(&pubkey_bytes));
                         self.config.save().expect("Failed to save generated keys");
 
-                        info!(
-                            "DKG Completed: {:?}, {}",
-                            store_key_hex,
-                            &store_key_bytes.len()
-                        );
-
-                        // match PublicKey::from_slice(&text[..]) {
-                        //     Ok(pk) => {
-                        //         debug!("pk: {:?}", pk);
-                        //     }
-                        //     Err(e) => {
-                        //         error!("Error: {:?}", e);
-                        //     }
-                        // };
                     }
                     None => {
                         error!("round2_secret_package not found");
@@ -242,7 +222,7 @@ impl Signer {
     }
 
     pub fn sign_init(&mut self, behave: &mut SigningBehaviour, group_task: &Task) {
-        let psbt_bytes = STANDARD.decode(group_task.message.clone()).unwrap();
+        let psbt_bytes = from_base64(&group_task.message).unwrap();
         let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
             Ok(psbt) => psbt,
             Err(e) => {
@@ -266,7 +246,7 @@ impl Signer {
                 continue;
             }
 
-            let prev_tx = match psbt.inputs[i].witness_utxo.clone() {
+            let prev_utxo = match psbt.inputs[i].witness_utxo.clone() {
                 Some(utxo) => utxo,
                 None => {
                     error!("Failed to get witness_utxo");
@@ -274,33 +254,35 @@ impl Signer {
                 }
             };
 
-            info!("prev_tx: {:?}", prev_tx.script_pubkey);
-
-            // Calculate the signature hash (sighash)
-            let mut sighash_cache = SighashCache::new(&psbt.unsigned_tx);
-            let x = input.sighash_type.unwrap();
-            let sighash_type = EcdsaSighashType::from_standard(x.to_u32()).expect("sighash type not deserialized");
-            let sighash = match sighash_cache.p2wpkh_signature_hash(
-                i,
-                &prev_tx.script_pubkey,
-                prev_tx.value,
-                sighash_type,
-            ) {
-                Ok(sighash) => sighash,
-                Err(e) => {
-                    error!("Failed to get sighash: {}", e);
-                    return;
-                }
-            };
+            info!("prev_tx: {:?}", prev_utxo.script_pubkey);
 
             let script = input.witness_utxo.clone().unwrap().script_pubkey;
             let address = Address::from_script(&script, self.config.network).unwrap();
 
-            let sign_key = match self.config.keys.get(address.to_string().as_str()) {
+            // get the message to sign
+            let hash_ty = input
+                .sighash_type
+                .and_then(|psbt_sighash_type| psbt_sighash_type.taproot_hash_ty().ok())
+                .unwrap_or(bitcoin::TapSighashType::All);
+            let hash = match SighashCache::new(&psbt.unsigned_tx).taproot_key_spend_signature_hash(
+                i,
+                &sighash::Prevouts::All(&[TxOut {
+                    value: prev_utxo.value,
+                    script_pubkey: script,
+                }]),
+                hash_ty,
+            ) {
+                Ok(hash) => hash,
+                Err(e) => {
+                    error!("failed to compute sighash: {}", e);
+                    return;
+                }
+            };
+
+            let sign_key = match config::get_sign_key(address.to_string().as_str()) {
                 Some(key) => {
-                    let bytes = STANDARD.decode(key).unwrap();
-                    frost::keys::KeyPackage::deserialize(bytes.as_slice())
-                        .expect("key package not deserialized")
+                    debug!("loaded key: {:?}", key);
+                    key
                 }
                 None => {
                     error!("Failed to get signing key for address: {}", address);
@@ -321,7 +303,8 @@ impl Signer {
                 party_id: self.participant_identifier,
                 address: address.to_string(),
                 packet: commitments,
-                message: hex::encode(sighash.as_raw_hash()),
+                message: hex::encode(hash.to_raw_hash()),
+                timestamp : now(),
             };
 
             let new_msg = serde_json::to_string(&sign_message).expect("msg not serialized");
@@ -355,9 +338,9 @@ impl Signer {
             }
         };
 
-        debug!("(signing round 1) received commitments: {:?}/{:?} {:?}", signing_commitments.len(), self.min_signers, &sign_message);
+        debug!("(signing round 1) received commitments: {:?}/{:?} {:?}", signing_commitments.len(), self.max_signers, &sign_message);
 
-        if signing_commitments.len() == self.max_signers - 1 {
+        if signing_commitments.len() == self.min_signers {
             // let signing_package = frost::SigningPackage::new(commitment_store.clone(), sign_message.message.clone().as_bytes());
             // let raw = hex::decode(sign_message.message.clone()).unwrap();
             let signing_package = frost::SigningPackage::new(
@@ -379,18 +362,11 @@ impl Signer {
                     return;
                 }
             };
-            let key_text = match self.config.keys.get(&sign_message.address) {
-                Some(text) => text,
+
+            let key_package = match config::get_sign_key(&sign_message.address) {
+                Some(pk) => pk,
                 None => {
-                    error!("not found pubkey for task: {}", sign_message.task_id);
-                    return;
-                }
-            };
-            let key_bytes = STANDARD.decode(key_text).unwrap();
-            let key_package = match KeyPackage::deserialize(&key_bytes) {
-                Ok(pk) => pk,
-                Err(e) => {
-                    error!("Error: {:?}", e);
+                    error!("not found signing key for {}", &sign_message.address);
                     return;
                 }
             };
@@ -418,6 +394,7 @@ impl Signer {
                 address: sign_message.address.to_string(),
                 packet: signature_shares,
                 message: sign_message.message.to_owned(),
+                timestamp: now(),
             };
 
             let new_msg = serde_json::to_string(&sig_shares_message).unwrap();
@@ -435,11 +412,34 @@ impl Signer {
         // self.sign_shares_store
         //     .insert(sig_shares_message.party_id, sig_shares_message.packet.clone());
         // debug!("sign_shares_store: {:?}", self.sign_shares_store.len());
-        store::set_sign_shares(
-            &sig_shares_message.task_id,
-            sig_shares_message.party_id,
-            sig_shares_message.packet.clone(),
-        );
+        // store::set_sign_shares(
+        //     &sig_shares_message.task_id,
+        //     sig_shares_message.party_id,
+        //     sig_shares_message.packet.clone(),
+        // );
+
+        let signing_package = match store::get_sign_package(&sig_shares_message.task_id) {
+            Some(package) => package,
+            None => {
+                error!(
+                    "not found signing package for task: {}",
+                    sig_shares_message.task_id
+                );
+                return;
+            }
+        };
+
+        if signing_package.signing_commitments().contains_key(&sig_shares_message.party_id) {
+            debug!("found commitment for: {:?}", sig_shares_message.party_id);
+            store::set_sign_shares(
+                &sig_shares_message.task_id,
+                sig_shares_message.party_id,
+                sig_shares_message.packet.clone(),
+            );
+        } else {
+            error!("commitment not found for: {:?}", sig_shares_message.party_id);
+            return;
+        }
 
         let signature_shares = match store::get_sign_shares(&sig_shares_message.task_id) {
             Some(shares) => shares,
@@ -452,34 +452,37 @@ impl Signer {
             }
         };
 
-        debug!("(signing round 2) received shares: {:?}/{:?} {:?}", signature_shares.len(), self.min_signers, &sig_shares_message);
-        if signature_shares.len() == self.max_signers - 1 {
-            let signing_package = match store::get_sign_package(&sig_shares_message.task_id) {
-                Some(package) => package,
+        debug!("(signing round 2) received shares: {:?}/{:?} {:?}", signature_shares.len(), self.max_signers, &sig_shares_message);
+
+        // let received = signing_package.signing_commitments().iter().map(|(k, v)| {
+        //     debug!("commitment: {:?} {:?}", k, v);
+        //     match signature_shares.get(k) {
+        //         Some(s) => {
+        //             debug!("found: {:?}, {:?}", k, s);
+        //             1
+        //         },
+        //         None => 0
+        //     }
+        // }).sum::<usize>();
+
+        if signature_shares.len() == signing_package.signing_commitments().len()  {
+
+             debug!("commentments keys: {:?}", signing_package.signing_commitments().keys());
+             debug!("signature shares: {:?}", signature_shares.keys());
+
+            let pubkeys = match config::get_pub_key(&sig_shares_message.address) {
+                Some(pk) => pk,
                 None => {
-                    error!(
-                        "not found signing package for task: {}",
-                        sig_shares_message.task_id
-                    );
+                    error!("not found pubkey for : {:?}", &sig_shares_message.address);
                     return;
                 }
             };
 
-            let pubkey_text = match self.config.pubkeys.get(&sig_shares_message.address) {
-                Some(text) => text,
-                None => {
-                    error!("not found pubkey for task: {}", sig_shares_message.task_id);
-                    return;
-                }
-            };
-            let pubkey_bytes = STANDARD.decode(pubkey_text).unwrap();
-            let pubkeys = match PublicKeyPackage::deserialize(&pubkey_bytes) {
-                Ok(pk) => pk,
-                Err(e) => {
-                    error!("Error: {:?}", e);
-                    return;
-                }
-            };
+
+            debug!("package: {:?}", signing_package);
+            debug!("pubkeys: {:?}", pubkeys);
+            debug!("shares: {:?}", signature_shares);
+
             match frost::aggregate(&signing_package, &signature_shares, &pubkeys) {
                 Ok(signature) => {
                     // println!("public key: {:?}", pub)
@@ -500,7 +503,7 @@ impl Signer {
                             Some(psbt) => {
                                 let mut psbt = psbt.clone();
                                 for i in 0..psbt.inputs.len() {
-                                    let input = &mut psbt.inputs[i];
+                                    // let input = &mut psbt.inputs[i];
 
                                     let pubkey = PublicKey::from_slice(&pubkeys.verifying_key().serialize()).unwrap();
                                     // let pubkey = match PublicKey::from_slice(&pubkeys.verifying_key().serialize().unwrap()) {
@@ -511,14 +514,37 @@ impl Signer {
                                     //     }
                                     // };
                                     debug!("pubkey: {:?}", pubkey.to_bytes());
+
+                                    
                                     let sig_bytes = signature.serialize();
                                     debug!("signature: {:?}, {}", sig_bytes, sig_bytes.len());
-                                    let sig = bitcoin::ecdsa::Signature::from_slice(&sig_bytes[..64]).unwrap();
-                                    
-                                    input.partial_sigs.insert(pubkey, sig);
+
+
+                                    // verify signature
+                                    let secp = secp256k1::Secp256k1::new();
+                                    let utpk = UntweakedPublicKey::from(pubkey.inner);
+                                    let (tpk, _) = utpk.tap_tweak(&secp, None);
+                                    // let addr = Address::p2tr(&secp, tpk., None, Network::Bitcoin);
+                                    // let sig_b = group_signature.serialize();
+                                    let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&sig_bytes[1..]).unwrap();
+                                    let msg = bitcoin::secp256k1::Message::from_digest_slice(&sighash).unwrap();
+                                    match secp.verify_schnorr(&sig, &msg, &tpk.to_inner()) {
+                                        Ok(_) => info!("Signature is valid"),
+                                        Err(e) => error!("Signature is invalid: {}", e),
+                                    }
+
+                                    // add sig to psbt
+                                    let hash_ty = bitcoin::sighash::TapSighashType::Default;
+                                    let sighash_type =  bitcoin::psbt::PsbtSighashType::from(hash_ty);
+                                    let sig = SchnorrSignature::from_slice(&sig_bytes[1..]).unwrap();
+                                    psbt.inputs[0].sighash_type = Option::Some(sighash_type);
+                                    psbt.inputs[0].tap_key_sig = Option::Some(bitcoin::taproot::Signature {
+                                        signature: sig,
+                                        sighash_type: hash_ty,
+                                    });
                                 }
                                 let psbt_bytes = psbt.serialize();
-                                let psbt_base64 = STANDARD.encode(psbt_bytes);
+                                let psbt_base64 = encoding::to_base64(&psbt_bytes);
                                 info!("Signed PSBT: {:?}", psbt_base64);
                             }
                             None => {
@@ -537,24 +563,3 @@ impl Signer {
     }
 }
 
-// fn sign_psbt(psbt_base64: &str, wif: &str) -> Result<Psbt, std::io::Error> {
-//     // Deserialize the PSBT
-//     let psbt_bytes = base64::decode(psbt_base64).unwrap();
-//     let psbt = Psbt::deserialize(psbt_bytes.as_slice()).unwrap();
-
-//     // Sign the PSBT
-//     for input in &psbt.inputs {
-//         if input.witness_utxo.is_none() {
-//             continue;
-//         }
-
-//         // let sighash = input.;
-
-//         let pk = PublicKey::from_slice(vec![0; 33].as_slice()).unwrap();
-//         let sig = Signature::from_slice(&[0; 64].as_slice()).unwrap();
-
-//         input.partial_sigs.insert(pk, sig);
-//     }
-
-//     Ok(psbt)
-// }

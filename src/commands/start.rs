@@ -5,11 +5,11 @@ use libp2p::gossipsub::{IdentTopic, Message};
 use libp2p::identity::Keypair;
 use libp2p::swarm::SwarmEvent;
 use libp2p::{gossipsub, mdns, noise, tcp, yamux};
-use tokio::io::AsyncReadExt;
+use tokio::io::AsyncReadExt as _;
 
 use crate::commands::Cli;
-use crate::signer::Signer;
-use crate::messages::{ SigningBehaviour, SigningBehaviourEvent, SigningSteps, Task};
+use crate::app::{config::Config, signer::Signer};
+use crate::helper::messages::{ SigningBehaviour, SigningBehaviourEvent, SigningSteps, Task};
 use std::error::Error;
 use std::time::Duration;
 use tokio::{io,  select, time};
@@ -19,7 +19,7 @@ use log::{debug, info, error};
 
 pub async fn execute(cli: &Cli) {
 
-    let conf = crate::config::Config::from_file(&cli.home).unwrap();
+    let conf = Config::from_file(&cli.home).unwrap();
     // Generate a random peer ID
     let b = base64::decode(&conf.p2p.local_key).unwrap();
     let kb = Keypair::ed25519_from_bytes(b).expect("Failed to create keypair from bytes");
@@ -123,7 +123,7 @@ pub async fn execute(cli: &Cli) {
                             Ok(n) => {
                                 // Print the received message
                                 let message = String::from_utf8_lossy(&buf[..n]);
-                                let task = serde_json::from_str::<crate::messages::Task>(&message).unwrap();
+                                let task = serde_json::from_str::<crate::helper::messages::Task>(&message).unwrap();
 
                                 // process the task 
                                 match task.step {

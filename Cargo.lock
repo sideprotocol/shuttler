@@ -1298,8 +1298,8 @@ dependencies = [
 
 [[package]]
 name = "frost-core"
-version = "1.0.0"
-source = "git+https://github.com/zebra-lucky/frost.git?branch=add-secp256k1-tr#d580241e8561ed145a464e6671a511d5a8c218f8"
+version = "1.0.0-rc.0"
+source = "git+https://github.com/liangping/frost.git?branch=frost-secp256k1-tr#17c38869bd6027f1da727587cf68b0824e9de97d"
 dependencies = [
  "byteorder",
  "const-crc32",
@@ -1319,8 +1319,8 @@ dependencies = [
 
 [[package]]
 name = "frost-rerandomized"
-version = "1.0.0"
-source = "git+https://github.com/zebra-lucky/frost.git?branch=add-secp256k1-tr#d580241e8561ed145a464e6671a511d5a8c218f8"
+version = "1.0.0-rc.0"
+source = "git+https://github.com/liangping/frost.git?branch=frost-secp256k1-tr#17c38869bd6027f1da727587cf68b0824e9de97d"
 dependencies = [
  "derive-getters",
  "document-features",
@@ -1329,9 +1329,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "frost-secp256k1"
-version = "1.0.0"
-source = "git+https://github.com/zebra-lucky/frost.git?branch=add-secp256k1-tr#d580241e8561ed145a464e6671a511d5a8c218f8"
+name = "frost-secp256k1-tr"
+version = "1.0.0-rc.0"
+source = "git+https://github.com/liangping/frost.git?branch=frost-secp256k1-tr#17c38869bd6027f1da727587cf68b0824e9de97d"
 dependencies = [
  "document-features",
  "frost-core",
@@ -4087,8 +4087,7 @@ dependencies = [
  "ed25519-dalek",
  "env_logger",
  "frost-core",
- "frost-rerandomized",
- "frost-secp256k1",
+ "frost-secp256k1-tr",
  "futures",
  "hex",
  "insta",

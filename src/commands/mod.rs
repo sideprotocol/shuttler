@@ -2,7 +2,7 @@ use bitcoin::Network;
 use clap::{Parser, Subcommand};
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 
-use crate::config;
+use crate::app::config;
 use log::{info, error};
 
 
@@ -38,7 +38,7 @@ pub mod dkg;
 pub mod sign;
 pub mod start;
 
-pub async fn publish(conf: &config::Config, task: crate::messages::Task) {
+pub async fn publish(conf: &config::Config, task: crate::helper::messages::Task) {
     match TcpStream::connect(conf.command_server.clone()).await {
         Ok(mut stream) => {
             let message = serde_json::to_string(&task).unwrap();

@@ -6,7 +6,7 @@ use libp2p::{gossipsub::IdentTopic, swarm::NetworkBehaviour};
 use libp2p::{gossipsub, mdns};
 
 
-use frost_secp256k1 as frost;
+use frost_secp256k1_tr as frost;
 
 #[derive(NetworkBehaviour)]
 pub struct SigningBehaviour {
@@ -34,19 +34,17 @@ impl SigningSteps {
 pub struct Task {
     pub id: String,
     pub step: SigningSteps,
-    pub pubkey: String,
     pub message: String,
 }
 
 impl Task {
     pub fn new(step: SigningSteps, message: String) -> Self {
-        Self::new_with_pubkey(step, "".to_string(), message)
-    }
-    pub fn new_with_pubkey(step: SigningSteps, pubkey: String, message: String) -> Self {
+    //     Self::new_with_pubkey(step, "".to_string(), message)
+    // }
+    // pub fn new_with_pubkey(step: SigningSteps, message: String) -> Self {
         Self {
             id: new_task_id(),
             step,
-            pubkey,
             message,
         }
     }    
@@ -83,6 +81,14 @@ pub struct SignMessage<T> {
     pub address: String,
     pub message: String,
     pub packet: T,
+    pub timestamp: u64,
+}
+
+pub fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
 }
 
 #[test]

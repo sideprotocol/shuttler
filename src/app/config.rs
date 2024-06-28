@@ -1,8 +1,12 @@
 use bitcoin::Network;
 use bitcoincore_rpc::jsonrpc::base64;
+use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, path::PathBuf, sync::Mutex};
+use log::{debug, error};
+
+use crate::helper::encoding::from_base64;
 
 const CONFIG_FILE: &str = "config.toml";
 
@@ -23,12 +27,29 @@ pub struct P2P {
 }
 
 lazy_static! {
-    static ref STATIC_STRING: Mutex<String> = Mutex::new(String::from(".tssigner"));
+    static ref APPLICATION_PATH: Mutex<String> = Mutex::new(String::from(".tssigner"));
+    static ref KEYS : Mutex<BTreeMap<String, KeyPackage>> = Mutex::new(BTreeMap::new());
+    static ref PUBKEYS : Mutex<BTreeMap<String, PublicKeyPackage>> = Mutex::new(BTreeMap::new());
 }
 
 pub fn update_app_home(app_home: &str) {
-    let mut string: std::sync::MutexGuard<String> = STATIC_STRING.lock().unwrap();
+    let mut string: std::sync::MutexGuard<String> = APPLICATION_PATH.lock().unwrap();
     *string = String::from(app_home);
+}
+
+pub fn get_sign_key(address: &str) -> Option<KeyPackage> {
+    KEYS.lock().unwrap().get(address).cloned()
+}
+pub fn add_sign_key(address: &str, key: KeyPackage) {
+    KEYS.lock().unwrap().insert(address.to_string(), key);
+}
+
+pub fn get_pub_key(address: &str) -> Option<PublicKeyPackage> {
+    PUBKEYS.lock().unwrap().get(address).cloned()
+}
+
+pub fn add_pub_key(address: &str, key: PublicKeyPackage) {
+    PUBKEYS.lock().unwrap().insert(address.to_string(), key);
 }
 
 impl Config {
@@ -43,6 +64,33 @@ impl Config {
         }
         let contents = fs::read_to_string(home_dir(app_home).join(CONFIG_FILE))?;
         let config: Config = toml::from_str(&contents).expect("Failed to parse config file");
+
+        config.keys.iter().for_each(|(k, v)| {
+            let b = from_base64(v).unwrap();
+            let kp = match KeyPackage::deserialize(&b) {
+                Ok(kp) => kp,
+                Err(e) => {
+                    error!("failed to load key package: {:?} {:?}", k, e);
+                    return;
+                }            
+            };
+            debug!("Loaded key package for {}", k);
+            KEYS.lock().unwrap().insert(k.clone(), kp);
+        });
+
+        config.pubkeys.iter().for_each(|(k, v)| {
+            let b = from_base64(v).unwrap();
+            let pkp = match PublicKeyPackage::deserialize(&b) {
+                Ok(pkp) => pkp,
+                Err(e) => {
+                    error!("failed to load pubkey package: {:?} {:?}", k, e);
+                    return;
+                }            
+            };
+            debug!("Loaded public key package for {}", k);
+            PUBKEYS.lock().unwrap().insert(k.clone(), pkp);
+        });
+
         Ok(config)
     }
 
@@ -69,7 +117,7 @@ impl Config {
     }
 
     pub fn save(&self) -> Result<(), std::io::Error> {
-        let app_home = STATIC_STRING.lock().unwrap();
+        let app_home = APPLICATION_PATH.lock().unwrap();
         let path = home_dir(app_home.as_str());
         if !path.exists() {
             fs::create_dir_all(&path)?;

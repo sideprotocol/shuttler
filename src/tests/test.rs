@@ -1,51 +1,197 @@
 
+use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use bitcoin::absolute::LockTime;
+use bitcoin::base64::alphabet::STANDARD;
 use bitcoin::hashes::Hash;
 use bitcoin::hex::DisplayHex;
-use bitcoin::key::{Keypair, TapTweak, TweakedKeypair};
+use bitcoin::key::{Keypair, TapTweak, TweakedKeypair, UntweakedPublicKey};
 use bitcoin::locktime::absolute;
 use bitcoin::psbt::Input;
 use bitcoin::secp256k1::schnorr::Signature;
-use bitcoin::secp256k1::{ecdsa, schnorr, PublicKey};
+use bitcoin::secp256k1::{self, ecdsa, schnorr, PublicKey};
 use bitcoin::secp256k1::{Message, Secp256k1, SecretKey, rand};
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::sign_message::MessageSignature;
 use bitcoin::{
- transaction, Address, Amount, CompressedPublicKey, Network, OutPoint, Psbt, Script, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, WPubkeyHash, Witness, XOnlyPublicKey
+ network, transaction, Address, Amount, CompressedPublicKey, Network, OutPoint, Psbt, Script, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, WPubkeyHash, Witness, XOnlyPublicKey
 };
 use clap::Id;
+use frost_core::keys::KeyPackage;
 use frost_core::{Ciphersuite, Field};
-use frost_secp256k1::Identifier;
+use frost_secp256k1_tr as frost;
+use rand::thread_rng;
 use serde::Deserialize;
 
-// #[test]
-// fn test_taproot_update() {
-//     let secp = Secp256k1::new();
-//     // let root_key = ExtendedPrivateKey::new_master(Network::Bitcoin, &[]).unwrap();
-//     let initial_unlock_script = Script::from_bytes(b"Initial Taproot unlock script");
-//     let taproot_address = Address::from_script(
-//         &Script::new_taproot(&[initial_unlock_script.clone()]),
-//         Network::Bitcoin,
-//     )
-//     .unwrap();
+use crate::helper::encoding;
 
-//     println!("Initial Taproot address: {}", taproot_address);
 
-//     // Update the unlock script of the Taproot address
-//     let new_unlock_script = Script::from_bytes(b"Updated Taproot unlock script");
-//     let updated_taproot_key = Script::new_taproot(&[new_unlock_script.clone()]);
 
-//     // The Taproot address remains the same, even with the updated unlock script
-//     println!("Updated Taproot address: {}", taproot_address);
-// }
+#[test]
+fn test_taproot_signature() {
+    // ANCHOR: tkg_gen
+
+    let mut rng = thread_rng();
+    let max_signers = 5;
+    let min_signers = 3;
+    let (shares, pubkey_package) = frost::keys::generate_with_dealer(
+        max_signers,
+        min_signers,
+        frost::keys::IdentifierList::Default,
+        &mut rng,
+    ).expect("msg");
+    // ANCHOR_END: tkg_gen
+
+    // Verifies the secret shares from the dealer and store them in a BTreeMap.
+    // In practice, the KeyPackages must be sent to its respective participants
+    // through a confidential and authenticated channel.
+    let mut key_packages: BTreeMap<_, _> = BTreeMap::new();
+
+    for (identifier, secret_share) in shares {
+        // ANCHOR: tkg_verify
+        let key_package = frost::keys::KeyPackage::try_from(secret_share).expect("msg");
+        // ANCHOR_END: tkg_verify
+        key_packages.insert(identifier, key_package);
+    }
+
+    let mut nonces_map = BTreeMap::new();
+    let mut commitments_map = BTreeMap::new();
+
+    ////////////////////////////////////////////////////////////////////////////
+    // Round 1: generating nonces and signing commitments for each participant
+    ////////////////////////////////////////////////////////////////////////////
+
+    // In practice, each iteration of this loop will be executed by its respective participant.
+    for participant_index in 1..(min_signers as u16 + 1) {
+        let participant_identifier = participant_index.try_into().expect("should be nonzero");
+        let key_package = &key_packages[&participant_identifier];
+
+        let bytes = key_package.serialize().unwrap();
+        let txt = encoding::to_base64(&bytes);
+        let new_bytes = encoding::from_base64(&txt).expect("unable to encode key package");
+        let kp = KeyPackage::deserialize(&new_bytes).expect("unable to deserialize key package");
+        assert_eq!(kp, *key_package);
+
+        // Generate one (1) nonce and one SigningCommitments instance for each
+        // participant, up to _threshold_.
+        // ANCHOR: round1_commit
+        let (nonces, commitments) = frost::round1::commit(
+            key_packages[&participant_identifier].signing_share(),
+            &mut rng,
+        );
+        // ANCHOR_END: round1_commit
+        // In practice, the nonces must be kept by the participant to use in the
+        // next round, while the commitment must be sent to the coordinator
+        // (or to every other participant if there is no coordinator) using
+        // an authenticated channel.
+        nonces_map.insert(participant_identifier, nonces);
+        commitments_map.insert(participant_identifier, commitments);
+    }
+
+    // This is what the signature aggregator / coordinator needs to do:
+    // - decide what message to sign
+    // - take one (unused) commitment per signing participant
+    let mut signature_shares = BTreeMap::new();
+    // ANCHOR: round2_package
+    // let message = "message to sign".as_bytes();
+    let message = &[62, 162, 82, 27, 173, 124, 142, 221, 180, 230, 209, 237, 25, 178, 167, 37, 94, 168, 190, 180, 72, 239, 214, 130, 163, 127, 91, 247, 66, 58, 106, 188];
+
+    // In practice, the SigningPackage must be sent to all participants
+    // involved in the current signing (at least min_signers participants),
+    // using an authenticate channel (and confidential if the message is secret).
+    let signing_package = frost::SigningPackage::new(commitments_map, message);
+    // ANCHOR_END: round2_package
+
+    ////////////////////////////////////////////////////////////////////////////
+    // Round 2: each participant generates their signature share
+    ////////////////////////////////////////////////////////////////////////////
+
+    // In practice, each iteration of this loop will be executed by its respective participant.
+    for participant_identifier in nonces_map.keys() {
+        let key_package = &key_packages[participant_identifier];
+
+        let nonces = &nonces_map[participant_identifier];
+
+        // Each participant generates their signature share.
+        // ANCHOR: round2_sign
+        let signature_share = frost::round2::sign(&signing_package, nonces, key_package).expect("msg");
+        // ANCHOR_END: round2_sign
+
+        // In practice, the signature share must be sent to the Coordinator
+        // using an authenticated channel.
+        signature_shares.insert(*participant_identifier, signature_share);
+    }
+
+    ////////////////////////////////////////////////////////////////////////////
+    // Aggregation: collects the signing shares from all participants,
+    // generates the final signature.
+    ////////////////////////////////////////////////////////////////////////////
+
+    // Aggregate (also verifies the signature shares)
+    // ANCHOR: aggregate
+    let group_signature = frost::aggregate(&signing_package, &signature_shares, &pubkey_package).expect("msg");
+    // ANCHOR_END: aggregate
+
+
+    // Check that the threshold signature can be verified by the group public
+    // key (the verification key).
+    // ANCHOR: verify
+    let is_signature_valid = pubkey_package
+        .verifying_key()
+        .verify(message, &group_signature)
+        .is_ok();
+    // ANCHOR_END: verify
+    assert!(is_signature_valid);
+
+    let pubkey_bytes = pubkey_package.verifying_key().serialize();
+    let pubk = bitcoin::PublicKey::from_slice(&pubkey_bytes).expect("unable to create pubkey");
+
+
+    let secp = secp256k1::Secp256k1::new();
+    let utpk = UntweakedPublicKey::from(pubk.inner);
+    let (tpk, _) = utpk.tap_tweak(&secp, None);
+    // let addr = Address::p2tr(&secp, tpk., None, Network::Bitcoin);
+    let sig_b = group_signature.serialize();
+    let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&sig_b[1..]).unwrap();
+    let msg = Message::from_digest_slice(message).unwrap();
+    match secp.verify_schnorr(&sig, &msg, &tpk.to_inner()) {
+        Ok(_) => println!("Signature is valid"),
+        Err(e) => println!("Signature is invalid: {}", e),
+    }
+
+    // let sig_bytes = group_signature.serialize();
+    // let sig_ecdsa = secp256k1::ecdsa::Signature::from_compact(&sig_bytes[1..]).expect("unable to create signature");
+    // let pubk_ecdsa = secp256k1::PublicKey::from_slice(&pubkey_bytes).expect("unable to create pubkey");
+    // match secp.verify_ecdsa(&msg, &sig_ecdsa, &pubk_ecdsa) {
+    //     Ok(_) => println!("Signature is valid"),
+    //     Err(e) => println!("Signature is invalid: {}", e),
+    // }
+
+    // let mut m = Vec::new();
+    // m.extend_from_slice(sig_bytes.as_slice());
+    // m.extend_from_slice(pubkey_bytes.as_slice());
+    // m.extend_from_slice(message);
+
+    // let msg_hash = frost::Secp256K1Sha256::H2(&m).to_bytes();
+    // let msgh = Message::from_digest_slice(&msg_hash.to_vec()).expect("msg");
+
+
+}
 
 #[test]
 fn test_psbt() {
 
-    let pubkey = CompressedPublicKey::from_str("0299e126bfd58a7dad478ad21cf7467d2927362ea8fd4a58dc7ac8f5fdfb218fab").expect("parse pubkey");
-    let address = Address::p2wpkh(&pubkey, bitcoin::network::Network::Bitcoin);
+    let network = Network::Bitcoin;
+    // p2wpkh address
+    // let pubkey = CompressedPublicKey::from_str("021a0e6628db5d43b97a0a566b7aaed02930ad22695af7244922476ba564df71ce").expect("parse pubkey");
+    // let address = Address::p2wpkh(&pubkey, network);
+    
+    // taproot address
+    let pubkey = PublicKey::from_str("025c5fef49ca441b8f377b69ac70a65c084a8c1bd9dc6b731f38c3ffdabea54a30").expect("parse pubkey");
+    let internel_key = XOnlyPublicKey::from(pubkey);
+    let secp = Secp256k1::new();
+    let address = Address::p2tr(&secp, internel_key, None, network);
 
     // Create a new transaction
     let mut unsigned_tx = Transaction {
@@ -94,7 +240,7 @@ fn test_psbt() {
     // Add the previous transaction output to the PSBT input
     psbt.inputs[0] = Input {
         witness_utxo: Some(prev_txout),
-        sighash_type: Some(bitcoin::psbt::PsbtSighashType::from_str("SIGHASH_ALL").unwrap()),
+        sighash_type: Some(bitcoin::psbt::PsbtSighashType::from_str("SIGHASH_DEFAULT").unwrap()),
         ..Default::default()
     };
 
@@ -221,10 +367,10 @@ pub fn receivers_address() -> Address {
 #[test]
 fn test_indentifier() {
 
-    let zero = frost_secp256k1::Secp256K1ScalarField::serialize(&frost_secp256k1::Secp256K1ScalarField::one());
+    let zero = frost::Secp256K1ScalarField::serialize(&frost::Secp256K1ScalarField::one());
     println!("zero: {:?}", zero);
 
-    let zero1 = frost_secp256k1::Secp256K1ScalarField::deserialize(&zero).unwrap();
+    let zero1 = frost::Secp256K1ScalarField::deserialize(&zero).unwrap();
     println!("zero1: {:?}", zero1);
 
     let privkey = x25519_dalek::StaticSecret::from(zero);
@@ -235,10 +381,10 @@ fn test_indentifier() {
     println!("pubkey: {:?}", hex::encode(pubkey.to_bytes()));
     println!("bytes: {:?}", pubkey.as_bytes());
 
-    // let ident = Identifier::new(frost_secp256k1::Secp256K1ScalarField::deserialize(&pubkey.as_bytes()).unwrap()).unwrap();
+    // let ident = frost::Identifier::new(frost::Secp256K1ScalarField::deserialize(&pubkey.as_bytes()).unwrap()).unwrap();
     // println!("{:?}", ident);
 
-    // let byt = frost_secp256k1::Secp256K1ScalarField::serialize(&ident.to_scalar());
+    // let byt = frost::Secp256K1ScalarField::serialize(&ident.());
     // println!("{:?}", byt);
 
     
