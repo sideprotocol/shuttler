@@ -409,15 +409,6 @@ impl Signer {
         let sig_shares_message: SignMessage<frost::round2::SignatureShare> =
             serde_json::from_slice(&msg.data).expect("msg not deserialized");
 
-        // self.sign_shares_store
-        //     .insert(sig_shares_message.party_id, sig_shares_message.packet.clone());
-        // debug!("sign_shares_store: {:?}", self.sign_shares_store.len());
-        // store::set_sign_shares(
-        //     &sig_shares_message.task_id,
-        //     sig_shares_message.party_id,
-        //     sig_shares_message.packet.clone(),
-        // );
-
         let signing_package = match store::get_sign_package(&sig_shares_message.task_id) {
             Some(package) => package,
             None => {
@@ -478,11 +469,6 @@ impl Signer {
                 }
             };
 
-
-            debug!("package: {:?}", signing_package);
-            debug!("pubkeys: {:?}", pubkeys);
-            debug!("shares: {:?}", signature_shares);
-
             match frost::aggregate(&signing_package, &signature_shares, &pubkeys) {
                 Ok(signature) => {
                     // println!("public key: {:?}", pub)
@@ -498,51 +484,44 @@ impl Signer {
 
                     debug!("message: {:?}", sighash);
 
+                    
+
                     if let Some(group_task_id) = store::get_signing_group_task(sig_shares_message.task_id.as_str()) {
                         match store::get_signing_task(&group_task_id) {
                             Some(psbt) => {
                                 let mut psbt = psbt.clone();
-                                for i in 0..psbt.inputs.len() {
-                                    // let input = &mut psbt.inputs[i];
 
-                                    let pubkey = PublicKey::from_slice(&pubkeys.verifying_key().serialize()).unwrap();
-                                    // let pubkey = match PublicKey::from_slice(&pubkeys.verifying_key().serialize().unwrap()) {
-                                    //     Ok(pk) => pk,
-                                    //     Err(e) => {
-                                    //         error!("Failed to get pubkey: {}", e);
-                                    //         return;
-                                    //     }
-                                    // };
-                                    debug!("pubkey: {:?}", pubkey.to_bytes());
+                                let pubkey = PublicKey::from_slice(&pubkeys.verifying_key().serialize()).unwrap();
+                                debug!("pubkey: {:?}", pubkey.to_bytes());
 
-                                    
-                                    let sig_bytes = signature.serialize();
-                                    debug!("signature: {:?}, {}", sig_bytes, sig_bytes.len());
+                                let sig_bytes = signature.serialize();
+                                debug!("signature: {:?}, {}", sig_bytes, sig_bytes.len());
 
 
-                                    // verify signature
-                                    let secp = secp256k1::Secp256k1::new();
-                                    let utpk = UntweakedPublicKey::from(pubkey.inner);
-                                    let (tpk, _) = utpk.tap_tweak(&secp, None);
-                                    // let addr = Address::p2tr(&secp, tpk., None, Network::Bitcoin);
-                                    // let sig_b = group_signature.serialize();
-                                    let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&sig_bytes[1..]).unwrap();
-                                    let msg = bitcoin::secp256k1::Message::from_digest_slice(&sighash).unwrap();
-                                    match secp.verify_schnorr(&sig, &msg, &tpk.to_inner()) {
-                                        Ok(_) => info!("Signature is valid"),
-                                        Err(e) => error!("Signature is invalid: {}", e),
-                                    }
-
-                                    // add sig to psbt
-                                    let hash_ty = bitcoin::sighash::TapSighashType::Default;
-                                    let sighash_type =  bitcoin::psbt::PsbtSighashType::from(hash_ty);
-                                    let sig = SchnorrSignature::from_slice(&sig_bytes[1..]).unwrap();
-                                    psbt.inputs[0].sighash_type = Option::Some(sighash_type);
-                                    psbt.inputs[0].tap_key_sig = Option::Some(bitcoin::taproot::Signature {
-                                        signature: sig,
-                                        sighash_type: hash_ty,
-                                    });
+                                // verify signature
+                                let secp = secp256k1::Secp256k1::new();
+                                let utpk = UntweakedPublicKey::from(pubkey.inner);
+                                let (tpk, _) = utpk.tap_tweak(&secp, None);
+                                // let addr = Address::p2tr(&secp, tpk., None, Network::Bitcoin);
+                                // let sig_b = group_signature.serialize();
+                                let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&sig_bytes[1..]).unwrap();
+                                let msg = bitcoin::secp256k1::Message::from_digest_slice(&sighash).unwrap();
+                                match secp.verify_schnorr(&sig, &msg, &tpk.to_inner()) {
+                                    Ok(_) => info!("Signature is valid"),
+                                    Err(e) => error!("Signature is invalid: {}", e),
                                 }
+
+                                // add sig to psbt
+                                let hash_ty = bitcoin::sighash::TapSighashType::Default;
+                                let sighash_type =  bitcoin::psbt::PsbtSighashType::from(hash_ty);
+                                let sig = SchnorrSignature::from_slice(&sig_bytes[1..]).unwrap();
+                                let index = extract_index_from_task_id(sig_shares_message.task_id.as_str());
+                                psbt.inputs[index].sighash_type = Option::Some(sighash_type);
+                                psbt.inputs[index].tap_key_sig = Option::Some(bitcoin::taproot::Signature {
+                                    signature: sig,
+                                    sighash_type: hash_ty,
+                                });
+
                                 let psbt_bytes = psbt.serialize();
                                 let psbt_base64 = encoding::to_base64(&psbt_bytes);
                                 info!("Signed PSBT: {:?}", psbt_base64);
@@ -563,3 +542,8 @@ impl Signer {
     }
 }
 
+fn extract_index_from_task_id(task_id: &str) -> usize {
+    let parts: Vec<&str> = task_id.split("-").collect();
+    let index = parts[1].parse::<usize>().unwrap();
+    index
+}
