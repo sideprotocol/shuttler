@@ -1,9 +1,12 @@
+use core::hash;
+
 use bitcoin::{key::{TapTweak as _, UntweakedPublicKey}, secp256k1::{self, ecdsa::Signature}, sighash::{self, SighashCache}, Address, EcdsaSighashType, Psbt, PublicKey, Script, TxOut};
+use bitcoin_hashes::Hash;
 use frost_core::Field;
 use libp2p::gossipsub::Message;
 use toml::de;
 
-use crate::{app::config::{self, Config}, helper::{messages::now, pbst::{self, get_group_address}}};
+use crate::{app::config::{self, Config}, commands::sign, helper::{messages::now, pbst::{self, get_group_address}}};
 use crate::helper::{
     cipher::{decrypt, encrypt}, encoding::{self, from_base64}, messages::{DKGRoundMessage, SignMessage, SigningBehaviour, SigningSteps, Task}, store
 };
@@ -12,13 +15,13 @@ use frost_secp256k1_tr as frost;
 
 use ::bitcoin::secp256k1::schnorr::{Signature as SchnorrSignature};
 
-use log::{debug, error, info};
+use tracing::{debug, error, info};
 use rand::thread_rng;
 pub struct Signer {
     config: Config,
     msg_key: x25519_dalek::StaticSecret,
-    max_signers: usize,
-    min_signers: usize,
+    // max_signers: usize,
+    // min_signers: usize,
     participant_identifier: Identifier,
 }
 
@@ -36,8 +39,8 @@ impl Signer {
         Self {
             config: conf,
             msg_key: local_key,
-            max_signers: 3,
-            min_signers: 2,
+            // max_signers: 3,
+            // min_signers: 2,
             participant_identifier: identifier,
         }
     }
@@ -46,11 +49,11 @@ impl Signer {
         let mut rng = thread_rng();
         let (round1_secret_package, round1_package) = frost::keys::dkg::part1(
             self.participant_identifier.clone(),
-            self.max_signers as u16,
-            self.min_signers as u16,
+            task.max_signers,
+            task.min_signers,
             &mut rng,
         )
-        .expect("Error in DKG round 1");
+        .expect("error in DKG round 1");
         debug!(
             "round1_secret_package: {:?}, {:?}",
             &round1_secret_package, &round1_package
@@ -60,6 +63,8 @@ impl Signer {
 
         let round1_message = DKGRoundMessage {
             task_id: task.id.clone(),
+            max_signers: task.max_signers,
+            min_signers: task.min_signers,
             from_party_id: self.participant_identifier,
             to_party_id: None,
             packet: &round1_package,
@@ -86,7 +91,7 @@ impl Signer {
         if let Some(received_round1_packages) =
             store::get_dkg_round1_packets(&round1_package.task_id)
         {
-            if received_round1_packages.len() == self.max_signers - 1 {
+            if received_round1_packages.len() as u16 == round1_package.max_signers - 1 {
                 let round1_secret_package =
                     store::get_dkg_round1_secret_packet(&round1_package.task_id);
                 match round1_secret_package {
@@ -116,6 +121,8 @@ impl Signer {
 
                             let round2_message = DKGRoundMessage {
                                 task_id: round1_package.task_id.clone(),
+                                min_signers: round1_package.min_signers,
+                                max_signers: round1_package.max_signers,
                                 from_party_id: self.participant_identifier.clone(),
                                 to_party_id: Some(receiver_identifier.clone()),
                                 packet: packet,
@@ -167,7 +174,7 @@ impl Signer {
         if let Some(received_round2_packages) =
             store::get_dkg_round2_packets(&round2_package.task_id)
         {
-            if received_round2_packages.len() == self.max_signers - 1 {
+            if received_round2_packages.len() as u16 == round2_package.max_signers - 1 {
                 let round2_secret_package =
                     store::get_dkg_round2_secret_packet(&round2_package.task_id);
                 match round2_secret_package {
@@ -221,8 +228,15 @@ impl Signer {
         }
     }
 
-    pub fn sign_init(&mut self, behave: &mut SigningBehaviour, group_task: &Task) {
-        let psbt_bytes = from_base64(&group_task.message).unwrap();
+    pub fn sign_init(&mut self, behave: &mut SigningBehaviour, psbt_str: &str) {
+
+        let psbt_bytes = from_base64(psbt_str).unwrap();
+        let group_task_id = bitcoin_hashes::sha256::Hash::hash(&psbt_bytes).to_string();
+        // if store::has_signing_task(group_task_id.as_str()) {
+        //     info!(group_task_id, "skip task, already exists");
+        //     return;
+        // }
+
         let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
             Ok(psbt) => psbt,
             Err(e) => {
@@ -231,15 +245,11 @@ impl Signer {
             }
         };
 
-        store::set_signing_task(&group_task.id, psbt.clone());
+        store::set_signing_task(&group_task_id, psbt.clone());
 
         let len = psbt.inputs.len();
         debug!("(signing round 0) prepare for signing: {:?} tasks", len);
         for i in 0..len {
-
-            // let task = Task::new(group_task.step, group_task.message);
-            let sub_task_id = format!("{}-{}", group_task.id, i);
-            store::set_signing_group_task(&sub_task_id, group_task.id.clone());
 
             let input = &psbt.inputs[i];
             if input.witness_utxo.is_none() {
@@ -255,9 +265,8 @@ impl Signer {
             };
 
             info!("prev_tx: {:?}", prev_utxo.script_pubkey);
-
             let script = input.witness_utxo.clone().unwrap().script_pubkey;
-            let address = Address::from_script(&script, self.config.network).unwrap();
+            let address: Address = Address::from_script(&script, self.config.network).unwrap();
 
             // get the message to sign
             let hash_ty = input
@@ -293,116 +302,75 @@ impl Signer {
             let mut rng = thread_rng();
             let (nonce, commitments) = frost::round1::commit(sign_key.signing_share(), &mut rng);
 
+            // let task = Task::new(group_task.step, group_task.message);
+            let sub_task_id = format!("{}-{}", group_task_id, i);
+
             // self.sign_nonces_store.insert(task.id.clone(), nonces);
             debug!("(signing round 0) save nonces for {:?} ", &sub_task_id);
-            store::set_sign_nonces(&sub_task_id, nonce);
+
+            // let pubkey = match config::get_pub_key(address.to_string().as_str()) {
+            //     Some(pk) => pk,
+            //     None => {
+            //         error!("Failed to get pubkey for address: {}", address);
+            //         continue;
+            //     }
+            // };
+            
+            let variables = store::TaskVariables {
+                signing_nonces: nonce,
+                address: address.to_string(),
+                // pubkey, 
+                sighash: hash.to_raw_hash().to_byte_array().to_vec(),
+                group_task_id: group_task_id.clone(),
+                step: SigningSteps::SignInit,
+            };
+            store::set_signing_task_variables(&sub_task_id, variables);
+            // store::set_sign_nonces(&sub_task_id, nonce);
             store::set_signing_commitments(&sub_task_id, self.participant_identifier, commitments);
 
             let sign_message = SignMessage {
                 task_id: sub_task_id,
                 party_id: self.participant_identifier,
                 address: address.to_string(),
+                // message: hex::encode(hash.to_raw_hash()),
                 packet: commitments,
-                message: hex::encode(hash.to_raw_hash()),
-                timestamp : now(),
+                timestamp : 0,
             };
 
             let new_msg = serde_json::to_string(&sign_message).expect("msg not serialized");
-            behave
-                .gossipsub
-                .publish(SigningSteps::SignRound1.topic(), new_msg.as_bytes())
-                .expect("msg not published");
+            match behave.gossipsub.publish(SigningSteps::SignRound1.topic(), new_msg.as_bytes()) {
+                Ok(_) => {
+                    debug!("Published commitments to gossip: {:?}", new_msg);
+                }
+                Err(e) => {
+                    error!("Failed to publish message to gossip: {:?}", e);
+                }
+            };
         }
     }
 
-    pub fn sign_round1(&mut self, behave: &mut SigningBehaviour, msg: &Message) {
+    pub fn sign_round1(&mut self, msg: &Message) {
+
         let sign_message: SignMessage<frost::round1::SigningCommitments> =
             serde_json::from_slice(&msg.data).expect("error in sign_round1");
 
-        // self.sign_commitment_store
-        //     .insert(sign_message.party_id, sign_message.packet);
-        store::set_signing_commitments(
-            &sign_message.task_id,
-            sign_message.party_id,
-            sign_message.packet.clone(),
-        );
-
-        let signing_commitments = match store::get_signing_commitments(&sign_message.task_id) {
-            Some(commitments) => commitments,
+        // filter packets from unknown parties
+        match config::get_pub_key(sign_message.address.as_str()) {
+            Some(pubkey) => {
+                if pubkey.verifying_shares().contains_key(&sign_message.party_id) {
+                    store::set_signing_commitments(
+                        &sign_message.task_id,
+                        sign_message.party_id,
+                        sign_message.packet.clone(),
+                    );
+                    debug!("(signing round 1) received commitments: {:?}", &sign_message);
+                }
+            }
             None => {
-                error!(
-                    "Failed to get commitments for task: {}",
-                    sign_message.task_id
-                );
-                return;
+                error!("skip task, no pubkey found for task: {:?}", sign_message.task_id);
             }
         };
 
-        debug!("(signing round 1) received commitments: {:?}/{:?} {:?}", signing_commitments.len(), self.max_signers, &sign_message);
-
-        if signing_commitments.len() == self.min_signers {
-            // let signing_package = frost::SigningPackage::new(commitment_store.clone(), sign_message.message.clone().as_bytes());
-            // let raw = hex::decode(sign_message.message.clone()).unwrap();
-            let signing_package = frost::SigningPackage::new(
-                signing_commitments.clone(),
-                &hex::decode(&sign_message.message).unwrap(),
-            );
-
-            info!("completed round 1: {:?}", sign_message);
-            // self.sign_package_store.insert(
-            //     sign_message.message.clone().digest(),
-            //     signing_package.clone(),
-            // );
-            store::set_sign_package(&sign_message.task_id, signing_package.clone());
-
-            let signer_nonces = match store::get_sign_nonces(&sign_message.task_id) {
-                Some(n) => n,
-                None => {
-                    error!("Failed to get nonces for task: {}", sign_message.task_id);
-                    return;
-                }
-            };
-
-            let key_package = match config::get_sign_key(&sign_message.address) {
-                Some(pk) => pk,
-                None => {
-                    error!("not found signing key for {}", &sign_message.address);
-                    return;
-                }
-            };
-
-            let signature_shares =
-                match frost::round2::sign(&signing_package, &signer_nonces, &key_package) {
-                    Ok(shares) => shares,
-                    Err(e) => {
-                        error!("Error: {:?}", e);
-                        return;
-                    }
-                };
-
-            // self.sign_shares_store
-            //     .insert(sign_message.party_id, sign_message.packet.clone());
-            store::set_sign_shares(
-                &sign_message.task_id,
-                self.participant_identifier,
-                signature_shares,
-            );
-
-            let sig_shares_message = SignMessage {
-                task_id: sign_message.task_id.to_string(),
-                party_id: self.participant_identifier,
-                address: sign_message.address.to_string(),
-                packet: signature_shares,
-                message: sign_message.message.to_owned(),
-                timestamp: now(),
-            };
-
-            let new_msg = serde_json::to_string(&sig_shares_message).unwrap();
-            behave
-                .gossipsub
-                .publish(SigningSteps::SignRound2.topic(), new_msg.as_bytes())
-                .expect("msg not published");
-        }
     }
 
     pub fn sign_round2(&mut self, msg: &Message) {
@@ -412,10 +380,7 @@ impl Signer {
         let signing_package = match store::get_sign_package(&sig_shares_message.task_id) {
             Some(package) => package,
             None => {
-                error!(
-                    "not found signing package for task: {}",
-                    sig_shares_message.task_id
-                );
+                error!("Failed to get signing package for task: {}", sig_shares_message.task_id);
                 return;
             }
         };
@@ -443,28 +408,19 @@ impl Signer {
             }
         };
 
-        debug!("(signing round 2) received shares: {:?}/{:?} {:?}", signature_shares.len(), self.max_signers, &sig_shares_message);
-
-        // let received = signing_package.signing_commitments().iter().map(|(k, v)| {
-        //     debug!("commitment: {:?} {:?}", k, v);
-        //     match signature_shares.get(k) {
-        //         Some(s) => {
-        //             debug!("found: {:?}, {:?}", k, s);
-        //             1
-        //         },
-        //         None => 0
-        //     }
-        // }).sum::<usize>();
+        debug!("(signing round 2) received shares: {:?} {:?}", signature_shares.len(), &sig_shares_message);
 
         if signature_shares.len() == signing_package.signing_commitments().len()  {
 
-             debug!("commentments keys: {:?}", signing_package.signing_commitments().keys());
-             debug!("signature shares: {:?}", signature_shares.keys());
+            debug!("commentments keys: {:?}", signing_package.signing_commitments().keys());
+            debug!("signature shares: {:?}", signature_shares.keys());
 
-            let pubkeys = match config::get_pub_key(&sig_shares_message.address) {
+            let signing_variables = store::get_signing_task_variables(sig_shares_message.task_id.as_str()).unwrap();
+
+            let pubkeys = match config::get_pub_key(&signing_variables.address) {
                 Some(pk) => pk,
                 None => {
-                    error!("not found pubkey for : {:?}", &sig_shares_message.address);
+                    error!("not found pubkey for : {:?}", &signing_variables.address);
                     return;
                 }
             };
@@ -472,73 +428,69 @@ impl Signer {
             match frost::aggregate(&signing_package, &signature_shares, &pubkeys) {
                 Ok(signature) => {
                     // println!("public key: {:?}", pub)
-                    let sighash = &hex::decode(sig_shares_message.message).unwrap();
+                    // let sighash = &hex::decode(sig_shares_message.message).unwrap();
                     let is_signature_valid = pubkeys
                         .verifying_key()
-                        .verify(sighash, &signature)
+                        .verify(signing_variables.sighash.as_slice(), &signature)
                         .is_ok();
                     info!(
                         "Signature: {:?} verified: {:?}",
                         signature, is_signature_valid
                     );
+                  
+                    match store::get_signing_task(&signing_variables.group_task_id) {
+                        Some(psbt) => {
+                            let mut psbt = psbt.clone();
 
-                    debug!("message: {:?}", sighash);
+                            let pubkey = PublicKey::from_slice(&pubkeys.verifying_key().serialize()).unwrap();
+                            debug!("pubkey: {:?}", pubkey.to_bytes());
 
-                    
+                            let sig_bytes = signature.serialize();
+                            debug!("signature: {:?}, {}", sig_bytes, sig_bytes.len());
 
-                    if let Some(group_task_id) = store::get_signing_group_task(sig_shares_message.task_id.as_str()) {
-                        match store::get_signing_task(&group_task_id) {
-                            Some(psbt) => {
-                                let mut psbt = psbt.clone();
-
-                                let pubkey = PublicKey::from_slice(&pubkeys.verifying_key().serialize()).unwrap();
-                                debug!("pubkey: {:?}", pubkey.to_bytes());
-
-                                let sig_bytes = signature.serialize();
-                                debug!("signature: {:?}, {}", sig_bytes, sig_bytes.len());
-
-
-                                // verify signature
-                                let secp = secp256k1::Secp256k1::new();
-                                let utpk = UntweakedPublicKey::from(pubkey.inner);
-                                let (tpk, _) = utpk.tap_tweak(&secp, None);
-                                // let addr = Address::p2tr(&secp, tpk., None, Network::Bitcoin);
-                                // let sig_b = group_signature.serialize();
-                                let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&sig_bytes[1..]).unwrap();
-                                let msg = bitcoin::secp256k1::Message::from_digest_slice(&sighash).unwrap();
-                                match secp.verify_schnorr(&sig, &msg, &tpk.to_inner()) {
-                                    Ok(_) => info!("Signature is valid"),
-                                    Err(e) => error!("Signature is invalid: {}", e),
-                                }
-
-                                // add sig to psbt
-                                let hash_ty = bitcoin::sighash::TapSighashType::Default;
-                                let sighash_type =  bitcoin::psbt::PsbtSighashType::from(hash_ty);
-                                let sig = SchnorrSignature::from_slice(&sig_bytes[1..]).unwrap();
-                                let index = extract_index_from_task_id(sig_shares_message.task_id.as_str());
-                                psbt.inputs[index].sighash_type = Option::Some(sighash_type);
-                                psbt.inputs[index].tap_key_sig = Option::Some(bitcoin::taproot::Signature {
-                                    signature: sig,
-                                    sighash_type: hash_ty,
-                                });
-
-                                let psbt_bytes = psbt.serialize();
-                                let psbt_base64 = encoding::to_base64(&psbt_bytes);
-                                info!("Signed PSBT: {:?}", psbt_base64);
+                            // verify signature
+                            let secp = secp256k1::Secp256k1::new();
+                            let utpk = UntweakedPublicKey::from(pubkey.inner);
+                            let (tpk, _) = utpk.tap_tweak(&secp, None);
+                            // let addr = Address::p2tr(&secp, tpk., None, Network::Bitcoin);
+                            // let sig_b = group_signature.serialize();
+                            let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&sig_bytes[1..]).unwrap();
+                            let msg = bitcoin::secp256k1::Message::from_digest_slice(&signing_variables.sighash).unwrap();
+                            match secp.verify_schnorr(&sig, &msg, &tpk.to_inner()) {
+                                Ok(_) => info!("Signature is valid"),
+                                Err(e) => error!("Signature is invalid: {}", e),
                             }
-                            None => {
-                                error!("Failed to get group task: {}", group_task_id);
-                            }
-                        
-                        };
+
+                            // add sig to psbt
+                            let hash_ty = bitcoin::sighash::TapSighashType::Default;
+                            let sighash_type =  bitcoin::psbt::PsbtSighashType::from(hash_ty);
+                            let sig = SchnorrSignature::from_slice(&sig_bytes[1..]).unwrap();
+                            let index = extract_index_from_task_id(sig_shares_message.task_id.as_str());
+                            psbt.inputs[index].sighash_type = Option::Some(sighash_type);
+                            psbt.inputs[index].tap_key_sig = Option::Some(bitcoin::taproot::Signature {
+                                signature: sig,
+                                sighash_type: hash_ty,
+                            });
+
+                            let psbt_bytes = psbt.serialize();
+                            let psbt_base64 = encoding::to_base64(&psbt_bytes);
+                            info!("Signed PSBT: {:?}", psbt_base64);
+                        }
+                        None => {
+                            error!("Failed to get group task: {}", &signing_variables.group_task_id);
+                        }                    
                     };
                 }
                 Err(e) => {
                     error!("Signature aggregation error: {:?}", e);
                 }
             };
-            store::clear_signing_variables(sig_shares_message.task_id.as_str());
+            // store::clear_signing_variables(sig_shares_message.task_id.as_str());
         }
+    }
+
+    pub fn config(&self) -> &Config {
+        &self.config
     }
 }
 
@@ -546,4 +498,94 @@ fn extract_index_from_task_id(task_id: &str) -> usize {
     let parts: Vec<&str> = task_id.split("-").collect();
     let index = parts[1].parse::<usize>().unwrap();
     index
+}
+
+pub fn broadcast_signing_commitments( 
+    behave: &mut SigningBehaviour,
+    signer: &mut Signer,
+) {
+
+    let pending_commitments = store::get_all_signing_commitments();
+
+    pending_commitments.iter().for_each(|(task_id, commitments)| {
+        let mut signing_variables = match store::get_signing_task_variables(task_id) {
+            Some(variables) => variables,
+            None => {
+                error!("Failed to get signing variables for task: {}", task_id);
+                // store::clear_signing_variables(task_id);
+                return;
+            }        
+        };
+
+        let sign_key = match config::get_sign_key(&signing_variables.address) {
+            Some(pk) => pk,
+            None => {
+                error!("not found signing key for {}", &signing_variables.address);
+                return;
+            }
+        };
+
+        if signing_variables.step == SigningSteps::SignInit && commitments.len() as u16 >= *sign_key.min_signers() {
+            debug!("(signing round 1) collected enough commitment {:?} for tasks {:?}", commitments.len(), task_id);
+
+            // update step
+            signing_variables.step = SigningSteps::SignRound1;
+            store::set_signing_task_variables(task_id, signing_variables.clone());
+
+            let signing_package = frost::SigningPackage::new(
+                commitments.clone(), 
+                &signing_variables.sighash
+            );
+
+            store::set_sign_package(task_id, signing_package.clone());
+
+            let key_package = match config::get_sign_key(&signing_variables.address) {
+                Some(pk) => pk,
+                None => {
+                    error!("not found signing key for {}", &signing_variables.address);
+                    return;
+                }
+            };
+
+            if store::has_sign_shares(task_id) {
+                info!("skip task, already signed");
+                return;
+            }
+
+            let signature_shares =
+                match frost::round2::sign(&signing_package, &signing_variables.signing_nonces, &key_package) {
+                    Ok(shares) => shares,
+                    Err(e) => {
+                        error!("Error: {:?}", e);
+                        return;
+                    }
+                };
+
+            store::set_sign_shares(
+                task_id.as_str(),
+                signer.participant_identifier,
+                signature_shares,
+            );
+
+            let addr = &signing_variables.address.clone();
+            let sig_shares_message = SignMessage {
+                task_id: task_id.clone(),
+                party_id: signer.participant_identifier,
+                address: addr.to_string(),
+                packet: signature_shares,
+                timestamp: now(),
+            };
+
+            let new_msg = serde_json::to_string(&sig_shares_message).unwrap();
+            match behave.gossipsub.publish(SigningSteps::SignRound2.topic(), new_msg.as_bytes()) {
+                Ok(_) => {
+                    info!("Published signature share to gossip: {:?}", new_msg);
+                }
+                Err(e) => {
+                    error!("Failed to publish message to gossip: {:?}", e);
+                }
+            };
+        }
+    });
+
 }

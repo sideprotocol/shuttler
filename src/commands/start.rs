@@ -6,16 +6,19 @@ use libp2p::identity::Keypair;
 use libp2p::swarm::SwarmEvent;
 use libp2p::{gossipsub, mdns, noise, tcp, yamux};
 use tokio::io::AsyncReadExt as _;
+use tokio::time::Instant;
 
+use crate::app::signer::broadcast_signing_commitments;
 use crate::commands::Cli;
 use crate::app::{config::Config, signer::Signer};
-use crate::helper::messages::{ SigningBehaviour, SigningBehaviourEvent, SigningSteps, Task};
+use crate::helper::http::{get_signing_requests, mock_signing_requests};
+use crate::helper::messages::{ now, SigningBehaviour, SigningBehaviourEvent, SigningSteps, Task};
 use std::error::Error;
 use std::time::Duration;
 use tokio::{io,  select, time};
 
-use tokio::net::TcpListener;
-use log::{debug, info, error};
+use tokio::net::{TcpListener, TcpStream};
+use tracing::{debug, info, error};
 
 pub async fn execute(cli: &Cli) {
 
@@ -68,14 +71,15 @@ pub async fn execute(cli: &Cli) {
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
 
+    // start libp2p swarm
     // subscribes to topics
     subscribes(swarm.behaviour_mut());
-
     // Listen on all interfaces and whatever port the OS assigns
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse().expect("address parser error")).expect("failed to listen on all interfaces");
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().expect("Address parse error")).expect("failed to listen on all interfaces");
 
-    // let mut buf = [0; 1024];
+    // start the command server
+    // listen for local incoming commands
     let listener = match TcpListener::bind(&conf.command_server).await {
         Ok(listener) => {
             info!("Listening on: {:?}", listener.local_addr().unwrap());
@@ -85,15 +89,15 @@ pub async fn execute(cli: &Cli) {
             error!("Failed to bind: {:?}", e);
             return;
         }
-    
     };
+
+    let d = 30 as u64;
+    let start = Instant::now() + (Duration::from_secs(d) - Duration::from_secs(now() % d));
+    let mut interval = tokio::time::interval_at(start, Duration::from_secs(d));
 
     let mut signer = Signer::new(conf);
 
-    // let (mut socket, _) = listener.accept().await.expect("Failed to accept");
-    // Run the swarm
     loop {
-
         select! {
             swarm_event = swarm.select_next_some() => match swarm_event {
                 SwarmEvent::Behaviour(evt) => {
@@ -107,66 +111,27 @@ pub async fn execute(cli: &Cli) {
                 },
             },
 
-            socket = listener.accept() => {
-                match socket {
-                    Ok((mut socket, _)) => {
-                        debug!("Accepted connection from: {:?}", socket.peer_addr().unwrap());
-                        let mut buf = [0; 1024];
-                        let result = socket.read(&mut buf).await;
+            _ = interval.tick() => {
+                debug!("Fetching tasks");
+                tasks_fetcher(cli, swarm.behaviour_mut(), &mut signer).await;
+            },
 
-                        match result {
-                            Ok(0) => {
-                                // Connection closed
-                                error!("Connection closed");
-                                break;
-                            }
-                            Ok(n) => {
-                                // Print the received message
-                                let message = String::from_utf8_lossy(&buf[..n]);
-                                let task = serde_json::from_str::<crate::helper::messages::Task>(&message).unwrap();
-
-                                // process the task 
-                                match task.step {
-                                    SigningSteps::DkgInit => signer.dkg_init(swarm.behaviour_mut(), &task),
-                                    SigningSteps::SignInit => signer.sign_init(swarm.behaviour_mut(), &task),
-                                    _ => {}
-                                }
-
-                                // publish the message to gossip to enable other nodes to process
-                                match swarm.behaviour_mut().gossipsub.publish(task.step.topic(), &buf[..n]) {
-                                    Ok(_) => {
-                                        info!("Published message to gossip: {:?}", message);
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to publish message to gossip: {:?}", e);
-                                    }
-                                } 
-                            }
-                            Err(e) => {
-                                error!("Failed to read from socket: {}", e);
-                                break;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to accept connection: {:?}", e);
-                    }
+            socket = listener.accept() => match socket {
+                Ok((mut tcpstream, _)) => {
+                    debug!("Accepted connection from: {:?}", tcpstream.peer_addr().unwrap());
+                    command_handler(&mut tcpstream, swarm.behaviour_mut(), &mut signer).await;
+                }
+                Err(e) => {
+                    error!("Failed to accept connection: {:?}", e);
                 }
             }
         }
     }
 }
 
-
-pub async fn tasks_fetcher(behave: &mut SigningBehaviour) {
-    let mut interval = time::interval(Duration::from_secs(5));
-    loop {
-        interval.tick().await;
-        let message = format!("Hello at {:?}", time::Instant::now());
-
-        behave.gossipsub.publish(IdentTopic::new("test"), message.as_bytes()).unwrap();
-        error!("Published message to gossip: {:?}", message);
-    }
+pub async fn tasks_fetcher(cli: &Cli , behave: &mut SigningBehaviour, signer: &mut Signer) {
+    broadcast_signing_commitments(behave, signer);
+    fetch_latest_signing_requests(cli, behave, signer).await;
 }
 
 // handle events from the swarm
@@ -196,7 +161,45 @@ fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehaviour, si
     }
 }
 
+pub async fn command_handler(steam: &mut TcpStream, behave: &mut SigningBehaviour, signer: &mut Signer) {
 
+    debug!("Accepted connection from: {:?}", steam.peer_addr().unwrap());
+    let mut buf = [0; 1024];
+    let result = steam.read(&mut buf).await;
+
+    match result {
+        Ok(0) => {
+            // Connection closed
+            error!("Connection closed");
+            return;
+        }
+        Ok(n) => {
+            // Print the received message
+            let message = String::from_utf8_lossy(&buf[..n]);
+            let task = serde_json::from_str::<crate::helper::messages::Task>(&message).unwrap();
+
+            // process the task on local node first
+            match task.step {
+                SigningSteps::DkgInit => signer.dkg_init(behave, &task),
+                // SigningSteps::SignInit => signer.sign_init(behave, &task),
+                _ => {}
+            }
+
+            // publish the message to gossip to enable other nodes to process
+            match behave.gossipsub.publish(task.step.topic(), &buf[..n]) {
+                Ok(_) => {
+                    info!("Published message to gossip: {:?}", message);
+                }
+                Err(e) => {
+                    error!("Failed to publish message to gossip: {:?}", e);
+                }
+            } 
+        }
+        Err(e) => {
+            error!("Failed to read from socket: {}", e);
+        }
+    }
+}
 
 fn subscribes(behave: &mut SigningBehaviour) {
 
@@ -224,14 +227,44 @@ fn topic_handler(message: &Message, behave: &mut SigningBehaviour, signer: &mut 
         signer.dkg_round1(behave, message);
     } else if topic == SigningSteps::DkgRound2.topic().into() {
         signer.dkg_round2(message);
-    } else if topic == SigningSteps::SignInit.topic().into() {
-        let json = String::from_utf8_lossy(&message.data);
-        let task: Task = serde_json::from_str(&json).expect("msg not deserialized");
-        signer.sign_init(behave, &task);
+    // } else if topic == SigningSteps::SignInit.topic().into() {
+    //     let json = String::from_utf8_lossy(&message.data);
+    //     let task: Task = serde_json::from_str(&json).expect("msg not deserialized");
+    //     signer.sign_init(behave, &task);
     } else if topic == SigningSteps::SignRound1.topic().into() {
-        signer.sign_round1(behave, message);
+        signer.sign_round1(message);
     } else if topic == SigningSteps::SignRound2.topic().into() {
         signer.sign_round2(message);
     }
     Ok(())
+}
+
+async fn fetch_latest_signing_requests(cli: &Cli, behave: &mut SigningBehaviour, signer: &mut Signer) {
+    let host = signer.config().command_server.clone();
+
+    if cli.mock {
+        match mock_signing_requests().await {
+            Ok(response) => {
+                for request in response.requests() {
+                    signer.sign_init(behave, &request.psbt);
+                }
+            },
+            Err(e) => {
+                error!("Failed to fetch signing requests: {:?}", e);
+                return;
+            }
+        };
+    } else {
+        match get_signing_requests(&host).await {
+            Ok(response) => {
+                for request in response.requests() {
+                    signer.sign_init(behave, &request.psbt);
+                }
+            },
+            Err(e) => {
+                error!("Failed to fetch signing requests: {:?}", e);
+                return;
+            }
+        };
+    }    
 }

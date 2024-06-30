@@ -4,7 +4,7 @@ use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, path::PathBuf, sync::Mutex};
-use log::{debug, error};
+use tracing::{debug, error};
 
 use crate::helper::encoding::from_base64;
 
@@ -74,7 +74,7 @@ impl Config {
                     return;
                 }            
             };
-            debug!("Loaded key package for {}", k);
+            debug!("Loaded key package for {}, {:?}", k, kp);
             KEYS.lock().unwrap().insert(k.clone(), kp);
         });
 
@@ -87,7 +87,7 @@ impl Config {
                     return;
                 }            
             };
-            debug!("Loaded public key package for {}", k);
+            debug!("Loaded public key package for {}, {:?}", k, pkp);
             PUBKEYS.lock().unwrap().insert(k.clone(), pkp);
         });
 

@@ -2,7 +2,7 @@ use crate::app::config;
 
 use super::Cli;
 use bitcoin::Network;
-use log::info;
+use tracing::info;
 
 pub fn execute(cli: &Cli, port : u16, network: Network) {
     info!("init config to: {}", &cli.home);

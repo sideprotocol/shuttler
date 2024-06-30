@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 use crate::app::config;
-use log::{info, error};
+use tracing::{info, error};
 
 
 #[derive(Parser)]
@@ -12,6 +12,8 @@ use log::{info, error};
 pub struct Cli {
     #[clap(long, default_value = ".tssigner")]
     pub home: String,
+    #[clap(long, default_value = "false")]
+    pub mock: bool,
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -25,7 +27,12 @@ pub enum Commands {
         network: Network    
     },
     /// Remove an item
-    DKG,
+    DKG {
+        #[clap(long, default_value = "2")]
+        min_signers: u16,
+        #[clap(long, default_value = "3")]
+        max_signers: u16,
+    },
     Sign {
         pbst: String,
     },

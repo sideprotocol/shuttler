@@ -1,9 +1,21 @@
 use std::collections::BTreeMap;
 
-use frost_secp256k1_tr::{keys::dkg, {round1, round2}, Identifier, SigningPackage};
+use frost_secp256k1_tr::{keys::{dkg, PublicKeyPackage}, round1, round2, Identifier, SigningPackage};
 use bitcoin::Psbt;
 use std::sync::Mutex;
 use lazy_static::lazy_static;
+
+use super::messages::SigningSteps;
+
+#[derive(Clone)]
+pub struct TaskVariables {
+    pub signing_nonces: round1::SigningNonces,
+    pub address: String,
+    // pub pubkey: PublicKeyPackage,
+    pub sighash: Vec<u8>,
+    pub group_task_id: String,
+    pub step: SigningSteps,
+}
 
 lazy_static! {
     static ref DkgRound1SecretPacket: Mutex<BTreeMap<String, dkg::round1::SecretPackage>> = {
@@ -21,10 +33,10 @@ lazy_static! {
     static ref SigningTasks: Mutex<BTreeMap<String, Psbt>> = {
         Mutex::new(BTreeMap::new())
     };
-    static ref SigningGroupTasks: Mutex<BTreeMap<String, String>> = {
+    static ref SigningTasksVariables: Mutex<BTreeMap<String, TaskVariables>> = {
         Mutex::new(BTreeMap::new())
     };
-    static ref SignNonces: Mutex<BTreeMap<String, round1::SigningNonces>> = {
+    static ref SigningGroupTasks: Mutex<BTreeMap<String, String>> = {
         Mutex::new(BTreeMap::new())
     };
     static ref SigningCommitments: Mutex<BTreeMap<String, BTreeMap<Identifier, round1::SigningCommitments>>> = {
@@ -106,19 +118,24 @@ pub fn get_signing_task(task_id: &str) -> Option<Psbt> {
     map.get(task_id).cloned()
 }
 
+pub fn has_signing_task(task_id: &str) -> bool {
+    let map = SigningTasks.lock().unwrap();
+    map.contains_key(task_id)
+}
+
 pub fn set_signing_task(task_id: &str, psbt: Psbt) {
     let mut map = SigningTasks.lock().unwrap();
     map.insert(task_id.to_string(), psbt);
 }
 
-pub fn get_sign_nonces(task_id: &str) -> Option<round1::SigningNonces> {
-    let map = SignNonces.lock().unwrap();
+pub fn get_signing_task_variables(task_id: &str) -> Option<TaskVariables> {
+    let map = SigningTasksVariables.lock().unwrap();
     map.get(task_id).cloned()
 }
 
-pub fn set_sign_nonces(task_id: &str, nonces: round1::SigningNonces) {
-    let mut map = SignNonces.lock().unwrap();
-    map.insert(task_id.to_string(), nonces);
+pub fn set_signing_task_variables(task_id: &str, variables: TaskVariables) {
+    let mut map = SigningTasksVariables.lock().unwrap();
+    map.insert(task_id.to_string(), variables);
 }
 
 pub fn get_signing_commitments(task_id: &str) -> Option<BTreeMap<Identifier, round1::SigningCommitments>> {
@@ -135,6 +152,11 @@ pub fn set_signing_commitments(task_id: &str, party_id: Identifier, commitment: 
         commitments.insert(party_id, commitment);
         map.insert(task_id.to_string(), commitments);
     }
+}
+
+pub fn get_all_signing_commitments() -> BTreeMap<String, BTreeMap<Identifier, round1::SigningCommitments>> {
+    let map = SigningCommitments.lock().unwrap();
+    map.clone()
 }
 
 pub fn get_sign_package(task_id: &str) -> Option<SigningPackage> {
@@ -163,10 +185,15 @@ pub fn set_sign_shares(task_id: &str, party_id: Identifier, share: round2::Signa
     }
 }
 
+pub fn has_sign_shares(task_id: &str) -> bool {
+    let map = SignShares.lock().unwrap();
+    map.contains_key(task_id)
+}
+
 pub fn clear_signing_variables(task_id: &str) {
-    let mut map = SigningTasks.lock().unwrap();
+    let mut map = SigningTasksVariables.lock().unwrap();
     map.remove(task_id);
-    let mut map = SignNonces.lock().unwrap();
+    let mut map = SigningTasks.lock().unwrap();
     map.remove(task_id);
     let mut map = SigningCommitments.lock().unwrap();
     map.remove(task_id);
@@ -174,16 +201,6 @@ pub fn clear_signing_variables(task_id: &str) {
     map.remove(task_id);
     let mut map = SignShares.lock().unwrap();
     map.remove(task_id);
-}
-
-pub fn get_signing_group_task(task_id: &str) -> Option<String> {
-    let map = SigningGroupTasks.lock().unwrap();
-    map.get(task_id).cloned()
-}
-
-pub fn set_signing_group_task(task_id: &str, group_task_id: String) {
-    let mut map = SigningGroupTasks.lock().unwrap();
-    map.insert(task_id.to_string(), group_task_id);
 }
 
 pub fn clear_signing_group_task(task_id: &str) {
