@@ -39,6 +39,14 @@ chacha20poly1305 = "0.10.1"
 
 reqwest = { version = "0.12.5", features = ["json"] } 
 lazy_static = "1.4"
+chrono = "0.4"
+cosmrs = "0.17.0"
+prost = "0.12.3"
+prost-types = "0.12"
+cosmos-sdk-proto  = "0.22"
+# Optional dependencies
+tonic = { version = "0.11", features = ["codegen", "prost"] }
+
 
 [dev-dependencies]
 criterion = "0.5"

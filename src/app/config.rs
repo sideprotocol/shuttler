@@ -1,5 +1,6 @@
 use bitcoin::Network;
 use bitcoincore_rpc::jsonrpc::base64;
+use cosmrs::crypto::secp256k1::SigningKey;
 use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
@@ -16,8 +17,25 @@ pub struct Config {
     pub command_server: String,
     pub log_level: String,
     pub p2p: P2P,
+    pub side_chain: CosmosChain,
     pub keys: BTreeMap<String, String>,
     pub pubkeys: BTreeMap<String, String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CosmosChain {
+    pub rest_url: String,
+    pub grpc: String,
+    pub gas: usize,
+    pub fee: Fee,
+    pub priv_key: String,
+    pub addr_prefix: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Fee {
+    pub amount: usize,
+    pub denom: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -50,6 +68,10 @@ pub fn get_pub_key(address: &str) -> Option<PublicKeyPackage> {
 
 pub fn add_pub_key(address: &str, key: PublicKeyPackage) {
     PUBKEYS.lock().unwrap().insert(address.to_string(), key);
+}
+
+pub fn get_pub_key_by_index(index: usize) -> Option<PublicKeyPackage> {
+    PUBKEYS.lock().unwrap().values().nth(index).cloned()
 }
 
 impl Config {
@@ -106,9 +128,20 @@ impl Config {
             keys: BTreeMap::new(),
             pubkeys: BTreeMap::new(),
             p2p: P2P {
-                local_key: encoded,
+                local_key: encoded.clone(),
                 public_key: pubkey,
             },
+            side_chain: CosmosChain {
+                rest_url: "http://localhost:1317".to_string(), 
+                grpc: "http://localhost:9090".to_string(),
+                gas: 200000,
+                fee: Fee {
+                    amount: 1000,
+                    denom: "uside".to_string(),
+                },
+                priv_key: encoded,
+                addr_prefix: "side".to_string(),
+            }
         }
     }
 
