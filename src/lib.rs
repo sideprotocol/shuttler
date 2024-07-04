@@ -1,10 +1,8 @@
-pub mod participant;
-pub mod config;
+pub mod app;
 pub mod commands;
-pub mod messages;
-pub mod signer;
-pub mod store;
-pub mod cipher;
+pub mod helper;
 #[cfg(test)]
-pub mod test;
+pub mod tests;
+pub mod proto;
+// pub mod prost;
 // pub mod taproot;

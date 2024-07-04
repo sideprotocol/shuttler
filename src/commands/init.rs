@@ -1,10 +1,11 @@
-use crate::config;
+use crate::app::config;
 
 use super::Cli;
-use log::info;
+use bitcoin::Network;
+use tracing::info;
 
-pub fn execute(cli: &Cli) {
+pub fn execute(cli: &Cli, port : u16, network: Network) {
     info!("init config to: {}", &cli.home);
     config::update_app_home(&cli.home);
-    config::Config::default().save().unwrap();
+    config::Config::default(port, network).save().unwrap();
 }

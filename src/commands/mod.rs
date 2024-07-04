@@ -1,8 +1,9 @@
+use bitcoin::Network;
 use clap::{Parser, Subcommand};
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 
-use crate::config;
-use log::{info, error};
+use crate::app::config;
+use tracing::{info, error};
 
 
 #[derive(Parser)]
@@ -11,29 +12,43 @@ use log::{info, error};
 pub struct Cli {
     #[clap(long, default_value = ".tssigner")]
     pub home: String,
+    #[clap(long, default_value = "false")]
+    pub mock: bool,
     #[command(subcommand)]
     pub command: Commands,
 }
 
 #[derive(Subcommand)]
 pub enum Commands {
-    Init,
+    Init {
+        #[clap(long, default_value = "5121")]
+        port: u16,
+        #[clap(long, default_value = "bitcoin")]
+        network: Network    
+    },
     /// Remove an item
-    DKG,
+    DKG {
+        #[clap(long, default_value = "2")]
+        min_signers: u16,
+        #[clap(long, default_value = "3")]
+        max_signers: u16,
+    },
     Sign {
         pbst: String,
     },
     /// Start a libp2p node
     Start,
+    Address,
 }
 
 pub mod init;
 pub mod dkg;
 pub mod sign;
 pub mod start;
+pub mod address;
 
-pub async fn publish(conf: &config::Config, task: crate::messages::Task) {
-    match TcpStream::connect(conf.message_server.clone()).await {
+pub async fn publish(conf: &config::Config, task: crate::helper::messages::Task) {
+    match TcpStream::connect(conf.command_server.clone()).await {
         Ok(mut stream) => {
             let message = serde_json::to_string(&task).unwrap();
             if let Err(e) = stream.write_all(message.as_bytes()).await {
