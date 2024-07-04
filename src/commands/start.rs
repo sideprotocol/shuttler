@@ -105,7 +105,7 @@ pub async fn execute(cli: &Cli) {
         select! {
             swarm_event = swarm.select_next_some() => match swarm_event {
                 SwarmEvent::Behaviour(evt) => {
-                    event_handler(evt, swarm.behaviour_mut(), &mut signer);
+                    event_handler(evt, swarm.behaviour_mut(), &mut signer).await;
                 },
                 SwarmEvent::NewListenAddr { address, .. } => {
                     info!("Local node is listening on {address}");
@@ -144,7 +144,7 @@ pub async fn tasks_fetcher(cli: &Cli , behave: &mut SigningBehaviour, signer: &m
 }
 
 // handle events from the swarm
-fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehaviour, signer: &mut Signer) {
+async fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehaviour, signer: &mut Signer) {
     match event {
         SigningBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, _multiaddr) in list {
@@ -164,7 +164,7 @@ fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehaviour, si
             message,
         }) => {
             // debug!("Received: {:?}", String::from_utf8_lossy(&message.data));
-            topic_handler(&message, behave, signer).expect("topic processing failed");
+            topic_handler(&message, behave, signer).await.expect("topic processing failed");
         }
         _ => {}
     }
@@ -226,7 +226,7 @@ fn subscribes(behave: &mut SigningBehaviour) {
     }
 }
 
-fn topic_handler(message: &Message, behave: &mut SigningBehaviour, signer: &mut Signer) -> Result<(), Box<dyn Error>> {
+async fn topic_handler(message: &Message, behave: &mut SigningBehaviour, signer: &mut Signer) -> Result<(), Box<dyn Error>> {
     let topic = message.topic.clone();
     if topic == SigningSteps::SignInit.topic().into() {
         let json = String::from_utf8_lossy(&message.data);
@@ -235,7 +235,7 @@ fn topic_handler(message: &Message, behave: &mut SigningBehaviour, signer: &mut 
     } else if topic == SigningSteps::SignRound1.topic().into() {
         signer.sign_round1(message);
     } else if topic == SigningSteps::SignRound2.topic().into() {
-        signer.sign_round2(message);
+        signer.sign_round2(message).await;
     // } else if topic == LeaderElection::Leader.topic().into() {
     //     leader::leader_election(behave, message);
     } else if topic == SigningSteps::DkgInit.topic().into() {
@@ -287,7 +287,7 @@ async fn fetch_latest_signing_requests(cli: &Cli, behave: &mut SigningBehaviour,
 
     match get_signing_requests(&host).await {
         Ok(response) => {
-            for request in response.requests() {
+            for request in response.into_inner().requests {
                 let task: Task = serde_json::from_str(request.psbt.as_str()).expect("msg not deserialized");
                 signer.dkg_init(behave, &task);
             }

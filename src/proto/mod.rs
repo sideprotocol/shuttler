@@ -25,3 +25,21 @@ pub mod btcbridge {
         include!("side/side.btcbridge.rs");
     }
 }
+
+use cosmos_sdk_proto::traits::Name;
+use crate::proto;
+
+macro_rules! impl_name {
+    ($type:ty, $package:expr, $name:expr) => {
+        impl Name for $type {
+            const NAME: &'static str = $name;
+            const PACKAGE: &'static str = $package;
+        }
+    };
+}
+
+impl_name!(
+    proto::btcbridge::v1beta1::MsgSubmitWithdrawSignaturesRequest,
+    "proto.btcbridge.v1beta1",
+    "MsgSubmitWithdrawSignaturesRequest"
+);

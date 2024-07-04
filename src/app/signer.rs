@@ -1,23 +1,23 @@
-use core::hash;
 use std::collections::BTreeMap;
 
-use bitcoin::{key::{TapTweak as _, UntweakedPublicKey}, psbt, secp256k1::{self, ecdsa::Signature}, sighash::{self, SighashCache}, Address, EcdsaSighashType, Psbt, PublicKey, Script, TxOut, Witness};
+use bitcoin::{key::{TapTweak as _, UntweakedPublicKey}, secp256k1, sighash::{self, SighashCache}, Address, Psbt, PublicKey, TxOut, Witness};
 use bitcoin_hashes::Hash;
+use cosmrs::Any;
 use frost_core::Field;
 use libp2p::gossipsub::Message;
-use toml::de;
 
-use crate::{app::config::{self, Config}, commands::sign, helper::{messages::now, pbst::{self, get_group_address}}};
+use crate::{app::config::{self, Config}, helper::{http::send_cosmos_transaction, messages::now, pbst::get_group_address}, proto::btcbridge::v1beta1::MsgSubmitWithdrawSignaturesRequest};
 use crate::helper::{
     cipher::{decrypt, encrypt}, encoding::{self, from_base64}, messages::{DKGRoundMessage, SignMessage, SigningBehaviour, SigningSteps, Task}, store
 };
-use frost::Identifier;
+use frost::Identifier; 
 use frost_secp256k1_tr as frost;
 
-use ::bitcoin::secp256k1::schnorr::{Signature as SchnorrSignature};
+use ::bitcoin::secp256k1::schnorr::Signature as SchnorrSignature;
 
 use tracing::{debug, error, info};
 use rand::thread_rng;
+
 pub struct Signer {
     config: Config,
     msg_key: x25519_dalek::StaticSecret,
@@ -417,7 +417,7 @@ impl Signer {
 
     }
 
-    pub fn sign_round2(&mut self, msg: &Message) {
+    pub async fn sign_round2(&mut self, msg: &Message) {
         let sig_shares_message: SignMessage<frost::round2::SignatureShare> =
             serde_json::from_slice(&msg.data).expect("msg not deserialized");
 
@@ -526,11 +526,23 @@ impl Signer {
                             });
                             debug!("is_complete: {:?}", is_complete);
 
-                            // psbt.
+                            if is_complete {
 
-                            let psbt_bytes = psbt.serialize();
-                            let psbt_base64 = encoding::to_base64(&psbt_bytes);
-                            info!("Signed PSBT: {:?}", psbt_base64);
+                                let psbt_bytes = psbt.serialize();
+                                let psbt_base64 = encoding::to_base64(&psbt_bytes);
+                                info!("Signed PSBT: {:?}", psbt_base64);
+
+                                let msg = MsgSubmitWithdrawSignaturesRequest {
+                                    sender: self.config().signer_address(),
+                                    txid: psbt.unsigned_tx.compute_txid().to_string(),
+                                    psbt: psbt_base64,
+                                };
+                                let any = Any::from_msg(&msg).unwrap();
+                                send_cosmos_transaction(self.config(), any ).await;
+                            } else {
+                                info!("PSBT is incomplete");
+                            }
+
                         }
                         None => {
                             error!("Failed to get group task: {}", &signing_variables.group_task_id);

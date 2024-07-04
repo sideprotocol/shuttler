@@ -7,9 +7,9 @@ use cosmos_sdk_proto::cosmos::{
 };
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_client::ServiceClient as TendermintServiceClient;
 use reqwest::Error;
-
+use tonic::{Response, Status};
+use crate::proto::btcbridge::v1beta1::{query_client::QueryClient as BtcQueryClient, QuerySigningRequestRequest, QuerySigningRequestResponse, SigningStatus};
 use crate::app::config::Config;
-
 use super::encoding::from_base64;
 
 pub fn get_http_client() -> reqwest::Client {
@@ -71,10 +71,22 @@ impl SigningRequestsResponse {
     }
 }
 
-pub async fn get_signing_requests(host: &str ) -> Result<SigningRequestsResponse, Error> {
-    let url = format!("{}/signing_requests", host);
-    get::<SigningRequestsResponse>(url.as_str()).await
+pub async fn get_signing_requests(host: &str ) -> Result<Response<QuerySigningRequestResponse>, Status> {
+    let mut btc_client = BtcQueryClient::connect(host.to_string()).await.unwrap();
+    btc_client.query_signing_request(QuerySigningRequestRequest {
+        pagination: None,
+        status: SigningStatus::Created as i32
+    }).await
 }
+
+pub async fn get_signing_request_by_txid(host: &str, _txid: String) -> Result<Response<QuerySigningRequestResponse>, Status> {
+    let mut btc_client = BtcQueryClient::connect(host.to_string()).await.unwrap();
+    btc_client.query_signing_request(QuerySigningRequestRequest {
+        pagination: None,
+        status: SigningStatus::Created as i32
+    }).await
+}
+
 
 pub async fn mock_signing_requests() -> Result<SigningRequestsResponse, Error> {
     Ok(SigningRequestsResponse {

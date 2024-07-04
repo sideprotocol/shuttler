@@ -1,6 +1,6 @@
 use bitcoin::Network;
 use bitcoincore_rpc::jsonrpc::base64;
-use cosmrs::crypto::secp256k1::SigningKey;
+use cosmrs::crypto::secp256k1::{self, SigningKey};
 use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
@@ -157,6 +157,14 @@ impl Config {
         }
         let contents = self.to_string();
         fs::write(path.join(CONFIG_FILE), contents)
+    }
+
+    pub fn signer_address(&self) -> String {
+        let key_bytes = from_base64(&self.side_chain.priv_key).unwrap();
+        let sender_private_key = secp256k1::SigningKey::from_slice(&key_bytes).unwrap();
+        let sender_public_key = sender_private_key.public_key();
+        let sender_account_id = sender_public_key.account_id(&self.side_chain.addr_prefix).unwrap();
+        sender_account_id.to_string()
     }
 }
 
