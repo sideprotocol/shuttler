@@ -288,8 +288,10 @@ async fn fetch_latest_signing_requests(cli: &Cli, behave: &mut SigningBehaviour,
     match get_signing_requests(&host).await {
         Ok(response) => {
             for request in response.into_inner().requests {
-                let task: Task = serde_json::from_str(request.psbt.as_str()).expect("msg not deserialized");
-                signer.dkg_init(behave, &task);
+                let task = Task::new(SigningSteps::SignInit, request.psbt);
+                signer.sign_init(behave, &task);
+                let message = serde_json::to_string(&task).unwrap();
+                behave.gossipsub.publish(task.step.topic(), message.as_bytes()).expect("Failed to publish message");
             }
         },
         Err(e) => {
