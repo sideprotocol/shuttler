@@ -1,6 +1,6 @@
 use bitcoin::Network;
 use bitcoincore_rpc::jsonrpc::base64;
-use cosmrs::crypto::secp256k1::{self, SigningKey};
+use cosmrs::crypto::secp256k1;
 use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};

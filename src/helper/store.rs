@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use frost_secp256k1_tr::{keys::{dkg, PublicKeyPackage}, round1, round2, Identifier, SigningPackage};
+use frost_secp256k1_tr::{keys::dkg, round1, round2, Identifier, SigningPackage};
 use bitcoin::Psbt;
 use std::sync::Mutex;
 use lazy_static::lazy_static;
