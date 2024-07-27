@@ -2,11 +2,12 @@ use std::collections::BTreeMap;
 
 use bitcoin::{key::{TapTweak as _, UntweakedPublicKey}, secp256k1, sighash::{self, SighashCache}, Address, Psbt, PublicKey, TxOut, Witness};
 use bitcoin_hashes::Hash;
+use bitcoincore_rpc::{Client, Auth};
 use cosmrs::Any;
 use frost_core::Field;
 use libp2p::gossipsub::Message;
 
-use crate::{app::config::{self, Config}, helper::{http::send_cosmos_transaction, messages::now, pbst::get_group_address}, proto::btcbridge::v1beta1::MsgSubmitWithdrawSignaturesRequest};
+use crate::{app::config::{self, Config}, helper::{client_side::send_cosmos_transaction, messages::now, pbst::get_group_address}, proto::btcbridge::v1beta1::MsgSubmitWithdrawSignaturesRequest};
 use crate::helper::{
     cipher::{decrypt, encrypt}, encoding::{self, from_base64}, messages::{DKGRoundMessage, SignMessage, SigningBehaviour, SigningSteps, Task}, store
 };
@@ -21,26 +22,32 @@ use rand::thread_rng;
 pub struct Signer {
     config: Config,
     msg_key: x25519_dalek::StaticSecret,
-    // max_signers: usize,
-    // min_signers: usize,
     participant_identifier: Identifier,
+    pub bitcoin_client: Client,
 }
 
 impl Signer {
     pub fn new(conf: Config) -> Self {
         let b = encoding::from_base64(&conf.p2p.local_key).unwrap();
-        let sized: [u8; 32] = b.try_into().unwrap();
-        let local_key = x25519_dalek::StaticSecret::from(sized);
+        let raw_bytes: [u8; 32] = b.try_into().unwrap();
+        let local_key = x25519_dalek::StaticSecret::from(raw_bytes);
         let pubkey = x25519_dalek::PublicKey::from(&local_key);
-        // frost::Secp256K1Sha256::H1(m).to_bytes();
         let id = frost::Secp256K1ScalarField::deserialize(pubkey.as_bytes()).unwrap();
         let identifier = frost_core::Identifier::new(id).unwrap(); 
         // let identifier = frost::Identifier::derive(&[0; 32]).expect("Error in identifier");
-        info!("identifier: {:?}", identifier);
+        info!("my identifier: {:?}", identifier);
+
+        let bitcoin_client = Client::new(
+            &conf.bitcoin.rpc, 
+            Auth::UserPass(conf.bitcoin.user.clone(), conf.bitcoin.password.clone()))
+            .expect("Could not initial bitcoin RPC client");
+
+
         Self {
             config: conf,
             msg_key: local_key,
             participant_identifier: identifier,
+            bitcoin_client,
         }
     }
 

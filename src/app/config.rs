@@ -17,9 +17,17 @@ pub struct Config {
     pub command_server: String,
     pub log_level: String,
     pub p2p: P2P,
+    pub bitcoin: BitcoinCfg,
     pub side_chain: CosmosChain,
     pub keys: BTreeMap<String, String>,
     pub pubkeys: BTreeMap<String, String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BitcoinCfg {
+    pub rpc: String,
+    pub user: String,
+    pub password: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -130,6 +138,11 @@ impl Config {
             p2p: P2P {
                 local_key: encoded.clone(),
                 public_key: pubkey,
+            },
+            bitcoin: BitcoinCfg {
+                rpc: "tcp://localhost:8332".to_string(),
+                user: "".to_string(),
+                password: "".to_string(),
             },
             side_chain: CosmosChain {
                 rest_url: "http://localhost:1317".to_string(), 

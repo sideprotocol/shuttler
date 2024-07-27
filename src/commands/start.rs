@@ -1,5 +1,5 @@
 use bitcoincore_rpc::jsonrpc::base64;
-use chrono::{Timelike, Utc};
+use bitcoincore_zmq::subscribe_async;
 use futures::StreamExt;
 use libp2p::gossipsub::Message;
 
@@ -9,18 +9,17 @@ use libp2p::{gossipsub, mdns, noise, tcp, yamux};
 use tokio::io::AsyncReadExt as _;
 use tokio::time::Instant;
 
-use crate::app::config;
-use crate::app::signer::broadcast_signing_commitments;
-use crate::commands::Cli;
 use crate::app::{config::Config, signer::Signer};
-use crate::helper::http::{get_signing_requests};
 use crate::helper::messages::{ now, SigningBehaviour, SigningBehaviourEvent, SigningSteps, Task};
+use crate::helper::ticker::tasks_fetcher;
 use std::error::Error;
 use std::time::Duration;
 use tokio::{io,  select};
 
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{debug, info, error};
+
+use super::Cli;
 
 pub async fn execute(cli: &Cli) {
 
@@ -93,6 +92,8 @@ pub async fn execute(cli: &Cli) {
         }
     };
 
+    let mut stream = subscribe_async(&["tcp://149.28.156.79:38332"]).unwrap();
+
     
     // this is to ensure that each node fetches tasks at the same time    
     let d = 6 as u64;
@@ -121,6 +122,13 @@ pub async fn execute(cli: &Cli) {
                 },
             },
 
+            zmq_msg = stream.next() => match zmq_msg {
+                Some(block) => {
+                    info!("block: {:?}", block)
+                },
+                None => {}
+            },
+
             _ = interval.tick() => {
                 tasks_fetcher(cli, swarm.behaviour_mut(), &mut signer).await;
             },
@@ -138,10 +146,7 @@ pub async fn execute(cli: &Cli) {
     }
 }
 
-pub async fn tasks_fetcher(cli: &Cli , behave: &mut SigningBehaviour, signer: &mut Signer) {
-    broadcast_signing_commitments(behave, signer);
-    fetch_latest_signing_requests(cli, behave, signer).await;
-}
+
 
 // handle events from the swarm
 async fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehaviour, signer: &mut Signer) {
@@ -248,55 +253,4 @@ async fn topic_handler(message: &Message, behave: &mut SigningBehaviour, signer:
         signer.dkg_round2(message);
     }
     Ok(())
-}
-
-async fn fetch_latest_signing_requests(cli: &Cli, behave: &mut SigningBehaviour, signer: &mut Signer) {
-    let host = signer.config().side_chain.rest_url.as_str();
-
-    if cli.mock {
-        return 
-    }
-
-    let seed = Utc::now().minute() as usize;
-    debug!("Seed: {:?}", seed);
-
-    match config::get_pub_key_by_index(0) {
-        Some(k) => {
-            let n = k.verifying_shares().len();
-
-            debug!("Key: {:?} {}", k, seed % n);
-            let coordinator = match k.verifying_shares().iter().nth(seed % n) {
-                Some((k, v)) => {
-                    debug!("Verifying share: {:?} {:?}", k, v);
-                    k
-                },
-                None => {
-                    error!("No verifying share found");
-                    return 
-                }                
-            };
-            if coordinator != signer.identifier() {
-                return
-            }
-        },
-        None => {
-            error!("No public key found");
-            return 
-        }
-    }
-
-    match get_signing_requests(&host).await {
-        Ok(response) => {
-            for request in response.into_inner().requests {
-                let task = Task::new(SigningSteps::SignInit, request.psbt);
-                signer.sign_init(behave, &task);
-                let message = serde_json::to_string(&task).unwrap();
-                behave.gossipsub.publish(task.step.topic(), message.as_bytes()).expect("Failed to publish message");
-            }
-        },
-        Err(e) => {
-            error!("Failed to fetch signing requests: {:?}", e);
-            return;
-        }
-    };
 }
