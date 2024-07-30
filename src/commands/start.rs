@@ -1,5 +1,4 @@
-use bitcoincore_rpc::jsonrpc::base64;
-use chrono::{Timelike, Utc};
+use bitcoincore_zmq::subscribe_async;
 use futures::StreamExt;
 use libp2p::gossipsub::Message;
 
@@ -9,12 +8,9 @@ use libp2p::{gossipsub, mdns, noise, tcp, yamux};
 use tokio::io::AsyncReadExt as _;
 use tokio::time::Instant;
 
-use crate::app::config;
-use crate::app::signer::broadcast_signing_commitments;
-use crate::commands::Cli;
-use crate::app::{config::Config, signer::Signer};
-use crate::helper::http::{get_signing_requests};
+use crate::app::{config::Config, signer::Shuttler};
 use crate::helper::messages::{ now, SigningBehaviour, SigningBehaviourEvent, SigningSteps, Task};
+use crate::helper::ticker::tasks_fetcher;
 use std::error::Error;
 use std::time::Duration;
 use tokio::{io,  select};
@@ -22,12 +18,12 @@ use tokio::{io,  select};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{debug, info, error};
 
+use super::Cli;
+
 pub async fn execute(cli: &Cli) {
 
-    let conf = Config::from_file(&cli.home).unwrap();
     // Generate a random peer ID
-    let b = base64::decode(&conf.p2p.local_key).unwrap();
-    let kb = Keypair::ed25519_from_bytes(b).expect("Failed to create keypair from bytes");
+    let kb = Keypair::generate_ed25519();
     let local_peer_id = kb.public().to_peer_id();
 
     info!("Local peer id: {:?}", local_peer_id);
@@ -80,9 +76,12 @@ pub async fn execute(cli: &Cli) {
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse().expect("address parser error")).expect("failed to listen on all interfaces");
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().expect("Address parse error")).expect("failed to listen on all interfaces");
 
+    let conf = Config::from_file(&cli.home).unwrap();
+    let mut shuttler = Shuttler::new(conf.clone());
+
     // start the command server
     // listen for local incoming commands
-    let listener = match TcpListener::bind(&conf.command_server).await {
+    let listener = match TcpListener::bind(&conf.mock_server).await {
         Ok(listener) => {
             info!("Listening on: {:?}", listener.local_addr().unwrap());
             listener
@@ -93,19 +92,19 @@ pub async fn execute(cli: &Cli) {
         }
     };
 
+    let mut stream = subscribe_async(&["tcp://149.28.156.79:38332"]).unwrap();
+
     
     // this is to ensure that each node fetches tasks at the same time    
     let d = 6 as u64;
     let start = Instant::now() + (Duration::from_secs(d) - Duration::from_secs(now() % d));
     let mut interval = tokio::time::interval_at(start, Duration::from_secs(d));
 
-    let mut signer = Signer::new(conf);
-
     loop {
         select! {
             swarm_event = swarm.select_next_some() => match swarm_event {
                 SwarmEvent::Behaviour(evt) => {
-                    event_handler(evt, swarm.behaviour_mut(), &mut signer).await;
+                    event_handler(evt, swarm.behaviour_mut(), &mut shuttler).await;
                 },
                 SwarmEvent::NewListenAddr { address, .. } => {
                     info!("Local node is listening on {address}");
@@ -121,14 +120,21 @@ pub async fn execute(cli: &Cli) {
                 },
             },
 
+            zmq_msg = stream.next() => match zmq_msg {
+                Some(block) => {
+                    info!("block: {:?}", block)
+                },
+                None => {}
+            },
+
             _ = interval.tick() => {
-                tasks_fetcher(cli, swarm.behaviour_mut(), &mut signer).await;
+                tasks_fetcher(cli, swarm.behaviour_mut(), &mut shuttler).await;
             },
 
             socket = listener.accept() => match socket {
                 Ok((mut tcpstream, _)) => {
                     debug!("Accepted connection from: {:?}", tcpstream.peer_addr().unwrap());
-                    command_handler(&mut tcpstream, swarm.behaviour_mut(), &mut signer).await;
+                    command_handler(&mut tcpstream, swarm.behaviour_mut(), &mut shuttler).await;
                 }
                 Err(e) => {
                     error!("Failed to accept connection: {:?}", e);
@@ -138,13 +144,10 @@ pub async fn execute(cli: &Cli) {
     }
 }
 
-pub async fn tasks_fetcher(cli: &Cli , behave: &mut SigningBehaviour, signer: &mut Signer) {
-    broadcast_signing_commitments(behave, signer);
-    fetch_latest_signing_requests(cli, behave, signer).await;
-}
+
 
 // handle events from the swarm
-async fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehaviour, signer: &mut Signer) {
+async fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehaviour, shuttler: &mut Shuttler) {
     match event {
         SigningBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, _multiaddr) in list {
@@ -164,13 +167,13 @@ async fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehavio
             message,
         }) => {
             // debug!("Received: {:?}", String::from_utf8_lossy(&message.data));
-            topic_handler(&message, behave, signer).await.expect("topic processing failed");
+            topic_handler(&message, behave, shuttler).await.expect("topic processing failed");
         }
         _ => {}
     }
 }
 
-pub async fn command_handler(steam: &mut TcpStream, behave: &mut SigningBehaviour, signer: &mut Signer) {
+pub async fn command_handler(steam: &mut TcpStream, behave: &mut SigningBehaviour, shuttler: &mut Shuttler) {
 
     debug!("Accepted connection from: {:?}", steam.peer_addr().unwrap());
     let mut buf = [0; 1024];
@@ -189,8 +192,8 @@ pub async fn command_handler(steam: &mut TcpStream, behave: &mut SigningBehaviou
 
             // process the task on local node first
             match task.step {
-                SigningSteps::DkgInit => signer.dkg_init(behave, &task),
-                SigningSteps::SignInit => signer.sign_init(behave, &task),
+                SigningSteps::DkgInit => shuttler.dkg_init(behave, &task),
+                SigningSteps::SignInit => shuttler.sign_init(behave, &task),
                 _ => {}
             }
 
@@ -226,77 +229,24 @@ fn subscribes(behave: &mut SigningBehaviour) {
     }
 }
 
-async fn topic_handler(message: &Message, behave: &mut SigningBehaviour, signer: &mut Signer) -> Result<(), Box<dyn Error>> {
+async fn topic_handler(message: &Message, behave: &mut SigningBehaviour, shuttler: &mut Shuttler) -> Result<(), Box<dyn Error>> {
     let topic = message.topic.clone();
     if topic == SigningSteps::SignInit.topic().into() {
         let json = String::from_utf8_lossy(&message.data);
         let task: Task = serde_json::from_str(&json).expect("msg not deserialized");
-        signer.sign_init(behave, &task);
+        shuttler.sign_init(behave, &task);
     } else if topic == SigningSteps::SignRound1.topic().into() {
-        signer.sign_round1(message);
+        shuttler.sign_round1(message);
     } else if topic == SigningSteps::SignRound2.topic().into() {
-        signer.sign_round2(message).await;
-    // } else if topic == LeaderElection::Leader.topic().into() {
-    //     leader::leader_election(behave, message);
+        shuttler.sign_round2(message).await;
     } else if topic == SigningSteps::DkgInit.topic().into() {
         let json = String::from_utf8_lossy(&message.data);
         let task: Task = serde_json::from_str(&json).expect("msg not deserialized");
-        signer.dkg_init(behave, &task);
+        shuttler.dkg_init(behave, &task);
     } else if topic == SigningSteps::DkgRound1.topic().into() {
-        signer.dkg_round1(behave, message);
+        shuttler.dkg_round1(behave, message);
     } else if topic == SigningSteps::DkgRound2.topic().into() {
-        signer.dkg_round2(message);
+        shuttler.dkg_round2(message);
     }
     Ok(())
-}
-
-async fn fetch_latest_signing_requests(cli: &Cli, behave: &mut SigningBehaviour, signer: &mut Signer) {
-    let host = signer.config().side_chain.rest_url.as_str();
-
-    if cli.mock {
-        return 
-    }
-
-    let seed = Utc::now().minute() as usize;
-    debug!("Seed: {:?}", seed);
-
-    match config::get_pub_key_by_index(0) {
-        Some(k) => {
-            let n = k.verifying_shares().len();
-
-            debug!("Key: {:?} {}", k, seed % n);
-            let coordinator = match k.verifying_shares().iter().nth(seed % n) {
-                Some((k, v)) => {
-                    debug!("Verifying share: {:?} {:?}", k, v);
-                    k
-                },
-                None => {
-                    error!("No verifying share found");
-                    return 
-                }                
-            };
-            if coordinator != signer.identifier() {
-                return
-            }
-        },
-        None => {
-            error!("No public key found");
-            return 
-        }
-    }
-
-    match get_signing_requests(&host).await {
-        Ok(response) => {
-            for request in response.into_inner().requests {
-                let task = Task::new(SigningSteps::SignInit, request.psbt);
-                signer.sign_init(behave, &task);
-                let message = serde_json::to_string(&task).unwrap();
-                behave.gossipsub.publish(task.step.topic(), message.as_bytes()).expect("Failed to publish message");
-            }
-        },
-        Err(e) => {
-            error!("Failed to fetch signing requests: {:?}", e);
-            return;
-        }
-    };
 }

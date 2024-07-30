@@ -48,7 +48,7 @@ pub mod start;
 pub mod address;
 
 pub async fn publish(conf: &config::Config, task: crate::helper::messages::Task) {
-    match TcpStream::connect(conf.command_server.clone()).await {
+    match TcpStream::connect(conf.mock_server.clone()).await {
         Ok(mut stream) => {
             let message = serde_json::to_string(&task).unwrap();
             if let Err(e) = stream.write_all(message.as_bytes()).await {

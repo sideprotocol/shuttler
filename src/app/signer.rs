@@ -1,12 +1,15 @@
-use std::collections::BTreeMap;
 
+use std::{collections::BTreeMap, fs, str::FromStr, sync::Mutex};
+
+use bip39::Mnemonic;
 use bitcoin::{key::{TapTweak as _, UntweakedPublicKey}, secp256k1, sighash::{self, SighashCache}, Address, Psbt, PublicKey, TxOut, Witness};
 use bitcoin_hashes::Hash;
-use cosmrs::Any;
+use bitcoincore_rpc::{Client, Auth};
+use cosmrs::{crypto::secp256k1::SigningKey, AccountId};
 use frost_core::Field;
 use libp2p::gossipsub::Message;
-
-use crate::{app::config::{self, Config}, helper::{http::send_cosmos_transaction, messages::now, pbst::get_group_address}, proto::btcbridge::v1beta1::MsgSubmitWithdrawSignaturesRequest};
+use cosmos_sdk_proto::cosmos::auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest};
+use crate::{app::config::{self, Config, PrivValidatorKey}, helper::{messages::now, pbst::get_group_address}};
 use crate::helper::{
     cipher::{decrypt, encrypt}, encoding::{self, from_base64}, messages::{DKGRoundMessage, SignMessage, SigningBehaviour, SigningSteps, Task}, store
 };
@@ -17,37 +20,67 @@ use ::bitcoin::secp256k1::schnorr::Signature as SchnorrSignature;
 
 use tracing::{debug, error, info};
 use rand::thread_rng;
+use ed25519_compact::{x25519, SecretKey};
 
-pub struct Signer {
-    config: Config,
-    msg_key: x25519_dalek::StaticSecret,
-    // max_signers: usize,
-    // min_signers: usize,
-    participant_identifier: Identifier,
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref BASE_ACCOUNT: Mutex<Option<BaseAccount>> = {
+        Mutex::new(None)
+    };
 }
 
-impl Signer {
+pub struct Shuttler {
+    config: Config,
+    identity_key: SecretKey,
+    identifier: Identifier,
+    relayer_key: SigningKey,
+    relayer_address: AccountId,
+    pub bitcoin_client: Client,
+}
+
+impl Shuttler {
     pub fn new(conf: Config) -> Self {
-        let b = encoding::from_base64(&conf.p2p.local_key).unwrap();
-        let sized: [u8; 32] = b.try_into().unwrap();
-        let local_key = x25519_dalek::StaticSecret::from(sized);
-        let pubkey = x25519_dalek::PublicKey::from(&local_key);
-        // frost::Secp256K1Sha256::H1(m).to_bytes();
-        let id = frost::Secp256K1ScalarField::deserialize(pubkey.as_bytes()).unwrap();
+
+        // load private key from priv_validator_key_path
+        let text: String = fs::read_to_string(&conf.priv_validator_key_path).expect("failed to load priv_validator_key.json");
+        let validator_key: PrivValidatorKey = serde_json::from_str::<PrivValidatorKey>(text.as_str()).expect("unable to parse priv_validator_key.json");
+
+        let b = encoding::from_base64(&validator_key.priv_key.value).unwrap();
+        println!("{:?}", b.len());
+        let local_key = SecretKey::from_slice(b.as_slice()).expect("invalid secret key");
+        let id = frost::Secp256K1ScalarField::deserialize(&local_key.public_key().as_slice().try_into().unwrap()).unwrap();
         let identifier = frost_core::Identifier::new(id).unwrap(); 
-        // let identifier = frost::Identifier::derive(&[0; 32]).expect("Error in identifier");
-        info!("identifier: {:?}", identifier);
+
+        info!("Threshold Signature Identifier: {:?}", identifier);
+
+        let bitcoin_client = Client::new(
+            &conf.bitcoin.rpc, 
+            Auth::UserPass(conf.bitcoin.user.clone(), conf.bitcoin.password.clone()))
+            .expect("Could not initial bitcoin RPC client");
+
+        let hdpath = cosmrs::bip32::DerivationPath::from_str("m/44'/118'/0'/0/0").unwrap();
+        let mnemonic = Mnemonic::parse(conf.mnemonic.as_str()).unwrap();
+
+        let relayer_key = SigningKey::derive_from_path(mnemonic.to_seed(""), &hdpath).unwrap();
+        let relayer_address =relayer_key.public_key().account_id(&conf.side_chain.address_prefix).expect("failed to derive relayer address");
+
+        info!("Relayer Address: {:?}", relayer_address.to_string());
+
         Self {
+            identity_key: local_key,
+            identifier,
+            bitcoin_client,
+            relayer_key, 
+            relayer_address,
             config: conf,
-            msg_key: local_key,
-            participant_identifier: identifier,
         }
     }
 
     pub fn dkg_init(&mut self, behave: &mut SigningBehaviour, task: &Task) {
         let mut rng = thread_rng();
         let (round1_secret_package, round1_package) = frost::keys::dkg::part1(
-            self.participant_identifier.clone(),
+            self.identifier.clone(),
             task.max_signers,
             task.min_signers,
             &mut rng,
@@ -64,7 +97,7 @@ impl Signer {
             task_id: task.id.clone(),
             max_signers: task.max_signers,
             min_signers: task.min_signers,
-            from_party_id: self.participant_identifier,
+            from_party_id: self.identifier,
             to_party_id: None,
             packet: &round1_package,
         };
@@ -110,19 +143,18 @@ impl Signer {
 
                         for (receiver_identifier, round2_package) in round2_packages {
                             let bz = receiver_identifier.serialize();
-                            let sized: [u8; 32] = bz.try_into().unwrap();
-                            let target = x25519_dalek::PublicKey::from(sized);
+                            let target = x25519::PublicKey::from_slice(bz.as_slice()).unwrap();
 
-                            let share_key = self.msg_key.diffie_hellman(&target);
+                            let share_key = target.dh(&x25519::SecretKey::from_ed25519(&self.identity_key).unwrap()).unwrap();
 
                             let byte = round2_package.serialize().unwrap();
-                            let packet = encrypt(byte.as_slice(), share_key.as_bytes());
+                            let packet = encrypt(byte.as_slice(), share_key.as_slice().try_into().unwrap());
 
                             let round2_message = DKGRoundMessage {
                                 task_id: round1_package.task_id.clone(),
                                 min_signers: round1_package.min_signers,
                                 max_signers: round1_package.max_signers,
-                                from_party_id: self.participant_identifier.clone(),
+                                from_party_id: self.identifier.clone(),
                                 to_party_id: Some(receiver_identifier.clone()),
                                 packet: packet,
                             };
@@ -149,18 +181,17 @@ impl Signer {
         debug!("round2_package: {:?}", String::from_utf8_lossy(&msg.data));
 
         if let Some(to) = round2_package.to_party_id {
-            if to != self.participant_identifier {
+            if to != self.identifier {
                 return;
             }
         }
 
         let bz = round2_package.from_party_id.serialize();
-        let sized: [u8; 32] = bz.try_into().unwrap();
-        let source = x25519_dalek::PublicKey::from(sized);
+        let source = x25519::PublicKey::from_slice(bz.as_slice()).unwrap();
 
-        let share_key = self.msg_key.diffie_hellman(&source);
+        let share_key = source.dh(&x25519::SecretKey::from_ed25519(&self.identity_key).unwrap()).unwrap();
 
-        let packet = decrypt(round2_package.packet.as_slice(), share_key.as_bytes());
+        let packet = decrypt(round2_package.packet.as_slice(), share_key.as_slice().try_into().unwrap());
         let received_round2_package =
             frost::keys::dkg::round2::Package::deserialize(&packet).unwrap();
 
@@ -197,7 +228,7 @@ impl Signer {
                         // clean caches
                         store::clear_dkg_variables(&round2_package.task_id);
 
-                        let address = get_group_address(pubkey.verifying_key(), self.config.network);
+                        let address = get_group_address(pubkey.verifying_key(), self.config.bitcoin.network);
                         info!(
                             "DKG Completed: {:?}, {:?}",
                             address.to_string(),
@@ -265,7 +296,7 @@ impl Signer {
 
             info!("prev_tx: {:?}", prev_utxo.script_pubkey);
             let script = input.witness_utxo.clone().unwrap().script_pubkey;
-            let address: Address = Address::from_script(&script, self.config.network).unwrap();
+            let address: Address = Address::from_script(&script, self.config.bitcoin.network).unwrap();
 
             // get the message to sign
             let hash_ty = input
@@ -315,11 +346,11 @@ impl Signer {
             };
             store::set_signing_task_variables(&sub_task_id, variables);
             // store::set_sign_nonces(&sub_task_id, nonce);
-            store::set_signing_commitments(&sub_task_id, self.participant_identifier, commitments);
+            store::set_signing_commitments(&sub_task_id, self.identifier, commitments);
 
             let sign_message = SignMessage {
                 task_id: sub_task_id,
-                party_id: self.participant_identifier,
+                party_id: self.identifier,
                 address: address.to_string(),
                 // message: hex::encode(hash.to_raw_hash()),
                 packet: commitments,
@@ -532,13 +563,13 @@ impl Signer {
                                 let psbt_base64 = encoding::to_base64(&psbt_bytes);
                                 info!("Signed PSBT: {:?}", psbt_base64);
 
-                                let msg = MsgSubmitWithdrawSignaturesRequest {
-                                    sender: self.config().signer_address(),
-                                    txid: psbt.unsigned_tx.compute_txid().to_string(),
-                                    psbt: psbt_base64,
-                                };
-                                let any = Any::from_msg(&msg).unwrap();
-                                send_cosmos_transaction(self.config(), any ).await;
+                                // let msg = MsgSubmit {
+                                //     sender: self.config().signer_address(),
+                                //     txid: psbt.unsigned_tx.compute_txid().to_string(),
+                                //     psbt: psbt_base64,
+                                // };
+                                // let any = Any::from_msg(&msg).unwrap();
+                                // send_cosmos_transaction(self.config(), any ).await;
                             } else {
                                 info!("PSBT is incomplete");
                             }
@@ -562,7 +593,46 @@ impl Signer {
     }
 
     pub fn identifier(&self) -> &Identifier {
-        &self.participant_identifier
+        &self.identifier
+    }
+
+    pub fn relayer_key(&self) -> &SigningKey {
+        &self.relayer_key
+    }
+
+    pub fn relayer_address(&self) -> &AccountId {
+        &self.relayer_address
+    }
+
+    pub async fn get_relayer_account(&self) -> BaseAccount {
+
+        let cache = BASE_ACCOUNT.lock().unwrap().clone().map(|account| account);
+        match cache {
+            Some(account) => {
+                let mut new_account = account.clone();
+                new_account.sequence += 1;
+                BASE_ACCOUNT.lock().unwrap().replace(new_account.clone());
+                return new_account;
+            }
+            None => {
+                let mut client = AuthQueryClient::connect(self.config.side_chain.grpc.clone()).await.unwrap();
+                let request = QueryAccountRequest {
+                    address: self.relayer_address.to_string(),
+                };
+        
+                match client.account(request).await {
+                    Ok(response) => {
+        
+                        let base_account: BaseAccount = response.into_inner().account.unwrap().to_msg().unwrap();
+                        BASE_ACCOUNT.lock().unwrap().replace(base_account.clone());
+                        base_account
+                    }
+                    Err(_) => {
+                        panic!("Failed to get relayer account");
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -574,7 +644,7 @@ fn extract_index_from_task_id(task_id: &str) -> usize {
 
 pub fn broadcast_signing_commitments( 
     behave: &mut SigningBehaviour,
-    signer: &mut Signer,
+    signer: &mut Shuttler,
 ) {
 
     let pending_commitments = store::get_all_signing_commitments();
@@ -615,7 +685,7 @@ pub fn broadcast_signing_commitments(
                 }
             };
 
-            let my_share = match signature_shares.get(&signer.participant_identifier) {
+            let my_share = match signature_shares.get(&signer.identifier) {
                 Some(share) => share,
                 None => {
                     error!("Failed to get my share for task: {}", task_id);
@@ -626,7 +696,7 @@ pub fn broadcast_signing_commitments(
             let addr = &signing_variables.address.clone();
             let sig_shares_message = SignMessage {
                 task_id: task_id.clone(),
-                party_id: signer.participant_identifier,
+                party_id: signer.identifier,
                 address: addr.to_string(),
                 packet: my_share,
                 timestamp: now(),
