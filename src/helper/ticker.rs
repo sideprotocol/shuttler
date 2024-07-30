@@ -1,19 +1,34 @@
 
 
+
+use std::sync::Mutex;
+
 use bitcoincore_rpc::RpcApi;
 use chrono::{Timelike, Utc};
-use cosmrs::Any;
-use tracing::{debug, error};
+use prost_types::Any;
+use tracing::{debug, error, info};
 
 use crate::{app::{config, 
-    signer::{broadcast_signing_commitments, Signer}}, 
+    signer::{broadcast_signing_commitments, Shuttler}}, 
     commands::Cli, 
     helper::{client_side::get_signing_requests, messages::{SigningSteps, Task}}};
 
 use super::{client_side::{self, send_cosmos_transaction}, messages::SigningBehaviour};
 use cosmos_sdk_proto::side::btcbridge::{BlockHeader, MsgSubmitBlockHeaders};
+use lazy_static::lazy_static;
 
-async fn fetch_latest_signing_requests(cli: &Cli, behave: &mut SigningBehaviour, signer: &mut Signer) {
+#[derive(Debug)]
+struct Lock {
+    loading: bool
+}
+
+lazy_static! {
+    static ref LOADING: Mutex<Lock> = {
+        Mutex::new(Lock { loading: false })
+    };
+}
+
+async fn fetch_latest_signing_requests(cli: &Cli, behave: &mut SigningBehaviour, signer: &mut Shuttler) {
     let host = signer.config().side_chain.rest_url.as_str();
 
     if cli.mock {
@@ -51,7 +66,8 @@ async fn fetch_latest_signing_requests(cli: &Cli, behave: &mut SigningBehaviour,
     match get_signing_requests(&host).await {
         Ok(response) => {
             for request in response.into_inner().requests {
-                let task = Task::new(SigningSteps::SignInit, request.psbt);
+                // TODO fix the message to real psbt
+                let task = Task::new(SigningSteps::SignInit, request.txid);
                 signer.sign_init(behave, &task);
                 let message = serde_json::to_string(&task).unwrap();
                 behave.gossipsub.publish(task.step.topic(), message.as_bytes()).expect("Failed to publish message");
@@ -64,7 +80,7 @@ async fn fetch_latest_signing_requests(cli: &Cli, behave: &mut SigningBehaviour,
     };
 }
 
-async fn sync_btc_blocks(signer: &mut Signer) {
+async fn sync_btc_blocks(signer: &mut Shuttler) {
     let tip_on_bitcoin = match signer.bitcoin_client.get_block_count() {
         Ok(height) => height,
         Err(e) => {
@@ -83,7 +99,16 @@ async fn sync_btc_blocks(signer: &mut Signer) {
         }
     };
 
+    let mut lock = LOADING.lock().unwrap();
+    if lock.loading {
+        info!("a previous task is running, skip!");
+        return
+    }
+    lock.loading = true;
+
     let mut block_headers: Vec<BlockHeader> = vec![];
+
+    info!("Syncing blocks from {} to {}", tip_on_side, tip_on_bitcoin);
 
     while tip_on_side < tip_on_bitcoin {
 
@@ -111,26 +136,39 @@ async fn sync_btc_blocks(signer: &mut Signer) {
             previous_block_hash: header.prev_blockhash.to_string(),
             merkle_root: header.merkle_root.to_string(),
             nonce: header.nonce as u64,
-            bits: header.bits.to_consensus().to_string(),
-            ntx: 0u64,
+            bits: format!("{:x}", header.bits.to_consensus()),
             time: header.time as u64,
-        })
+            ntx: 0u64,
+        });
+
+        // send 100 headers in a batch
+        if block_headers.len() == 1 {
+            send_block_headers(signer, &block_headers).await;
+            block_headers = vec![] //reset 
+        }
 
     }
 
-    let submit_block_msg = MsgSubmitBlockHeaderRequest {
-        sender: "sender".to_string(),
-        block_headers
-    };
+    if block_headers.len() > 0 {
+        send_block_headers(signer, &block_headers).await;
+    }
 
-
-    let any_msg = Any::from_msg(&submit_block_msg).unwrap();
-    send_cosmos_transaction(signer.config(), any_msg).await
-
+    lock.loading = false;
 
 }
 
-pub async fn tasks_fetcher(cli: &Cli , behave: &mut SigningBehaviour, signer: &mut Signer) {
+async fn send_block_headers(shuttler: &Shuttler, block_headers: &Vec<BlockHeader>) {
+    let submit_block_msg = MsgSubmitBlockHeaders {
+        sender: shuttler.relayer_address().as_ref().to_string(),
+        block_headers: block_headers.clone()
+    };
+
+    info!("Submitting block headers: {:?}", submit_block_msg);
+    let any_msg = Any::from_msg(&submit_block_msg).unwrap();
+    send_cosmos_transaction(shuttler, any_msg).await
+}
+
+pub async fn tasks_fetcher(cli: &Cli , behave: &mut SigningBehaviour, signer: &mut Shuttler) {
     broadcast_signing_commitments(behave, signer);
     fetch_latest_signing_requests(cli, behave, signer).await;
     sync_btc_blocks(signer).await

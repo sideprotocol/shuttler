@@ -1,55 +1,74 @@
-use bitcoin::Network;
-use bitcoincore_rpc::jsonrpc::base64;
-use cosmrs::crypto::secp256k1;
+use bitcoin::{bip32::DerivationPath, key::Secp256k1, Address, CompressedPublicKey, Network, NetworkKind};
+use bip39::{self, Mnemonic};
 use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, path::PathBuf, sync::Mutex};
 use tracing::{debug, error};
 
-use crate::helper::encoding::from_base64;
+use crate::helper::{cipher::random_bytes, encoding::from_base64};
 
 const CONFIG_FILE: &str = "config.toml";
 
-#[derive(Serialize, Deserialize, Debug)]
+/// Threshold Signature Configuration
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
-    pub network: Network,
-    pub command_server: String,
+    /// Internal command listener
+    pub mock_server: String,
+    /// logger level
     pub log_level: String,
-    pub p2p: P2P,
+    pub mnemonic: String,
+    pub priv_validator_key_path: String,
+
     pub bitcoin: BitcoinCfg,
     pub side_chain: CosmosChain,
     pub keys: BTreeMap<String, String>,
     pub pubkeys: BTreeMap<String, String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+/// Bitcoin Configuration
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BitcoinCfg {
+    /// Bitcoin network type
+    pub network: Network,
+    /// Bitcoin RPC endpoint
     pub rpc: String,
+    /// RPC User
     pub user: String,
+    /// RPC password
     pub password: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+/// Side Chain Configuration
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CosmosChain {
+    /// the cosmos rest endpoint, http://localhost:1317
     pub rest_url: String,
+    /// the cosmos grpc endpoint, http://localhost:9001
     pub grpc: String,
+    /// Transaction gas
     pub gas: usize,
     pub fee: Fee,
-    pub priv_key: String,
-    pub addr_prefix: String,
+    pub address_prefix: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Fee {
     pub amount: usize,
     pub denom: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct P2P {
-    pub local_key: String,
-    pub public_key: String,
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AnyKey {
+    pub r#type: String,
+    pub value: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PrivValidatorKey {
+    pub address: String,
+    pub pub_key: AnyKey,
+    pub priv_key: AnyKey,
 }
 
 lazy_static! {
@@ -125,24 +144,21 @@ impl Config {
     }
 
     pub fn default(port: u16, network: Network) -> Self {
-        let privkey = x25519_dalek::StaticSecret::random_from_rng(&mut rand::thread_rng());
-        let encoded = base64::encode(privkey.to_bytes());
-        let pubkey = hex::encode(x25519_dalek::PublicKey::from(&privkey).to_bytes());
+        let entropy = random_bytes(128);
+        let mnemonic = bip39::Mnemonic::from_entropy(entropy.as_slice()).expect("failed to create mnemonic");
 
         Self {
-            network,
-            command_server: format!("localhost:{}", port),
+            mock_server: format!("localhost:{}", port),
             log_level: "debug".to_string(),
+            mnemonic: mnemonic.to_string(),
+            priv_validator_key_path: "priv_validator_key.json".to_string(),
             keys: BTreeMap::new(),
             pubkeys: BTreeMap::new(),
-            p2p: P2P {
-                local_key: encoded.clone(),
-                public_key: pubkey,
-            },
             bitcoin: BitcoinCfg {
-                rpc: "tcp://localhost:8332".to_string(),
-                user: "".to_string(),
-                password: "".to_string(),
+                network,
+                rpc: "http://signet:38332".to_string(),
+                user: "side".to_string(),
+                password: "12345678".to_string(),
             },
             side_chain: CosmosChain {
                 rest_url: "http://localhost:1317".to_string(), 
@@ -152,8 +168,7 @@ impl Config {
                     amount: 1000,
                     denom: "uside".to_string(),
                 },
-                priv_key: encoded,
-                addr_prefix: "side".to_string(),
+                address_prefix: "side".to_string(),
             }
         }
     }
@@ -173,12 +188,37 @@ impl Config {
     }
 
     pub fn signer_address(&self) -> String {
-        let key_bytes = from_base64(&self.side_chain.priv_key).unwrap();
-        let sender_private_key = secp256k1::SigningKey::from_slice(&key_bytes).unwrap();
-        let sender_public_key = sender_private_key.public_key();
-        let sender_account_id = sender_public_key.account_id(&self.side_chain.addr_prefix).unwrap();
-        sender_account_id.to_string()
+        let mnemonic = Mnemonic::parse(self.mnemonic.as_str()).expect("Mnemonic is invalid!");
+
+        let master = bitcoin::bip32::Xpriv::new_master(NetworkKind::Main, &mnemonic.to_seed("")).expect("invalid seed");
+
+        let secp = Secp256k1::new();
+        let path = DerivationPath::master();
+        let sk = master.derive_priv(&secp, &path).expect("failed to derive pk");
+
+        let pubkey = CompressedPublicKey::from_private_key(&secp, &sk.to_priv()).unwrap();
+        Address::p2wpkh(&pubkey, self.bitcoin.network).to_string()
+        // let sender_private_key = secp256k1::SigningKey::from_slice().unwrap();
+        // let sender_public_key = sender_private_key.public_key();
+        // let sender_account_id = sender_public_key.account_id(&self.side_chain.addr_prefix).unwrap();
+        // sender_account_id.to_string()
     }
+}
+
+pub fn compute_relayer_address(mnemonic: &str, network: Network) -> Address {
+    // let entropy = from_base64(&validator_priv_key).unwrap();
+    // let mnemonic = bip39::Mnemonic::from_entropy(entropy.as_slice()).unwrap();
+    let mnemonic = Mnemonic::parse(mnemonic).expect("Mnemonic is invalid!");
+
+    // derive the master key
+    let master = bitcoin::bip32::Xpriv::new_master(NetworkKind::Main, &mnemonic.to_seed("")).expect("invalid seed");
+
+    let secp = Secp256k1::new();
+    let path = DerivationPath::master();
+    let sk = master.derive_priv(&secp, &path).expect("failed to derive pk");
+
+    let pubkey = CompressedPublicKey::from_private_key(&secp, &sk.to_priv()).unwrap();
+    Address::p2wpkh(&pubkey, network)
 }
 
 pub fn home_dir(app_home: &str) -> PathBuf {

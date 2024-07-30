@@ -1,8 +1,16 @@
-use cosmos_sdk_proto::cosmos::{self, auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest}, base::tendermint::v1beta1::{service_client::ServiceClient as TendermintServiceClient, GetLatestBlockRequest}, tx::v1beta1::{BroadcastMode, BroadcastTxRequest}};
+use cosmos_sdk_proto::cosmos::{
+    self, 
+    auth::v1beta1::{
+        query_client::QueryClient as AuthQueryClient, 
+        BaseAccount, QueryAccountRequest
+    }, 
+    base::tendermint::v1beta1::{service_client::ServiceClient as TendermintServiceClient, GetLatestBlockRequest}, 
+    tx::v1beta1::{BroadcastMode, BroadcastTxRequest},
+};
+use cosmos_sdk_proto::side::btcbridge::query_client::QueryClient as BtcQueryClient;
 use cosmrs::{
     crypto::secp256k1, tx::{self, Fee, SignDoc, SignerInfo, Tx}, AccountId, Any, Coin
 };
-use crate::proto::btcbridge::v1beta1::{query_client::QueryClient as BtcQueryClient, QuerySigningRequestRequest};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -14,6 +22,9 @@ struct TestMsg {
 
 #[tokio::test]
 async fn test_grpc_query() {
+
+    let btcClient = BtcQueryClient::connect("").await.unwrap();
+    // btcClient.q
     
     let mut client = AuthQueryClient::connect("http://localhost:9090").await.unwrap();
     let resp = client.account(QueryAccountRequest {
@@ -31,24 +42,24 @@ async fn test_grpc_query() {
     let chain_id: String = resp_b.into_inner().block.unwrap().header.unwrap().chain_id.parse().unwrap();
     println!("Chain ID: {:?}", chain_id);
 
-    let mut btc_client = BtcQueryClient::connect("http://localhost:9090").await.unwrap();
-    let resp_c = btc_client.query_signing_request(QuerySigningRequestRequest {
-        pagination: None,
-        status: 2
-    }).await.unwrap();
+    // let mut btc_client = BtcQueryClient::connect("http://localhost:9090").await.unwrap();
+    // let resp_c = btc_client.query_signing_request(QuerySigningRequestRequest {
+    //     pagination: None,
+    //     status: 2
+    // }).await.unwrap();
 
     // println!("Signing Request: {:?}", resp_c.into_inner().requests.len()  );
 
-    resp_c.into_inner().requests.iter().for_each(|x| {
-        println!("Request: {:?}", x);
-    });
+    // resp_c.into_inner().requests.iter().for_each(|x| {
+    //     println!("Request: {:?}", x);
+    // });
 
-    let mut tx_client = cosmos::tx::v1beta1::service_client::ServiceClient::connect("http://localhost:9090").await.unwrap();
-    let resp = tx_client.broadcast_tx(BroadcastTxRequest {
-        tx_bytes: vec![],
-        mode: BroadcastMode::Sync.into(),
+    // let mut tx_client = cosmos::tx::v1beta1::service_client::ServiceClient::connect("http://localhost:9090").await.unwrap();
+    // let resp = tx_client.broadcast_tx(BroadcastTxRequest {
+    //     tx_bytes: vec![],
+    //     mode: BroadcastMode::Sync.into(),
     
-    }).await.unwrap();
+    // }).await.unwrap();
 
 
     

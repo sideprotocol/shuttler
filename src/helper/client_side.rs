@@ -1,16 +1,15 @@
 
-use cosmrs::{crypto::secp256k1, tx::{self, Fee, SignDoc, SignerInfo}, Any, Coin};
+use cosmrs::{ tx::{self, Fee, SignDoc, SignerInfo}, Coin};
 use cosmos_sdk_proto::cosmos::{
-    auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest}, 
-    base::tendermint::v1beta1::GetLatestBlockRequest, tx::v1beta1::{BroadcastMode, BroadcastTxRequest},
-    tx::v1beta1::service_client::ServiceClient as TxServiceClient
+    base::{self, tendermint::v1beta1::GetLatestBlockRequest}, tx::v1beta1::{service_client::ServiceClient as TxServiceClient, BroadcastMode, BroadcastTxRequest}
 };
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_client::ServiceClient as TendermintServiceClient;
 use reqwest::Error;
 use tonic::{Response, Status};
-use crate::proto::btcbridge::v1beta1::{query_client::QueryClient as BtcQueryClient, QueryChainTipRequest, QueryChainTipResponse, QuerySigningRequestRequest, QuerySigningRequestResponse, SigningStatus};
-use crate::app::config::Config;
-use super::encoding::from_base64;
+use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, QueryChainTipRequest, QueryChainTipResponse, QueryWithdrawRequestsRequest, QueryWithdrawRequestsResponse};
+use crate::app::signer::Shuttler;
+
+use prost_types::Any;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Pagination {
@@ -47,19 +46,19 @@ pub async fn get_bitcoin_tip_on_side(host: &str ) -> Result<Response<QueryChainT
     btc_client.query_chain_tip(QueryChainTipRequest {}).await
 }
 
-pub async fn get_signing_requests(host: &str ) -> Result<Response<QuerySigningRequestResponse>, Status> {
+pub async fn get_signing_requests(host: &str ) -> Result<Response<QueryWithdrawRequestsResponse>, Status> {
     let mut btc_client = BtcQueryClient::connect(host.to_string()).await.unwrap();
-    btc_client.query_signing_request(QuerySigningRequestRequest {
+    btc_client.query_withdraw_requests(QueryWithdrawRequestsRequest {
         pagination: None,
-        status: SigningStatus::Created as i32
+        status: 0i32
     }).await
 }
 
-pub async fn get_signing_request_by_txid(host: &str, _txid: String) -> Result<Response<QuerySigningRequestResponse>, Status> {
+pub async fn get_signing_request_by_txid(host: &str, _txid: String) -> Result<Response<QueryWithdrawRequestsResponse>, Status> {
     let mut btc_client = BtcQueryClient::connect(host.to_string()).await.unwrap();
-    btc_client.query_signing_request(QuerySigningRequestRequest {
+    btc_client.query_withdraw_requests(QueryWithdrawRequestsRequest {
         pagination: None,
-        status: SigningStatus::Created as i32
+        status: 0
     }).await
 }
 
@@ -77,8 +76,8 @@ pub async fn mock_signing_requests() -> Result<SigningRequestsResponse, Error> {
     })
 }
 
-pub async fn send_cosmos_transaction(conf: &Config, msg : Any) {
-    // let url = format!("{}/txs", conf.side_chain.);
+pub async fn send_cosmos_transaction(shuttler: &Shuttler, msg : Any) {
+    let conf = shuttler.config();
 
     if conf.side_chain.grpc.is_empty() {
         tracing::error!("GRPC URL is empty, skip sending");
@@ -87,23 +86,14 @@ pub async fn send_cosmos_transaction(conf: &Config, msg : Any) {
 
     // Generate sender private key.
     // In real world usage, this account would need to be funded before use.
-    let key_bytes = from_base64(&conf.side_chain.priv_key).unwrap();
-    let sender_private_key = secp256k1::SigningKey::from_slice(&key_bytes).unwrap();
-    let sender_public_key = sender_private_key.public_key();
-    let sender_account_id = sender_public_key.account_id(&conf.side_chain.addr_prefix).unwrap();
+    let sender_private_key = shuttler.relayer_key();
+    // let sender_account_id = shuttler.relayer_address();
 
     ///////////////////////////
     // Building transactions //
     ///////////////////////////
 
-    let mut client = AuthQueryClient::connect(conf.side_chain.grpc.to_string()).await.unwrap();
-    let resp = client.account(QueryAccountRequest {
-        address: sender_account_id.as_ref().to_string(),
-    }).await.unwrap();
-
-    // let acc_resp = resp.into_inner().account.unwrap();
-    // acc_resp.account.unwrap().
-    let base_account: BaseAccount = resp.into_inner().account.unwrap().to_msg().unwrap();
+    let base_account = shuttler.get_relayer_account().await;
     
 
     let mut base_client = TendermintServiceClient::connect(conf.side_chain.grpc.to_string()).await.unwrap();
@@ -127,10 +117,10 @@ pub async fn send_cosmos_transaction(conf: &Config, msg : Any) {
 
     // Create signer info from public key and sequence number.
     // This uses a standard "direct" signature from a single signer.
-    let signer_info = SignerInfo::single_direct(Some(sender_public_key), sequence_number);
+    let signer_info = SignerInfo::single_direct(Some(sender_private_key.public_key()), sequence_number);
 
     // Compute auth info from signer info by associating a fee.
-    let auth_info = signer_info.auth_info(Fee::from_amount_and_gas(fees, gas as u16));
+    let auth_info = signer_info.auth_info(Fee::from_amount_and_gas(fees, gas as u64));
 
     //////////////////////////
     // Signing transactions //

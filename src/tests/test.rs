@@ -3,26 +3,21 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use bitcoin::absolute::LockTime;
-use bitcoin::base64::alphabet::STANDARD;
 use bitcoin::hashes::Hash;
 use bitcoin::hex::DisplayHex;
 use bitcoin::key::{Keypair, TapTweak, TweakedKeypair, UntweakedPublicKey};
 use bitcoin::locktime::absolute;
 use bitcoin::psbt::Input;
-use bitcoin::secp256k1::schnorr::Signature;
 use bitcoin::secp256k1::{self, ecdsa, schnorr, PublicKey};
 use bitcoin::secp256k1::{Message, Secp256k1, SecretKey, rand};
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::sign_message::MessageSignature;
-use bitcoin::{
- network, transaction, Address, Amount, CompressedPublicKey, Network, OutPoint, Psbt, Script, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, WPubkeyHash, Witness, XOnlyPublicKey
+use bitcoin::{transaction, Address, Amount, Network, OutPoint, Psbt, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness, XOnlyPublicKey
 };
-use clap::Id;
 use frost_core::keys::KeyPackage;
-use frost_core::{Ciphersuite, Field};
+use frost_core:: Field;
 use frost_secp256k1_tr as frost;
 use rand::thread_rng;
-use serde::Deserialize;
 
 use crate::helper::encoding;
 
@@ -373,13 +368,6 @@ fn test_indentifier() {
     let zero1 = frost::Secp256K1ScalarField::deserialize(&zero).unwrap();
     println!("zero1: {:?}", zero1);
 
-    let privkey = x25519_dalek::StaticSecret::from(zero);
-    println!("privkey: {:?}", hex::encode(privkey.as_bytes()));
-    
-    let pubkey = x25519_dalek::PublicKey::from(&privkey);
-
-    println!("pubkey: {:?}", hex::encode(pubkey.to_bytes()));
-    println!("bytes: {:?}", pubkey.as_bytes());
 
     // let ident = frost::Identifier::new(frost::Secp256K1ScalarField::deserialize(&pubkey.as_bytes()).unwrap()).unwrap();
     // println!("{:?}", ident);
