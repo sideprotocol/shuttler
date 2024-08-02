@@ -34,8 +34,10 @@ pub struct Shuttler {
     config: Config,
     identity_key: SecretKey,
     identifier: Identifier,
+    validator_address: Vec<u8>,
     relayer_key: SigningKey,
     relayer_address: AccountId,
+
     pub bitcoin_client: Client,
 }
 
@@ -70,6 +72,7 @@ impl Shuttler {
         Self {
             identity_key: local_key,
             identifier,
+            validator_address: hex::decode(validator_key.address).unwrap(),
             bitcoin_client,
             relayer_key, 
             relayer_address,
@@ -602,6 +605,10 @@ impl Shuttler {
 
     pub fn relayer_address(&self) -> &AccountId {
         &self.relayer_address
+    }
+
+    pub fn validator_address(&self) -> &[u8] {
+        &self.validator_address
     }
 
     pub async fn get_relayer_account(&self) -> BaseAccount {

@@ -144,7 +144,7 @@ impl Config {
     }
 
     pub fn default(port: u16, network: Network) -> Self {
-        let entropy = random_bytes(128);
+        let entropy = random_bytes(32);
         let mnemonic = bip39::Mnemonic::from_entropy(entropy.as_slice()).expect("failed to create mnemonic");
 
         Self {

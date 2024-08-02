@@ -1,10 +1,13 @@
 use bitcoincore_zmq::subscribe_async;
+use chrono::{Timelike, Utc};
 use futures::StreamExt;
 use libp2p::gossipsub::Message;
 
 use libp2p::identity::Keypair;
 use libp2p::swarm::SwarmEvent;
 use libp2p::{gossipsub, mdns, noise, tcp, yamux};
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use tokio::io::AsyncReadExt as _;
 use tokio::time::Instant;
 
@@ -100,6 +103,10 @@ pub async fn execute(cli: &Cli) {
     let start = Instant::now() + (Duration::from_secs(d) - Duration::from_secs(now() % d));
     let mut interval = tokio::time::interval_at(start, Duration::from_secs(d));
 
+
+    let seed = Utc::now().minute() as u64;
+    let mut rng = ChaCha8Rng::seed_from_u64(seed );
+
     loop {
         select! {
             swarm_event = swarm.select_next_some() => match swarm_event {
@@ -128,7 +135,7 @@ pub async fn execute(cli: &Cli) {
             },
 
             _ = interval.tick() => {
-                tasks_fetcher(cli, swarm.behaviour_mut(), &mut shuttler).await;
+                tasks_fetcher(cli, swarm.behaviour_mut(), &mut shuttler, &mut rng).await;
             },
 
             socket = listener.accept() => match socket {

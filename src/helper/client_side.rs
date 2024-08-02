@@ -1,7 +1,8 @@
 
 use cosmrs::{ tx::{self, Fee, SignDoc, SignerInfo}, Coin};
 use cosmos_sdk_proto::cosmos::{
-    base::{self, tendermint::v1beta1::GetLatestBlockRequest}, tx::v1beta1::{service_client::ServiceClient as TxServiceClient, BroadcastMode, BroadcastTxRequest}
+    base::tendermint::v1beta1::GetLatestBlockRequest, 
+    tx::v1beta1::{service_client::ServiceClient as TxServiceClient, BroadcastMode, BroadcastTxRequest, BroadcastTxResponse}
 };
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_client::ServiceClient as TendermintServiceClient;
 use reqwest::Error;
@@ -76,12 +77,11 @@ pub async fn mock_signing_requests() -> Result<SigningRequestsResponse, Error> {
     })
 }
 
-pub async fn send_cosmos_transaction(shuttler: &Shuttler, msg : Any) {
+pub async fn send_cosmos_transaction(shuttler: &Shuttler, msg : Any) -> Result<Response<BroadcastTxResponse>, Status> {
     let conf = shuttler.config();
 
     if conf.side_chain.grpc.is_empty() {
-        tracing::error!("GRPC URL is empty, skip sending");
-        return;
+        return Err(Status::cancelled("GRPC URL is empty"));
     }
 
     // Generate sender private key.
@@ -104,13 +104,9 @@ pub async fn send_cosmos_transaction(shuttler: &Shuttler, msg : Any) {
     let account_number = base_account.account_number;
     let sequence_number = base_account.sequence;
     let gas = conf.side_chain.gas;
+    let fee = Coin::new(conf.side_chain.fee.amount as u128, conf.side_chain.fee.denom.as_str()).unwrap();
     let timeout_height = 0u16;
     let memo = "tss_signer";
-
-    let fees = Coin {
-        amount: 2_000u128,
-        denom: "uside".parse().unwrap(),
-    };
 
     // Create transaction body from the MsgSend, memo, and timeout height.
     let tx_body = tx::Body::new(vec![msg], memo, timeout_height);
@@ -120,7 +116,7 @@ pub async fn send_cosmos_transaction(shuttler: &Shuttler, msg : Any) {
     let signer_info = SignerInfo::single_direct(Some(sender_private_key.public_key()), sequence_number);
 
     // Compute auth info from signer info by associating a fee.
-    let auth_info = signer_info.auth_info(Fee::from_amount_and_gas(fees, gas as u64));
+    let auth_info = signer_info.auth_info(Fee::from_amount_and_gas(fee, gas as u64));
 
     //////////////////////////
     // Signing transactions //
@@ -136,17 +132,10 @@ pub async fn send_cosmos_transaction(shuttler: &Shuttler, msg : Any) {
     let tx_bytes = tx_signed.to_bytes().unwrap();
 
     let mut tx_client = TxServiceClient::connect(conf.side_chain.grpc.to_string()).await.unwrap();
-    match tx_client.broadcast_tx(BroadcastTxRequest {
+    tx_client.broadcast_tx(BroadcastTxRequest {
         tx_bytes,
         mode: BroadcastMode::Sync.into(),    
-    }).await {
-        Ok(resp) => {
-            tracing::info!("Transaction sent: {:?}", resp.into_inner());
-        },
-        Err(error) => {
-            tracing::error!("Failed to send transaction: {:?}", error);
-        }    
-    };
+    }).await 
     
    // post::<>(url.as_str(), tx).await
 }
