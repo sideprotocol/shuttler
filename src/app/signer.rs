@@ -2,14 +2,15 @@
 use std::{collections::BTreeMap, fs, str::FromStr, sync::Mutex};
 
 use bip39::Mnemonic;
-use bitcoin::{key::{TapTweak as _, UntweakedPublicKey}, secp256k1, sighash::{self, SighashCache}, Address, Psbt, PublicKey, TxOut, Witness};
+use bitcoin::{hex::{Case, DisplayHex}, key::{TapTweak as _, UntweakedPublicKey}, secp256k1, sighash::{self, SighashCache}, Address, Psbt, PublicKey, TxOut, Witness};
 use bitcoin_hashes::Hash;
 use bitcoincore_rpc::{Client, Auth};
-use cosmrs::{crypto::secp256k1::SigningKey, AccountId};
+use cosmrs::{crypto::secp256k1::SigningKey, AccountId, Any};
 use frost_core::Field;
+use futures::executor::block_on;
 use libp2p::gossipsub::Message;
-use cosmos_sdk_proto::cosmos::auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest};
-use crate::{app::config::{self, Config, PrivValidatorKey}, helper::{messages::now, pbst::get_group_address}};
+use cosmos_sdk_proto::{cosmos::auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest}, side::btcbridge::MsgCompleteDkg};
+use crate::{app::config::{self, Config, PrivValidatorKey}, helper::{client_side::send_cosmos_transaction, messages::now, pbst::get_group_address}};
 use crate::helper::{
     cipher::{decrypt, encrypt}, encoding::{self, from_base64}, messages::{DKGRoundMessage, SignMessage, SigningBehaviour, SigningSteps, Task}, store
 };
@@ -234,7 +235,7 @@ impl Shuttler {
                         .expect("msg not deserialized");
 
                         // clean caches
-                        store::clear_dkg_variables(&round2_package.task_id);
+                        // store::clear_dkg_variables(&round2_package.task_id);
 
                         let address = get_group_address(pubkey.verifying_key(), self.config.bitcoin.network);
                         info!(
@@ -256,6 +257,31 @@ impl Shuttler {
                             .pubkeys
                             .insert(address.to_string(), encoding::to_base64(&pubkey_bytes));
                         self.config.save().expect("Failed to save generated keys");
+
+                        // submit the vault address to sidechain
+                        let cosm_msg = MsgCompleteDkg {
+                            id: round2_package.task_id.parse().unwrap(),
+                            sender: self.relayer_address.to_string(),
+                            vaults: vec![address.to_string()],
+                            validator: self.validator_address.to_hex_string(Case::Upper),
+                            signature: "".to_string(),
+                        };
+
+                        let any = Any::from_msg(&cosm_msg).unwrap();
+                        match block_on(send_cosmos_transaction(self, any)) {
+                            Ok(resp) => {
+                                let tx_response = resp.into_inner().tx_response.unwrap();
+                                if tx_response.code != 0 {
+                                    error!("Failed to send dkg vault: {:?}", tx_response);
+                                    return
+                                }
+                                info!("Sent dkg vault: {:?}", tx_response);
+                            },
+                            Err(e) => {
+                                error!("Failed to send dkg vault: {:?}", e);
+                                return
+                            },
+                        };
 
                     }
                     None => {
