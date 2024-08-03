@@ -81,6 +81,11 @@ impl Shuttler {
     }
 
     pub fn dkg_init(&mut self, behave: &mut SigningBehaviour, task: &Task) {
+
+        if store::has_dkg_preceeded(&task.id) {
+            return
+        }
+
         let mut rng = thread_rng();
         let (round1_secret_package, round1_package) = frost::keys::dkg::part1(
             self.identifier.clone(),

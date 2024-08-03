@@ -70,6 +70,11 @@ pub fn set_dkg_round2_secret_packet(task_id: &str, secret_packet: dkg::round2::S
     map.insert(task_id.to_string(), secret_packet);
 }
 
+pub fn has_dkg_preceeded(req_id: &str) -> bool {
+    let map = DkgRound1Packets.lock().unwrap();
+    map.contains_key(req_id)
+}
+
 pub fn get_dkg_round1_packets(task_id: &str) -> Option<BTreeMap<Identifier, dkg::round1::Package>> {
     let map = DkgRound1Packets.lock().unwrap();
     map.get(task_id).cloned()
