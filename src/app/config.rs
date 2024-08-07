@@ -24,6 +24,9 @@ pub struct Config {
     pub side_chain: CosmosChain,
     pub keys: BTreeMap<String, String>,
     pub pubkeys: BTreeMap<String, String>,
+
+    pub tweaks: BTreeMap<String, String>,
+    pub default_tweak: String,
 }
 
 /// Bitcoin Configuration
@@ -75,6 +78,7 @@ lazy_static! {
     static ref APPLICATION_PATH: Mutex<String> = Mutex::new(String::from(".tssigner"));
     static ref KEYS : Mutex<BTreeMap<String, KeyPackage>> = Mutex::new(BTreeMap::new());
     static ref PUBKEYS : Mutex<BTreeMap<String, PublicKeyPackage>> = Mutex::new(BTreeMap::new());
+    static ref TWEAKS : Mutex<BTreeMap<String, Vec<u8>>> = Mutex::new(BTreeMap::new());
 }
 
 pub fn update_app_home(app_home: &str) {
@@ -99,6 +103,17 @@ pub fn add_pub_key(address: &str, key: PublicKeyPackage) {
 
 pub fn get_pub_key_by_index(index: usize) -> Option<PublicKeyPackage> {
     PUBKEYS.lock().unwrap().values().nth(index).cloned()
+}
+
+pub fn add_tweak(address: &str, tweak: Vec<u8> ) {
+    TWEAKS.lock().unwrap().insert(address.to_string(), tweak);
+}
+
+pub fn get_tweak(address: &str) -> Option<Vec<u8>> {
+    match TWEAKS.lock().unwrap().get(address).cloned() {
+        Some(tweak) => Some(tweak),
+        None => Some(get_empty_tweak()),
+    }
 }
 
 impl Config {
@@ -140,6 +155,11 @@ impl Config {
             PUBKEYS.lock().unwrap().insert(k.clone(), pkp);
         });
 
+        config.tweaks.iter().for_each(|(k, v)| {
+            let b = v.as_bytes().to_vec();
+            TWEAKS.lock().unwrap().insert(k.clone(), b);
+        });
+
         Ok(config)
     }
 
@@ -169,7 +189,9 @@ impl Config {
                     denom: "uside".to_string(),
                 },
                 address_prefix: "side".to_string(),
-            }
+            },
+            tweaks: BTreeMap::new(),
+            default_tweak: "runes".to_string(),
         }
     }
 
@@ -203,6 +225,10 @@ impl Config {
         // let sender_account_id = sender_public_key.account_id(&self.side_chain.addr_prefix).unwrap();
         // sender_account_id.to_string()
     }
+
+    pub fn get_default_tweak(&self) -> Vec<u8> {
+        self.default_tweak.as_bytes().to_vec()
+    }
 }
 
 pub fn compute_relayer_address(mnemonic: &str, network: Network) -> Address {
@@ -219,6 +245,10 @@ pub fn compute_relayer_address(mnemonic: &str, network: Network) -> Address {
 
     let pubkey = CompressedPublicKey::from_private_key(&secp, &sk.to_priv()).unwrap();
     Address::p2wpkh(&pubkey, network)
+}
+
+pub fn get_empty_tweak() -> Vec<u8> {
+    "".as_bytes().to_vec()
 }
 
 pub fn home_dir(app_home: &str) -> PathBuf {

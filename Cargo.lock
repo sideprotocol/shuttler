@@ -1641,8 +1641,8 @@ dependencies = [
 
 [[package]]
 name = "frost-core"
-version = "1.0.0-rc.0"
-source = "git+https://github.com/liangping/frost.git?branch=frost-secp256k1-tr#17c38869bd6027f1da727587cf68b0824e9de97d"
+version = "1.0.0"
+source = "git+https://github.com/keithsue/frost.git?branch=sufay/make-new-pub#af50a377a61d52da51e3a9f76254a0c6e3d64b87"
 dependencies = [
  "byteorder",
  "const-crc32",
@@ -1662,8 +1662,8 @@ dependencies = [
 
 [[package]]
 name = "frost-rerandomized"
-version = "1.0.0-rc.0"
-source = "git+https://github.com/liangping/frost.git?branch=frost-secp256k1-tr#17c38869bd6027f1da727587cf68b0824e9de97d"
+version = "1.0.0"
+source = "git+https://github.com/keithsue/frost.git?branch=sufay/make-new-pub#af50a377a61d52da51e3a9f76254a0c6e3d64b87"
 dependencies = [
  "derive-getters",
  "document-features",
@@ -1673,14 +1673,15 @@ dependencies = [
 
 [[package]]
 name = "frost-secp256k1-tr"
-version = "1.0.0-rc.0"
-source = "git+https://github.com/liangping/frost.git?branch=frost-secp256k1-tr#17c38869bd6027f1da727587cf68b0824e9de97d"
+version = "1.0.0"
+source = "git+https://github.com/keithsue/frost.git?branch=sufay/make-new-pub#af50a377a61d52da51e3a9f76254a0c6e3d64b87"
 dependencies = [
  "document-features",
  "frost-core",
  "frost-rerandomized",
  "k256",
  "rand_core",
+ "serde",
  "sha2 0.10.8",
 ]
 

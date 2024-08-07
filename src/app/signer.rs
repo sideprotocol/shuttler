@@ -6,16 +6,16 @@ use bitcoin::{hex::{Case, DisplayHex}, key::{TapTweak as _, UntweakedPublicKey},
 use bitcoin_hashes::Hash;
 use bitcoincore_rpc::{Client, Auth};
 use cosmrs::{crypto::secp256k1::SigningKey, AccountId, Any};
-use frost_core::Field;
+use frost_core::{keys::{PublicKeyPackage, KeyPackage}, Field};
 use futures::executor::block_on;
 use libp2p::gossipsub::Message;
 use cosmos_sdk_proto::{cosmos::auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest}, side::btcbridge::MsgCompleteDkg};
-use crate::{app::config::{self, Config, PrivValidatorKey}, helper::{client_side::send_cosmos_transaction, messages::now, pbst::get_group_address}};
+use crate::{app::config::{self, Config, PrivValidatorKey}, helper::{client_side::send_cosmos_transaction, messages::now, pbst::{get_group_address, get_group_address_by_tweak}}};
 use crate::helper::{
     cipher::{decrypt, encrypt}, encoding::{self, from_base64}, messages::{DKGRoundMessage, SignMessage, SigningBehaviour, SigningSteps, Task}, store
 };
 use frost::Identifier; 
-use frost_secp256k1_tr as frost;
+use frost_secp256k1_tr::{self as frost, Secp256K1Sha256};
 
 use ::bitcoin::secp256k1::schnorr::Signature as SchnorrSignature;
 
@@ -246,10 +246,10 @@ impl Shuttler {
 
                         let privkey_bytes = key.serialize().expect("key not serialized");
                         let pubkey_bytes = pubkey.serialize().expect("pubkey not serialized");
-                        
-                        config::add_sign_key(&address.to_string(), key);
-                        config::add_pub_key(&address.to_string(), pubkey);
 
+                        config::add_sign_key(&address.to_string(), key.clone());
+                        config::add_pub_key(&address.to_string(), pubkey.clone());
+                        
                         self.config
                             .keys
                             .insert(address.to_string(), encoding::to_base64(&privkey_bytes));
@@ -258,14 +258,18 @@ impl Shuttler {
                             .insert(address.to_string(), encoding::to_base64(&pubkey_bytes));
                         self.config.save().expect("Failed to save generated keys");
 
+                        let address_with_tweak = self.add_address_with_tweak(pubkey, key, self.config.get_default_tweak());
+
                         // submit the vault address to sidechain
-                        let cosm_msg = MsgCompleteDkg {
+                        let mut cosm_msg = MsgCompleteDkg {
                             id: round2_package.task_id.parse().unwrap(),
                             sender: self.relayer_address.to_string(),
-                            vaults: vec![address.to_string()],
+                            vaults: vec![address.to_string(),address_with_tweak.to_string()],
                             validator: self.validator_address.to_hex_string(Case::Upper),
                             signature: "".to_string(),
                         };
+
+                        cosm_msg.signature = self.get_complete_dkg_signature(cosm_msg.id, &cosm_msg.vaults);
 
                         let any = Any::from_msg(&cosm_msg).unwrap();
                         match block_on(send_cosmos_transaction(self, any)) {
@@ -449,9 +453,13 @@ impl Shuttler {
                     // the following code will be executed or re-executed
                     let signing_package = frost::SigningPackage::new(
                         commitments.clone(), 
-                        &signing_variables.sighash
-                    );
-        
+                        frost::SigningTarget::new(
+                            &signing_variables.sighash, 
+                            frost::SigningParameters{
+                                tapscript_merkle_root: config::get_tweak(&sign_message.address)
+                            }
+                        ));
+
                     store::set_sign_package(&sign_message.task_id, signing_package.clone());
         
                     // if store::has_sign_shares(&sign_message.task_id) {
@@ -671,6 +679,34 @@ impl Shuttler {
                 }
             }
         }
+    }
+
+    pub fn add_address_with_tweak(&mut self, pubkey: PublicKeyPackage<Secp256K1Sha256>, key: KeyPackage<Secp256K1Sha256>, tweak: Vec<u8>) -> Address {
+        let address_with_tweak = get_group_address_by_tweak(&pubkey.verifying_key(), tweak.clone(), self.config.bitcoin.network);
+
+        let privkey_bytes = key.serialize().expect("key not serialized");
+        let pubkey_bytes = pubkey.serialize().expect("pubkey not serialized");
+
+        config::add_sign_key(&address_with_tweak.to_string(),key);
+        config::add_pub_key(&address_with_tweak.to_string(), pubkey);
+        config::add_tweak(&address_with_tweak.to_string(), tweak.clone());
+
+        self.config.keys.insert(address_with_tweak.to_string(), encoding::to_base64(&privkey_bytes));
+        self.config.pubkeys.insert(address_with_tweak.to_string(), encoding::to_base64(&pubkey_bytes));
+        self.config.tweaks.insert(address_with_tweak.to_string(), String::from_utf8(tweak).expect("invalid tweak"));
+        self.config.save().expect("Failed to save generated keys");
+
+        address_with_tweak
+    }
+
+    pub fn get_complete_dkg_signature(&self, id: u64, vaults: &[String]) -> String {
+        let mut sig_msg = id.to_be_bytes().to_vec();
+
+        for v in vaults {
+            sig_msg.extend(v.as_bytes())
+        }
+
+        self.identity_key.sign(sig_msg, None).to_hex_string(Case::Lower)
     }
 }
 
