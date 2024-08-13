@@ -152,7 +152,7 @@ impl Shuttler {
 
                         for (receiver_identifier, round2_package) in round2_packages {
                             let bz = receiver_identifier.serialize();
-                            let target = x25519::PublicKey::from_slice(bz.as_slice()).unwrap();
+                            let target = x25519::PublicKey::from_ed25519(&ed25519_compact::PublicKey::from_slice(bz.as_slice()).unwrap()).unwrap();
 
                             let share_key = target.dh(&x25519::SecretKey::from_ed25519(&self.identity_key).unwrap()).unwrap();
 
@@ -196,7 +196,7 @@ impl Shuttler {
         }
 
         let bz = round2_package.from_party_id.serialize();
-        let source = x25519::PublicKey::from_slice(bz.as_slice()).unwrap();
+        let source= x25519::PublicKey::from_ed25519(&ed25519_compact::PublicKey::from_slice(bz.as_slice()).unwrap()).unwrap();
 
         let share_key = source.dh(&x25519::SecretKey::from_ed25519(&self.identity_key).unwrap()).unwrap();
 
