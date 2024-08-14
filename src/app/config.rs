@@ -27,6 +27,8 @@ pub struct Config {
 
     pub tweaks: BTreeMap<String, String>,
     pub default_tweak: String,
+
+    pub last_scanned_height: u64,
 }
 
 /// Bitcoin Configuration
@@ -103,6 +105,10 @@ pub fn add_pub_key(address: &str, key: PublicKeyPackage) {
 
 pub fn get_pub_key_by_index(index: usize) -> Option<PublicKeyPackage> {
     PUBKEYS.lock().unwrap().values().nth(index).cloned()
+}
+
+pub fn address_exists(address: &str) -> bool {
+    PUBKEYS.lock().unwrap().contains_key(address)
 }
 
 pub fn add_tweak(address: &str, tweak: Vec<u8> ) {
@@ -192,6 +198,7 @@ impl Config {
             },
             tweaks: BTreeMap::new(),
             default_tweak: "runes".to_string(),
+            last_scanned_height: 0,
         }
     }
 
@@ -224,6 +231,11 @@ impl Config {
         // let sender_public_key = sender_private_key.public_key();
         // let sender_account_id = sender_public_key.account_id(&self.side_chain.addr_prefix).unwrap();
         // sender_account_id.to_string()
+    }
+
+    pub fn save_last_scanned_height(&mut self, height: u64) {
+        self.last_scanned_height = height;
+        self.save();
     }
 
     pub fn get_default_tweak(&self) -> Vec<u8> {
