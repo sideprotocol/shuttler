@@ -1,6 +1,4 @@
-use std::ops::Add;
-
-use bitcoin::{key::Secp256k1, Address, Network, PublicKey, ScriptBuf, TapNodeHash, Transaction, Txid, XOnlyPublicKey};
+use bitcoin::{key::Secp256k1, Address, Network, PublicKey, TapNodeHash, XOnlyPublicKey};
 use frost_secp256k1_tr::VerifyingKey;
 
 pub fn get_group_address(verify_key: &VerifyingKey, network: Network) -> Address {
@@ -26,15 +24,4 @@ pub fn get_group_address_by_tweak(
     let merkle_root = TapNodeHash::assume_hidden(hash);
 
     Address::p2tr(&secp, internal_key, Some(merkle_root), network)
-}
-
-pub fn get_address_from_pk_script(pk_script: ScriptBuf, network: Network) -> String {
-    match Address::from_script(&pk_script, network) {
-        Ok(address) => address.to_string(),
-        _ => String::new()
-    }
-}
-
-pub fn calculate_merkle_proof(txs: &Vec<Transaction>, tx: &Transaction) -> Vec<String> {
-    Vec::new()
 }
