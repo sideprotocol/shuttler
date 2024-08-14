@@ -2,7 +2,7 @@
 use std::{collections::BTreeMap, fs, str::FromStr, sync::Mutex};
 
 use bip39::Mnemonic;
-use bitcoin::{hex::{Case, DisplayHex}, key::{TapTweak as _, UntweakedPublicKey}, secp256k1, sighash::{self, SighashCache}, Address, Psbt, PublicKey, TxOut, Witness};
+use bitcoin::{key::{TapTweak as _, UntweakedPublicKey}, secp256k1, sighash::{self, SighashCache}, Address, Psbt, PublicKey, TxOut, Witness};
 use bitcoin_hashes::Hash;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use cosmrs::{crypto::secp256k1::SigningKey, AccountId, Any};
@@ -266,7 +266,7 @@ impl Shuttler {
                             id: round2_package.task_id.parse().unwrap(),
                             sender: self.relayer_address.to_string(),
                             vaults: vec![address.to_string(),address_with_tweak.to_string()],
-                            consensus_address: self.validator_address.to_hex_string(Case::Upper),
+                            consensus_address: hex::encode_upper(&self.validator_address),
                             signature: "".to_string(),
                         };
 
@@ -747,7 +747,7 @@ impl Shuttler {
 
         sig_msg = hex::decode(sha256::digest(sig_msg)).unwrap();
 
-        self.identity_key.sign(sig_msg, None).to_hex_string(Case::Lower)
+        hex::encode(self.identity_key.sign(sig_msg, None))
     }
 }
 
