@@ -227,7 +227,10 @@ impl Config {
     }
 
     pub fn get_default_tweak(&self) -> Vec<u8> {
-        self.default_tweak.as_bytes().to_vec()
+        let mut tweak: [u8; 32] = [0u8; 32];
+        tweak[0..self.default_tweak.len()].copy_from_slice(self.default_tweak.as_bytes());
+        
+        tweak.to_vec()
     }
 }
 
