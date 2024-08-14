@@ -4,12 +4,12 @@ use std::{collections::BTreeMap, fs, str::FromStr, sync::Mutex};
 use bip39::Mnemonic;
 use bitcoin::{hex::{Case, DisplayHex}, key::{TapTweak as _, UntweakedPublicKey}, secp256k1, sighash::{self, SighashCache}, Address, Psbt, PublicKey, TxOut, Witness};
 use bitcoin_hashes::Hash;
-use bitcoincore_rpc::{Auth, Client};
+use bitcoincore_rpc::{Auth, Client, RpcApi};
 use cosmrs::{crypto::secp256k1::SigningKey, AccountId, Any};
 use frost_core::{keys::{PublicKeyPackage, KeyPackage}, Field};
 use futures::executor::block_on;
 use libp2p::gossipsub::Message;
-use cosmos_sdk_proto::{cosmos::auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest}, side::btcbridge::MsgCompleteDkg};
+use cosmos_sdk_proto::{cosmos::auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest}, side::btcbridge::{MsgCompleteDkg, MsgSubmitWithdrawSignatures}};
 use crate::{app::config::{self, Config, PrivValidatorKey}, helper::{client_side::send_cosmos_transaction, messages::now, bitcoin::{get_group_address, get_group_address_by_tweak}}};
 use crate::helper::{
     cipher::{decrypt, encrypt}, encoding::{self, from_base64}, messages::{DKGRoundMessage, SignMessage, SigningBehaviour, SigningSteps, Task}, store
@@ -266,7 +266,7 @@ impl Shuttler {
                             id: round2_package.task_id.parse().unwrap(),
                             sender: self.relayer_address.to_string(),
                             vaults: vec![address.to_string(),address_with_tweak.to_string()],
-                            validator: self.validator_address.to_hex_string(Case::Upper),
+                            consensus_address: self.validator_address.to_hex_string(Case::Upper),
                             signature: "".to_string(),
                         };
 
@@ -618,17 +618,43 @@ impl Shuttler {
                                 let psbt_base64 = encoding::to_base64(&psbt_bytes);
                                 info!("Signed PSBT: {:?}", psbt_base64);
 
-                                // let msg = MsgSubmit {
-                                //     sender: self.config().signer_address(),
-                                    //     txid: psbt.unsigned_tx.compute_txid().to_string(),
-                                    //     psbt: psbt_base64,
-                                // };
-                                // let any = Any::from_msg(&msg).unwrap();
-                                // send_cosmos_transaction(self.config(), any ).await;
+                                 // broadcast to bitcoin network
+                                 let signed_tx = psbt.extract_tx().expect("failed to extract signed tx");
+                                 match self.bitcoin_client.send_raw_transaction(&signed_tx) {
+                                     Ok(txid) => {
+                                         info!("Tx broadcasted: {}", txid);
+                                     }
+                                     Err(err) => {
+                                         error! ("Failed to broadcast tx: {:?}, err: {:?}", signed_tx.compute_txid(), err);
+                                         return;
+                                     }
+                                 }
+
+                                 // submit signed psbt to side chain
+                                 let msg = MsgSubmitWithdrawSignatures {
+                                     sender: self.config().signer_address(),
+                                     txid: signed_tx.compute_txid().to_string(),
+                                     psbt: psbt_base64,
+                                 };
+
+                                 let any = Any::from_msg(&msg).unwrap();
+                                 match send_cosmos_transaction(self, any).await {
+                                    Ok(resp) => {
+                                        let tx_response = resp.into_inner().tx_response.unwrap();
+                                        if tx_response.code != 0 {
+                                            error!("Failed to submit signatures: {:?}", tx_response);
+                                            return
+                                        }
+                                        info!("Submitted signatures: {:?}", tx_response);
+                                    },
+                                    Err(e) => {
+                                        error!("Failed to submit signatures: {:?}", e);
+                                        return
+                                    },
+                                };
                             } else {
                                 info!("PSBT is incomplete");
                             }
-
                         }
                         None => {
                             error!("Failed to get group task: {}", &signing_variables.group_task_id);

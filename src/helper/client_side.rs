@@ -7,7 +7,7 @@ use cosmos_sdk_proto::cosmos::{
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_client::ServiceClient as TendermintServiceClient;
 use reqwest::Error;
 use tonic::{Response, Status};
-use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, QueryChainTipRequest, QueryChainTipResponse, QueryWithdrawRequestsRequest, QueryWithdrawRequestsResponse};
+use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, QueryChainTipRequest, QueryChainTipResponse, QueryParamsRequest, QueryParamsResponse, QueryWithdrawRequestsRequest, QueryWithdrawRequestsResponse, QueryWithdrawRequestByTxHashRequest, QueryWithdrawRequestByTxHashResponse};
 use crate::app::signer::Shuttler;
 
 use prost_types::Any;
@@ -18,22 +18,21 @@ pub struct Pagination {
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct SigningRequest {
+pub struct WithdrawRequest {
     pub address: String,
     pub psbt: String,
     pub status: String,
     pub sequence: u32,
-    pub vault_address: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct SigningRequestsResponse {
-    requests: Vec<SigningRequest>,
+pub struct WithdrawRequestsResponse {
+    requests: Vec<WithdrawRequest>,
     pagination: Option<Pagination>,
 }
 
-impl SigningRequestsResponse {
-    pub fn requests(&self) -> &Vec<SigningRequest> {
+impl WithdrawRequestsResponse {
+    pub fn requests(&self) -> &Vec<WithdrawRequest> {
         &self.requests
     }
 
@@ -47,7 +46,7 @@ pub async fn get_bitcoin_tip_on_side(host: &str ) -> Result<Response<QueryChainT
     btc_client.query_chain_tip(QueryChainTipRequest {}).await
 }
 
-pub async fn get_signing_requests(host: &str ) -> Result<Response<QueryWithdrawRequestsResponse>, Status> {
+pub async fn get_withdraw_requests(host: &str ) -> Result<Response<QueryWithdrawRequestsResponse>, Status> {
     let mut btc_client = BtcQueryClient::connect(host.to_string()).await.unwrap();
     btc_client.query_withdraw_requests(QueryWithdrawRequestsRequest {
         pagination: None,
@@ -55,23 +54,21 @@ pub async fn get_signing_requests(host: &str ) -> Result<Response<QueryWithdrawR
     }).await
 }
 
-pub async fn get_signing_request_by_txid(host: &str, _txid: String) -> Result<Response<QueryWithdrawRequestsResponse>, Status> {
+pub async fn get_withdraw_request_by_txid(host: &str, txid: String) -> Result<Response<QueryWithdrawRequestByTxHashResponse>, Status> {
     let mut btc_client = BtcQueryClient::connect(host.to_string()).await.unwrap();
-    btc_client.query_withdraw_requests(QueryWithdrawRequestsRequest {
-        pagination: None,
-        status: 0
+    btc_client.query_withdraw_request_by_tx_hash(QueryWithdrawRequestByTxHashRequest {
+        txid,
     }).await
 }
 
-pub async fn mock_signing_requests() -> Result<SigningRequestsResponse, Error> {
-    Ok(SigningRequestsResponse {
+pub async fn mock_withdraw_requests() -> Result<WithdrawRequestsResponse, Error> {
+    Ok(WithdrawRequestsResponse {
         requests: vec![
-            SigningRequest {
+            WithdrawRequest {
                 address: "bc1q5wgdhplnzn075eq7xep4zes7lnk5jy2ke0scsm".to_string(),
                 psbt: "cHNidP8BAIkCAAAAARuMLk06K1ufndtymk3RaWdbLy21UYs9vUs8D6o8HjtNAAAAAAAAAAAAAkCcAAAAAAAAIlEglUAPVXmsEIekhIthcGwg/vRxs93mpUYfH3vFVlGNjiEoIwAAAAAAACJRIJVAD1V5rBCHpISLYXBsIP70cbPd5qVGHx97xVZRjY4hAAAAAAABAStQwwAAAAAAACJRIJVAD1V5rBCHpISLYXBsIP70cbPd5qVGHx97xVZRjY4hAQMEAAAAAAAAAA==".to_string(),
                 status: "pending".to_string(),
                 sequence: 1,
-                vault_address: "bc1q5wgdhplnzn075eq7xep4zes7lnk5jy2ke0scsm".to_string(),
             }],
         pagination: None,
     })
