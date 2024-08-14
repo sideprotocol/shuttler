@@ -24,6 +24,9 @@ pub struct Config {
     pub side_chain: CosmosChain,
     pub keys: BTreeMap<String, String>,
     pub pubkeys: BTreeMap<String, String>,
+
+    pub tweaks: BTreeMap<String, String>,
+    pub default_tweak: String,
 }
 
 /// Bitcoin Configuration
@@ -75,6 +78,7 @@ lazy_static! {
     static ref APPLICATION_PATH: Mutex<String> = Mutex::new(String::from(".tssigner"));
     static ref KEYS : Mutex<BTreeMap<String, KeyPackage>> = Mutex::new(BTreeMap::new());
     static ref PUBKEYS : Mutex<BTreeMap<String, PublicKeyPackage>> = Mutex::new(BTreeMap::new());
+    static ref TWEAKS : Mutex<BTreeMap<String, Vec<u8>>> = Mutex::new(BTreeMap::new());
 }
 
 pub fn update_app_home(app_home: &str) {
@@ -103,6 +107,17 @@ pub fn add_pub_key(address: &str, key: PublicKeyPackage) {
 
 pub fn get_pub_key_by_index(index: usize) -> Option<PublicKeyPackage> {
     PUBKEYS.lock().unwrap().values().nth(index).cloned()
+}
+
+pub fn add_tweak(address: &str, tweak: Vec<u8> ) {
+    TWEAKS.lock().unwrap().insert(address.to_string(), tweak);
+}
+
+pub fn get_tweak(address: &str) -> Option<Vec<u8>> {
+    match TWEAKS.lock().unwrap().get(address).cloned() {
+        Some(tweak) => Some(tweak),
+        None => Some(vec![]),
+    }
 }
 
 impl Config {
@@ -144,6 +159,11 @@ impl Config {
             PUBKEYS.lock().unwrap().insert(k.clone(), pkp);
         });
 
+        config.tweaks.iter().for_each(|(k, v)| {
+            let b = v.as_bytes().to_vec();
+            TWEAKS.lock().unwrap().insert(k.clone(), b);
+        });
+
         Ok(config)
     }
 
@@ -173,7 +193,9 @@ impl Config {
                     denom: "uside".to_string(),
                 },
                 address_prefix: "side".to_string(),
-            }
+            },
+            tweaks: BTreeMap::new(),
+            default_tweak: "runes".to_string(),
         }
     }
 
@@ -206,6 +228,13 @@ impl Config {
         // let sender_public_key = sender_private_key.public_key();
         // let sender_account_id = sender_public_key.account_id(&self.side_chain.addr_prefix).unwrap();
         // sender_account_id.to_string()
+    }
+
+    pub fn get_default_tweak(&self) -> Vec<u8> {
+        let mut tweak: [u8; 32] = [0u8; 32];
+        tweak[0..self.default_tweak.len()].copy_from_slice(self.default_tweak.as_bytes());
+        
+        tweak.to_vec()
     }
 }
 

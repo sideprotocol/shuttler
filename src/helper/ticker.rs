@@ -14,7 +14,7 @@ use tracing::{debug, error, info};
 use crate::{app::{config::{self, Config}, 
     signer::{broadcast_signing_commitments, Shuttler}}, 
     commands::Cli, 
-    helper::{client_side::get_signing_requests, messages::{SigningSteps, Task}}};
+    helper::{client_side::get_withdraw_requests, messages::{SigningSteps, Task}}};
 
 use super::{client_side::{self, send_cosmos_transaction}, messages::SigningBehaviour};
 use cosmos_sdk_proto::{
@@ -36,7 +36,7 @@ lazy_static! {
     };
 }
 
-async fn fetch_latest_signing_requests(cli: &Cli, behave: &mut SigningBehaviour, signer: &mut Shuttler) {
+async fn fetch_latest_withdraw_requests(cli: &Cli, behave: &mut SigningBehaviour, signer: &mut Shuttler) {
     let host = signer.config().side_chain.rest_url.as_str();
 
     if cli.mock {
@@ -71,11 +71,10 @@ async fn fetch_latest_signing_requests(cli: &Cli, behave: &mut SigningBehaviour,
         }
     }
 
-    match get_signing_requests(&host).await {
+    match get_withdraw_requests(&host).await {
         Ok(response) => {
             for request in response.into_inner().requests {
-                // TODO fix the message to real psbt
-                let task = Task::new(SigningSteps::SignInit, request.txid);
+                let task = Task::new(SigningSteps::SignInit, request.psbt);
                 signer.sign_init(behave, &task);
                 let message = serde_json::to_string(&task).unwrap();
                 behave.gossipsub.publish(task.step.topic(), message.as_bytes()).expect("Failed to publish message");
@@ -195,15 +194,14 @@ async fn send_block_headers(shuttler: &Shuttler, block_headers: &Vec<BlockHeader
     send_cosmos_transaction(shuttler, any_msg).await
 }
 
-async fn fatch_dkg_requests(shuttler: &mut Shuttler, behave: &mut SigningBehaviour) {
-
+async fn fetch_dkg_requests(shuttler: &mut Shuttler, behave: &mut SigningBehaviour) {
     let host = shuttler.config().side_chain.grpc.clone();
     let mut client = BtcQueryClient::connect(host.to_owned()).await.unwrap();
     if let Ok(requests) = client.query_dkg_requests(QueryDkgRequestsRequest {
         status: DkgRequestStatus::Pending as i32,
     }).await {
         for request in requests.into_inner().requests {
-            if request.participants.iter().find(|p| p.consensus_address.as_bytes() == shuttler.validator_address()).is_some() {
+            if request.participants.iter().find(|p| p.consensus_address == hex::encode_upper(shuttler.validator_address())).is_some() {
                 // create a dkg task
                 let mut task = Task::new(SigningSteps::DkgInit, request.id.to_string());
                 task.id = request.id.to_string();
@@ -256,7 +254,7 @@ pub async fn tasks_fetcher(cli: &Cli , behave: &mut SigningBehaviour, shuttler: 
     // all participants tasks:
     // ===========================
     // 1. fetch dkg requests
-    fatch_dkg_requests(shuttler, behave).await;
+    fetch_dkg_requests(shuttler, behave).await;
 
 
     // ===========================
@@ -268,6 +266,6 @@ pub async fn tasks_fetcher(cli: &Cli , behave: &mut SigningBehaviour, shuttler: 
     }
 
     broadcast_signing_commitments(behave, shuttler);
-    fetch_latest_signing_requests(cli, behave, shuttler).await;
+    fetch_latest_withdraw_requests(cli, behave, shuttler).await;
     sync_btc_blocks(shuttler).await
 }

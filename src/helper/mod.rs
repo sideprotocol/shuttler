@@ -2,7 +2,7 @@ pub mod cipher;
 pub mod encoding;
 pub mod messages;
 pub mod store;
-pub mod pbst;
+pub mod bitcoin;
 pub mod http;
 pub mod ticker;
 pub mod client_bitcoin;

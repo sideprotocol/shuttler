@@ -71,7 +71,7 @@ pub fn set_dkg_round2_secret_packet(task_id: &str, secret_packet: dkg::round2::S
 }
 
 pub fn has_dkg_preceeded(req_id: &str) -> bool {
-    let map = DkgRound1Packets.lock().unwrap();
+    let map = DkgRound1SecretPacket.lock().unwrap();
     map.contains_key(req_id)
 }
 
