@@ -201,7 +201,7 @@ async fn fetch_dkg_requests(shuttler: &mut Shuttler, behave: &mut SigningBehavio
         status: DkgRequestStatus::Pending as i32,
     }).await {
         for request in requests.into_inner().requests {
-            if request.participants.iter().find(|p| p.consensus_address.as_bytes() == shuttler.validator_address()).is_some() {
+            if request.participants.iter().find(|p| p.consensus_address == hex::encode_upper(shuttler.validator_address())).is_some() {
                 // create a dkg task
                 let mut task = Task::new(SigningSteps::DkgInit, request.id.to_string());
                 task.id = request.id.to_string();
