@@ -4,13 +4,13 @@ use std::{collections::BTreeMap, fs, str::FromStr, sync::Mutex};
 use bip39::Mnemonic;
 use bitcoin::{hex::{Case, DisplayHex}, key::{TapTweak as _, UntweakedPublicKey}, secp256k1, sighash::{self, SighashCache}, Address, Psbt, PublicKey, TxOut, Witness};
 use bitcoin_hashes::Hash;
-use bitcoincore_rpc::{Client, Auth};
+use bitcoincore_rpc::{Auth, Client};
 use cosmrs::{crypto::secp256k1::SigningKey, AccountId, Any};
 use frost_core::{keys::{PublicKeyPackage, KeyPackage}, Field};
 use futures::executor::block_on;
 use libp2p::gossipsub::Message;
 use cosmos_sdk_proto::{cosmos::auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest}, side::btcbridge::MsgCompleteDkg};
-use crate::{app::config::{self, Config, PrivValidatorKey}, helper::{client_side::send_cosmos_transaction, messages::now, pbst::{get_group_address, get_group_address_by_tweak}}};
+use crate::{app::config::{self, Config, PrivValidatorKey}, helper::{client_side::send_cosmos_transaction, messages::now, bitcoin::{get_group_address, get_group_address_by_tweak}}};
 use crate::helper::{
     cipher::{decrypt, encrypt}, encoding::{self, from_base64}, messages::{DKGRoundMessage, SignMessage, SigningBehaviour, SigningSteps, Task}, store
 };
@@ -18,6 +18,7 @@ use frost::Identifier;
 use frost_secp256k1_tr::{self as frost, Secp256K1Sha256};
 
 use ::bitcoin::secp256k1::schnorr::Signature as SchnorrSignature;
+use bitcoin::TapNodeHash;
 
 use tracing::{debug, error, info};
 use rand::thread_rng;
@@ -153,9 +154,9 @@ impl Shuttler {
                         for (receiver_identifier, round2_package) in round2_packages {
                             let bz = receiver_identifier.serialize();
                             let target = x25519::PublicKey::from_slice(bz.as_slice()).unwrap();
-
+                            
                             let share_key = target.dh(&x25519::SecretKey::from_ed25519(&self.identity_key).unwrap()).unwrap();
-
+                            
                             let byte = round2_package.serialize().unwrap();
                             let packet = encrypt(byte.as_slice(), share_key.as_slice().try_into().unwrap());
 
@@ -165,7 +166,7 @@ impl Shuttler {
                                 max_signers: round1_package.max_signers,
                                 from_party_id: self.identifier.clone(),
                                 to_party_id: Some(receiver_identifier.clone()),
-                                packet: packet,
+                                packet,
                             };
 
                             let new_msg =
@@ -197,7 +198,7 @@ impl Shuttler {
 
         let bz = round2_package.from_party_id.serialize();
         let source = x25519::PublicKey::from_slice(bz.as_slice()).unwrap();
-
+        
         let share_key = source.dh(&x25519::SecretKey::from_ed25519(&self.identity_key).unwrap()).unwrap();
 
         let packet = decrypt(round2_package.packet.as_slice(), share_key.as_slice().try_into().unwrap());
@@ -548,7 +549,7 @@ impl Shuttler {
                     // let sighash = &hex::decode(sig_shares_message.message).unwrap();
                     let is_signature_valid = pubkeys
                         .verifying_key()
-                        .verify(signing_variables.sighash.as_slice(), &signature)
+                        .verify(signing_package.sig_target().clone(), &signature)
                         .is_ok();
                     info!(
                         "Signature: {:?} verified: {:?}",
@@ -568,10 +569,22 @@ impl Shuttler {
                             // verify signature
                             let secp = secp256k1::Secp256k1::new();
                             let utpk = UntweakedPublicKey::from(pubkey.inner);
-                            let (tpk, _) = utpk.tap_tweak(&secp, None);
+
+                            let merkle_root = match signing_package.sig_target().sig_params().tapscript_merkle_root.clone() {
+                                Some(root) => {
+                                    if root.len() == 0 {
+                                        None
+                                    } else {
+                                        Some(TapNodeHash::from_slice(&root).unwrap())
+                                    }
+                                }
+                                None => None
+                            };
+
+                            let (tpk, _) = utpk.tap_tweak(&secp, merkle_root);
                             // let addr = Address::p2tr(&secp, tpk., None, Network::Bitcoin);
                             // let sig_b = group_signature.serialize();
-                            let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&sig_bytes[1..]).unwrap();
+                            let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&sig_bytes).unwrap();
                             let msg = bitcoin::secp256k1::Message::from_digest_slice(&signing_variables.sighash).unwrap();
                             match secp.verify_schnorr(&sig, &msg, &tpk.to_inner()) {
                                 Ok(_) => info!("Signature is valid"),
@@ -581,7 +594,7 @@ impl Shuttler {
                             // add sig to psbt
                             let hash_ty = bitcoin::sighash::TapSighashType::Default;
                             // let sighash_type =  bitcoin::psbt::PsbtSighashType::from(hash_ty);
-                            let sig = SchnorrSignature::from_slice(&sig_bytes[1..]).unwrap();
+                            let sig = SchnorrSignature::from_slice(&sig_bytes).unwrap();
                             let index = extract_index_from_task_id(sig_shares_message.task_id.as_str());
                             // psbt.inputs[index].sighash_type = Option::Some(sighash_type);
                             psbt.inputs[index].tap_key_sig = Option::Some(bitcoin::taproot::Signature {
@@ -607,8 +620,8 @@ impl Shuttler {
 
                                 // let msg = MsgSubmit {
                                 //     sender: self.config().signer_address(),
-                                //     txid: psbt.unsigned_tx.compute_txid().to_string(),
-                                //     psbt: psbt_base64,
+                                    //     txid: psbt.unsigned_tx.compute_txid().to_string(),
+                                    //     psbt: psbt_base64,
                                 // };
                                 // let any = Any::from_msg(&msg).unwrap();
                                 // send_cosmos_transaction(self.config(), any ).await;
@@ -705,6 +718,8 @@ impl Shuttler {
         for v in vaults {
             sig_msg.extend(v.as_bytes())
         }
+
+        sig_msg = hex::decode(sha256::digest(sig_msg)).unwrap();
 
         self.identity_key.sign(sig_msg, None).to_hex_string(Case::Lower)
     }

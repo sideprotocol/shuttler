@@ -20,7 +20,7 @@ pub fn get_group_address_by_tweak(
     let secp = Secp256k1::new();
 
     let mut hash: [u8; 32] = [0; 32];
-    hash.copy_from_slice(tweak.as_slice());
+    hash[0..tweak.len()].copy_from_slice(tweak.as_slice());
     let merkle_root = TapNodeHash::assume_hidden(hash);
 
     Address::p2tr(&secp, internal_key, Some(merkle_root), network)

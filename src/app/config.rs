@@ -112,7 +112,7 @@ pub fn add_tweak(address: &str, tweak: Vec<u8> ) {
 pub fn get_tweak(address: &str) -> Option<Vec<u8>> {
     match TWEAKS.lock().unwrap().get(address).cloned() {
         Some(tweak) => Some(tweak),
-        None => Some(get_empty_tweak()),
+        None => Some(vec![]),
     }
 }
 
@@ -245,10 +245,6 @@ pub fn compute_relayer_address(mnemonic: &str, network: Network) -> Address {
 
     let pubkey = CompressedPublicKey::from_private_key(&secp, &sk.to_priv()).unwrap();
     Address::p2wpkh(&pubkey, network)
-}
-
-pub fn get_empty_tweak() -> Vec<u8> {
-    "".as_bytes().to_vec()
 }
 
 pub fn home_dir(app_home: &str) -> PathBuf {

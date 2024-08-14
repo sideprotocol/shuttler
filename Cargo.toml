@@ -27,8 +27,8 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 toml = "0.8.14"
 descriptive_toml_derive = "0.1.1"
 document-features = "0.2.7"
-frost-core = { git="https://github.com/keithsue/frost.git", branch = "sufay/make-new-pub", features=["serde", "serialization", "internals"]}
-frost-secp256k1-tr = { git="https://github.com/keithsue/frost.git", branch = "sufay/make-new-pub", features=["serde", "serialization",]}
+frost-core = { git="https://github.com/liangping/frost.git", branch = "frost-secp256k1-tr", features=["serde", "serialization", "internals"]}
+frost-secp256k1-tr = { git="https://github.com/liangping/frost.git", branch = "frost-secp256k1-tr", features=["serde", "serialization",]}
 k256 = { version = "0.13.0", features = ["arithmetic", "expose-field", "hash2curve"] }
 rand_core = "0.6"
 rand_chacha = "0.3.1"
