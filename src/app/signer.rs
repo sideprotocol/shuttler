@@ -10,7 +10,7 @@ use frost_core::Field;
 use futures::executor::block_on;
 use libp2p::gossipsub::Message;
 use cosmos_sdk_proto::{cosmos::auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest}, side::btcbridge::MsgCompleteDkg};
-use crate::{app::config::{self, Config, PrivValidatorKey}, helper::{client_side::send_cosmos_transaction, messages::now, pbst::get_group_address}};
+use crate::{app::config::{self, get_app_home, Config, PrivValidatorKey}, helper::{client_side::send_cosmos_transaction, messages::now, pbst::get_group_address}};
 use crate::helper::{
     cipher::{decrypt, encrypt}, encoding::{self, from_base64}, messages::{DKGRoundMessage, SignMessage, SigningBehaviour, SigningSteps, Task}, store
 };
@@ -22,6 +22,7 @@ use ::bitcoin::secp256k1::schnorr::Signature as SchnorrSignature;
 use tracing::{debug, error, info};
 use rand::thread_rng;
 use ed25519_compact::{x25519, SecretKey};
+use rusqlite::Connection;
 
 use lazy_static::lazy_static;
 
@@ -40,10 +41,16 @@ pub struct Shuttler {
     relayer_address: AccountId,
 
     pub bitcoin_client: Client,
+    pub db_conn: Connection,
 }
 
 impl Shuttler {
     pub fn new(conf: Config) -> Self {
+
+        
+        let mut path = get_app_home();
+        path.push_str("/history.db");
+        let db_conn = Connection::open(path).expect("failed to open database");
 
         // load private key from priv_validator_key_path
         let text: String = fs::read_to_string(&conf.priv_validator_key_path).expect("failed to load priv_validator_key.json");
@@ -78,6 +85,7 @@ impl Shuttler {
             relayer_key, 
             relayer_address,
             config: conf,
+            db_conn,
         }
     }
 
@@ -132,55 +140,7 @@ impl Shuttler {
         if let Some(received_round1_packages) =
             store::get_dkg_round1_packets(&round1_package.task_id)
         {
-            if received_round1_packages.len() as u16 == round1_package.max_signers - 1 {
-                let round1_secret_package =
-                    store::get_dkg_round1_secret_packet(&round1_package.task_id);
-                match round1_secret_package {
-                    Some(secret_package) => {
-                        let (round2_secret_package, round2_packages) =
-                            frost::keys::dkg::part2(secret_package, &received_round1_packages)
-                                .expect("error in DKG round 2");
-                        debug!(
-                            "round2_secret_package: {:?}, {:?}",
-                            &round2_secret_package, &round2_packages
-                        );
-                        // self.round2_secret_package_store.push(round2_secret_package);
-                        store::set_dkg_round2_secret_packet(
-                            &round1_package.task_id,
-                            round2_secret_package.clone(),
-                        );
-
-                        for (receiver_identifier, round2_package) in round2_packages {
-                            let bz = receiver_identifier.serialize();
-                            let target = x25519::PublicKey::from_slice(bz.as_slice()).unwrap();
-
-                            let share_key = target.dh(&x25519::SecretKey::from_ed25519(&self.identity_key).unwrap()).unwrap();
-
-                            let byte = round2_package.serialize().unwrap();
-                            let packet = encrypt(byte.as_slice(), share_key.as_slice().try_into().unwrap());
-
-                            let round2_message = DKGRoundMessage {
-                                task_id: round1_package.task_id.clone(),
-                                min_signers: round1_package.min_signers,
-                                max_signers: round1_package.max_signers,
-                                from_party_id: self.identifier.clone(),
-                                to_party_id: Some(receiver_identifier.clone()),
-                                packet: packet,
-                            };
-
-                            let new_msg =
-                                serde_json::to_string(&round2_message).expect("msg not serialized");
-                            behave
-                                .gossipsub
-                                .publish(SigningSteps::DkgRound2.topic(), new_msg.as_bytes())
-                                .expect("msg not published");
-                        }
-                    }
-                    None => {
-                        error!("round1_secret_package not found");
-                    }
-                }
-            }
+            // move to ticker
         }
     }
 
@@ -678,6 +638,62 @@ fn extract_index_from_task_id(task_id: &str) -> usize {
     let parts: Vec<&str> = task_id.split("-").collect();
     let index = parts[1].parse::<usize>().unwrap();
     index
+}
+
+pub fn broadcast_dkg_commitments(
+    behave: &mut SigningBehaviour,
+    signer: &mut Shuttler,
+) {
+
+    if received_round1_packages.len() as u16 == round1_package.max_signers - 1 {
+        let round1_secret_package =
+            store::get_dkg_round1_secret_packet(&round1_package.task_id);
+        match round1_secret_package {
+            Some(secret_package) => {
+                let (round2_secret_package, round2_packages) =
+                    frost::keys::dkg::part2(secret_package, &received_round1_packages)
+                        .expect("error in DKG round 2");
+                debug!(
+                    "round2_secret_package: {:?}, {:?}",
+                    &round2_secret_package, &round2_packages
+                );
+                // self.round2_secret_package_store.push(round2_secret_package);
+                store::set_dkg_round2_secret_packet(
+                    &round1_package.task_id,
+                    round2_secret_package.clone(),
+                );
+
+                for (receiver_identifier, round2_package) in round2_packages {
+                    let bz = receiver_identifier.serialize();
+                    let target = x25519::PublicKey::from_slice(bz.as_slice()).unwrap();
+
+                    let share_key = target.dh(&x25519::SecretKey::from_ed25519(&self.identity_key).unwrap()).unwrap();
+
+                    let byte = round2_package.serialize().unwrap();
+                    let packet = encrypt(byte.as_slice(), share_key.as_slice().try_into().unwrap());
+
+                    let round2_message = DKGRoundMessage {
+                        task_id: round1_package.task_id.clone(),
+                        min_signers: round1_package.min_signers,
+                        max_signers: round1_package.max_signers,
+                        from_party_id: self.identifier.clone(),
+                        to_party_id: Some(receiver_identifier.clone()),
+                        packet: packet,
+                    };
+
+                    let new_msg =
+                        serde_json::to_string(&round2_message).expect("msg not serialized");
+                    behave
+                        .gossipsub
+                        .publish(SigningSteps::DkgRound2.topic(), new_msg.as_bytes())
+                        .expect("msg not published");
+                }
+            }
+            None => {
+                error!("round1_secret_package not found");
+            }
+        }
+    }
 }
 
 pub fn broadcast_signing_commitments( 

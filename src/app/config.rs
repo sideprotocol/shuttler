@@ -82,6 +82,10 @@ pub fn update_app_home(app_home: &str) {
     *string = String::from(app_home);
 }
 
+pub fn get_app_home() -> String {
+    APPLICATION_PATH.lock().unwrap().clone()
+}
+
 pub fn get_sign_key(address: &str) -> Option<KeyPackage> {
     KEYS.lock().unwrap().get(address).cloned()
 }
