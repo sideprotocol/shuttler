@@ -1,8 +1,9 @@
 
 
 
-use std::sync::Mutex;
+use std::{sync::Mutex, thread::sleep, time::Duration};
 
+use bitcoin::{consensus::encode, BlockHash, Transaction};
 use bitcoincore_rpc::RpcApi;
 use chrono::{Timelike, Utc};
 use prost_types::Any;
@@ -11,17 +12,17 @@ use rand_chacha::ChaCha8Rng;
 use tonic::{Response, Status};
 use tracing::{debug, error, info};
 
-use crate::{app::{config::{self, Config}, 
+use crate::{app::{config,
     signer::{broadcast_signing_commitments, Shuttler}}, 
     commands::Cli, 
-    helper::{client_side::get_withdraw_requests, messages::{SigningSteps, Task}}};
+    helper::{client_side::get_withdraw_requests, encoding::to_base64, messages::{SigningSteps, Task}}};
 
-use super::{client_side::{self, send_cosmos_transaction}, messages::SigningBehaviour};
+use super::{bitcoin::{self as bitcoin_utils}, client_side::{self, send_cosmos_transaction}, messages::SigningBehaviour};
 use cosmos_sdk_proto::{
     cosmos::{
         base::tendermint::v1beta1::{service_client::ServiceClient as TendermintServiceClient, GetLatestValidatorSetRequest, Validator}, tx::v1beta1::BroadcastTxResponse
     }, 
-    side::btcbridge::{query_client::QueryClient as BtcQueryClient, BlockHeader, DkgRequestStatus, MsgSubmitBlockHeaders, QueryChainTipRequest, QueryChainTipResponse, QueryDkgRequestsRequest, QueryWithdrawRequestsRequest, QueryWithdrawRequestsResponse}};
+    side::btcbridge::{query_client::QueryClient as BtcQueryClient, BlockHeader, DkgRequestStatus, MsgSubmitBlockHeaders, MsgSubmitDepositTransaction, MsgSubmitWithdrawTransaction, QueryChainTipRequest, QueryChainTipResponse, QueryDkgRequestsRequest, QueryWithdrawRequestsRequest, QueryWithdrawRequestsResponse, Vault}};
 use lazy_static::lazy_static;
 
 
@@ -32,6 +33,9 @@ struct Lock {
 
 lazy_static! {
     static ref LOADING: Mutex<Lock> = {
+        Mutex::new(Lock { loading: false })
+    };
+    static ref SCAN_VAULT_TXS_LOCK: Mutex<Lock> = {
         Mutex::new(Lock { loading: false })
     };
 }
@@ -194,6 +198,119 @@ async fn send_block_headers(shuttler: &Shuttler, block_headers: &Vec<BlockHeader
     send_cosmos_transaction(shuttler, any_msg).await
 }
 
+async fn scan_vault_txs(shuttler: &mut Shuttler, height: u64) {
+    let block_hash = match shuttler.bitcoin_client.get_block_hash(height) {
+        Ok(hash) => hash,
+        Err(e) => {
+            error!("Failed to get block hash: {:?}, err: {:?}", height, e);
+            return;
+        }
+    };
+
+    let block = match shuttler.bitcoin_client.get_block(&block_hash) {
+        Ok(block) => block,
+        Err(e) => {
+            error!("Failed to get block: {}, err: {}", height, e);
+            return;
+        }
+    };
+
+    for tx in &block.txdata {
+        if bitcoin_utils::may_be_withdraw_tx(&tx) {
+            match bitcoin_utils::get_tx_proof(&shuttler.bitcoin_client, tx.compute_txid(), &block_hash) {
+                Some(proof) => {
+                    send_withdraw_tx(shuttler, &block_hash, &tx, proof).await;
+                }
+                None => {
+                    error!("Failed to get tx proof");
+                }
+            }
+
+            continue;
+        }
+
+        if bitcoin_utils::is_deposit_tx(tx, shuttler.config().bitcoin.network) {
+            let prev_txid = tx.input[0].previous_output.txid;
+            match shuttler.bitcoin_client.get_raw_transaction(&prev_txid, Some(&block_hash)) {
+                Ok(prev_tx) => {
+                    match bitcoin_utils::get_tx_proof(&shuttler.bitcoin_client, tx.compute_txid(), &block_hash) {
+                        Some(proof) => {
+                            send_deposit_tx(shuttler, &block_hash, &prev_tx, &tx, proof).await;
+                        }
+                        None => {
+                            error!("Failed to get tx proof");
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to get the previous tx: {:?}, err: {:?}", prev_txid, e);
+                }
+            }
+        }
+    }
+}
+
+async fn scan_vault_txs_loop(shuttler: &mut Shuttler) {
+    let mut lock = SCAN_VAULT_TXS_LOCK.lock().unwrap();
+    if lock.loading {
+        info!("a previous vault tx scanning task is running, skip!");
+        return
+    }
+    lock.loading = true;
+    
+    let mut height = shuttler.config().last_scanned_height + 1;
+
+    loop {
+        let side_tip = match client_side::get_bitcoin_tip_on_side (&shuttler.config().side_chain.grpc).await {
+            Ok(res) => res.get_ref().height,
+            Err(e) => {
+                error!("Failed to get tip from side chain: {}", e);
+                continue;
+            }
+        };
+
+        if height > side_tip - 1 {
+            continue
+        }
+
+        scan_vault_txs(shuttler, height).await;
+
+        shuttler.config_mut().save_last_scanned_height(height);
+        height += 1;
+
+        sleep(Duration::from_secs(6));
+    }
+}
+
+async fn send_withdraw_tx(shuttler: &Shuttler, block_hash: &BlockHash, tx: &Transaction, proof: Vec<String>) -> Result<Response<BroadcastTxResponse>, Status> {
+    let msg = MsgSubmitWithdrawTransaction {
+        sender: shuttler.relayer_address().as_ref().to_string(),
+        blockhash: block_hash.to_string(),
+        tx_bytes: to_base64(encode::serialize(tx).as_slice()),
+        proof,
+    };
+
+    info!("Submitting withdrawal tx: {:?}", msg);
+
+    let any_msg = Any::from_msg(&msg).unwrap();
+    send_cosmos_transaction(shuttler, any_msg).await
+}
+
+async fn send_deposit_tx(shuttler: &Shuttler, block_hash: &BlockHash, prev_tx: &Transaction, tx: &Transaction, proof: Vec<String>) -> Result<Response<BroadcastTxResponse>, Status> {
+    let msg = MsgSubmitDepositTransaction {
+        sender: shuttler.relayer_address().as_ref().to_string(),
+        blockhash: block_hash.to_string(),
+        prev_tx_bytes: to_base64(encode::serialize(prev_tx).as_slice()),
+        tx_bytes: to_base64(encode::serialize(tx).as_slice()),
+        proof,
+    };
+
+    info!("Submitting deposit tx: {:?}", msg);
+    
+    let any_msg = Any::from_msg(&msg).unwrap();
+    send_cosmos_transaction(shuttler, any_msg).await
+}
+
 async fn fetch_dkg_requests(shuttler: &mut Shuttler, behave: &mut SigningBehaviour) {
     let host = shuttler.config().side_chain.grpc.clone();
     let mut client = BtcQueryClient::connect(host.to_owned()).await.unwrap();
@@ -267,5 +384,7 @@ pub async fn tasks_fetcher(cli: &Cli , behave: &mut SigningBehaviour, shuttler: 
 
     broadcast_signing_commitments(behave, shuttler);
     fetch_latest_withdraw_requests(cli, behave, shuttler).await;
-    sync_btc_blocks(shuttler).await
+    sync_btc_blocks(shuttler);
+    
+    scan_vault_txs_loop(shuttler);
 }

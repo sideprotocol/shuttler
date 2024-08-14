@@ -586,6 +586,10 @@ impl Shuttler {
         &self.config
     }
 
+    pub fn config_mut(&mut self) -> Config {
+        self.config.clone()
+    }
+
     pub fn identifier(&self) -> &Identifier {
         &self.identifier
     }
