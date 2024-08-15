@@ -92,6 +92,12 @@ pub fn get_app_home() -> String {
     APPLICATION_PATH.lock().unwrap().clone()
 }
 
+pub fn get_database_path() -> String {
+    let mut home = APPLICATION_PATH.lock().unwrap().clone();
+    home.push_str("/history.db");
+    home
+}
+
 pub fn get_sign_key(address: &str) -> Option<KeyPackage> {
     KEYS.lock().unwrap().get(address).cloned()
 }

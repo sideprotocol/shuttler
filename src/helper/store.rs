@@ -2,10 +2,13 @@ use std::collections::BTreeMap;
 
 use frost_secp256k1_tr::{keys::dkg, round1, round2, Identifier, SigningPackage};
 use bitcoin::Psbt;
+use sled::Db;
 use std::sync::Mutex;
 use lazy_static::lazy_static;
 
-use super::messages::SigningSteps;
+use crate::app::config::get_database_path;
+
+use super::messages::{SigningSteps, Task};
 
 #[derive(Clone)]
 pub struct TaskVariables {
@@ -48,6 +51,56 @@ lazy_static! {
     static ref SignShares:  Mutex<BTreeMap<String, BTreeMap<Identifier, round2::SignatureShare>>> = {
         Mutex::new(BTreeMap::new())
     };
+    static ref DB: Db = {
+        let path = get_database_path();
+        sled::open(path).unwrap()
+    };
+}
+
+fn save_to_db(key: &str, value: &str) {
+    DB.insert(key, value.as_bytes()).unwrap();
+    DB.flush().unwrap();
+}
+
+fn get_from_db(key: &str) -> Option<String> {
+    match DB.get(key) {
+        Ok(Some(value)) => {
+            Some(String::from_utf8(value.to_vec()).unwrap())
+        },
+        Ok(None) => {
+            None
+        },
+        Err(_) => {
+            None
+        }
+    }
+}
+
+pub fn save_task(task_id: &str, task: &Task) {
+    save_to_db(task_id, &serde_json::to_string(task).unwrap());
+}
+
+pub fn get_task(task_id: &str) -> Option<Task> {
+    match get_from_db(task_id) {
+        Some(task) => {
+            Some(serde_json::from_str(&task).unwrap())
+        },
+        None => {
+            None
+        }
+    }
+}
+
+
+pub fn has_dkg_preceeded(key: &str) -> bool {
+    match DB.contains_key(key) {
+        Ok(v) => {
+            v
+        },
+        _ => {
+            false
+        }
+    }
 }
 
 pub fn get_dkg_round1_secret_packet(task_id: &str) -> Option<dkg::round1::SecretPackage> {
@@ -70,14 +123,14 @@ pub fn set_dkg_round2_secret_packet(task_id: &str, secret_packet: dkg::round2::S
     map.insert(task_id.to_string(), secret_packet);
 }
 
-pub fn has_dkg_preceeded(req_id: &str) -> bool {
-    let map = DkgRound1SecretPacket.lock().unwrap();
-    map.contains_key(req_id)
-}
-
 pub fn get_dkg_round1_packets(task_id: &str) -> Option<BTreeMap<Identifier, dkg::round1::Package>> {
     let map = DkgRound1Packets.lock().unwrap();
     map.get(task_id).cloned()
+}
+
+pub fn get_all_dkg_round1_packets() -> BTreeMap<String, BTreeMap<Identifier, dkg::round1::Package>> {
+    let map = DkgRound1Packets.lock().unwrap();
+    map.clone()
 }
 
 pub fn set_dkg_round1_packets(task_id: &str, party_id: Identifier, packet: dkg::round1::Package) {
