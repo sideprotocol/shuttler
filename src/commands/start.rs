@@ -13,7 +13,7 @@ use tokio::time::Instant;
 
 use crate::app::{config::Config, signer::Shuttler};
 use crate::helper::messages::{ now, SigningBehaviour, SigningBehaviourEvent, SigningSteps, Task};
-use crate::helper::ticker::tasks_fetcher;
+use crate::helper::{loop_tasks::start_loop_tasks, tick_tasks::tasks_fetcher};
 use std::error::Error;
 use std::time::Duration;
 use tokio::{io,  select};
@@ -106,6 +106,8 @@ pub async fn execute(cli: &Cli) {
 
     let seed = Utc::now().minute() as u64;
     let mut rng = ChaCha8Rng::seed_from_u64(seed );
+
+    tokio::spawn(start_loop_tasks(conf.clone()));
 
     loop {
         select! {

@@ -50,7 +50,7 @@ pub async fn get_withdraw_requests(host: &str ) -> Result<Response<QueryWithdraw
     let mut btc_client = BtcQueryClient::connect(host.to_string()).await.unwrap();
     btc_client.query_withdraw_requests(QueryWithdrawRequestsRequest {
         pagination: None,
-        status: 0i32
+        status: 1i32
     }).await
 }
 

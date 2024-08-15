@@ -57,6 +57,8 @@ lazy_static! {
     };
 }
 
+const LAST_SCANNED_HEIGHT_KEY: &str = "last_scanned_height";
+
 fn save_to_db(key: &str, value: &str) {
     DB.insert(key, value.as_bytes()).unwrap();
     DB.flush().unwrap();
@@ -91,6 +93,20 @@ pub fn get_task(task_id: &str) -> Option<Task> {
     }
 }
 
+pub fn save_last_scanned_height(height: u64) {
+    save_to_db(LAST_SCANNED_HEIGHT_KEY, &height.to_string())
+}
+
+pub fn get_last_scanned_height() -> Option<u64> {
+    match get_from_db(LAST_SCANNED_HEIGHT_KEY) {
+        Some(height) => {
+            Some(height.parse::<u64>().unwrap())
+        },
+        None => {
+            None
+        }
+    }
+}
 
 pub fn has_dkg_preceeded(key: &str) -> bool {
     match DB.contains_key(key) {

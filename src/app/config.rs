@@ -127,7 +127,12 @@ pub fn add_tweak(address: &str, tweak: Vec<u8> ) {
 
 pub fn get_tweak(address: &str) -> Option<Vec<u8>> {
     match TWEAKS.lock().unwrap().get(address).cloned() {
-        Some(tweak) => Some(tweak),
+        Some(tweak) => {
+            let mut normalized_tweak= vec![0u8; 32];
+            normalized_tweak[0..tweak.len()].copy_from_slice(tweak.as_slice());
+            
+            Some(normalized_tweak)
+        }
         None => Some(vec![]),
     }
 }
@@ -243,16 +248,8 @@ impl Config {
         // sender_account_id.to_string()
     }
 
-    pub fn save_last_scanned_height(&mut self, height: u64) {
-        self.last_scanned_height = height;
-        self.save();
-    }
-
     pub fn get_default_tweak(&self) -> Vec<u8> {
-        let mut tweak: [u8; 32] = [0u8; 32];
-        tweak[0..self.default_tweak.len()].copy_from_slice(self.default_tweak.as_bytes());
-        
-        tweak.to_vec()
+        self.default_tweak.as_bytes().to_vec()
     }
 }
 
