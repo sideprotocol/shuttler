@@ -731,7 +731,7 @@ pub fn broadcast_dkg_commitments(
             }
         };
 
-        // check if tasks has recevied enough packets
+        // check if the task has recevied enough packets
         if task.max_signers - 1 != received_round1_packages.len() as u16 {
             return;
         }
