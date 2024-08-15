@@ -75,8 +75,8 @@ pub fn new_task_id() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DKGRoundMessage<T> {
     pub task_id: String,
-    pub min_signers: u16,
-    pub max_signers: u16,
+    // pub min_signers: u16,
+    // pub max_signers: u16,
     pub from_party_id: frost::Identifier,
     pub to_party_id: Option<frost::Identifier>,
     pub packet: T,

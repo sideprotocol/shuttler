@@ -251,7 +251,7 @@ async fn topic_handler(message: &Message, behave: &mut SigningBehaviour, shuttle
         let task: Task = serde_json::from_str(&json).expect("msg not deserialized");
         shuttler.dkg_init(behave, &task);
     } else if topic == SigningSteps::DkgRound1.topic().into() {
-        shuttler.dkg_round1(behave, message);
+        shuttler.dkg_round1(message);
     } else if topic == SigningSteps::DkgRound2.topic().into() {
         shuttler.dkg_round2(message);
     }
