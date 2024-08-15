@@ -777,10 +777,16 @@ pub fn broadcast_dkg_commitments(
 
             let new_msg =
                 serde_json::to_string(&round2_message).expect("msg not serialized");
-            behave
+            match behave
                 .gossipsub
-                .publish(SigningSteps::DkgRound2.topic(), new_msg.as_bytes())
-                .expect("msg not published");
+                .publish(SigningSteps::DkgRound2.topic(), new_msg.as_bytes()) {
+                    Ok(_) => {
+                        info!("Published round2 to gossip: {:?}", new_msg);
+                    },
+                    Err(e) => {
+                        info!("Failed to publish message to gossip: {:?}", e);
+                    },
+                };
         }
     });
 }
