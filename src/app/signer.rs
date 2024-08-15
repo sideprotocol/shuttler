@@ -723,6 +723,19 @@ pub fn broadcast_dkg_commitments(
     let pending_packages = store::get_all_dkg_round1_packets();
     pending_packages.iter().for_each(|(task_id, received_round1_packages)| {
 
+        let task = match store::get_task(task_id) {
+            Some(task) => task,
+            None => {
+                error!("Failed to get dkg task: {}", task_id);
+                return;
+            }
+        };
+
+        // check if tasks has recevied enough packets
+        if task.max_signers - 1 != received_round1_packages.len() as u16 {
+            return;
+        }
+
         let secret_package = match store::get_dkg_round1_secret_packet(task_id) {
             Some(secret) => secret,
             None => {
