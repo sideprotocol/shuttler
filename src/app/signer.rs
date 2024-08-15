@@ -2,20 +2,20 @@
 use std::{collections::BTreeMap, fs, str::FromStr, sync::Mutex};
 
 use bip39::Mnemonic;
-use bitcoin::{hex::{Case, DisplayHex}, key::{TapTweak as _, UntweakedPublicKey}, secp256k1, sighash::{self, SighashCache}, Address, Psbt, PublicKey, TxOut, Witness};
+use bitcoin::{key::{TapTweak as _, UntweakedPublicKey}, secp256k1, sighash::{self, SighashCache}, Address, TapNodeHash, Psbt, PublicKey, TxOut, Witness};
 use bitcoin_hashes::Hash;
-use bitcoincore_rpc::{Client, Auth};
+use bitcoincore_rpc::{Auth, Client, RpcApi};
 use cosmrs::{crypto::secp256k1::SigningKey, AccountId, Any};
-use frost_core::Field;
+use frost_core::{keys::{PublicKeyPackage, KeyPackage}, Field};
 use futures::executor::block_on;
 use libp2p::gossipsub::Message;
-use cosmos_sdk_proto::{cosmos::auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest}, side::btcbridge::MsgCompleteDkg};
-use crate::{app::config::{self, Config, PrivValidatorKey}, helper::{client_side::send_cosmos_transaction, messages::now, pbst::get_group_address}};
+use cosmos_sdk_proto::{cosmos::auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest}, side::btcbridge::{MsgCompleteDkg, MsgSubmitWithdrawSignatures}};
+use crate::{app::config::{self, Config, PrivValidatorKey}, helper::{client_side::send_cosmos_transaction, messages::now, bitcoin::{get_group_address, get_group_address_by_tweak}}};
 use crate::helper::{
     cipher::{decrypt, encrypt}, encoding::{self, from_base64}, messages::{DKGRoundMessage, SignMessage, SigningBehaviour, SigningSteps, Task}, store
 };
 use frost::Identifier; 
-use frost_secp256k1_tr as frost;
+use frost_secp256k1_tr::{self as frost, Secp256K1Sha256};
 
 use ::bitcoin::secp256k1::schnorr::Signature as SchnorrSignature;
 
@@ -144,7 +144,7 @@ impl Shuttler {
         }
 
         let bz = round2_package.from_party_id.serialize();
-        let source = x25519::PublicKey::from_slice(bz.as_slice()).unwrap();
+        let source = x25519::PublicKey::from_ed25519(&ed25519_compact::PublicKey::from_slice(bz.as_slice()).unwrap()).unwrap();
 
         let share_key = source.dh(&x25519::SecretKey::from_ed25519(&self.identity_key).unwrap()).unwrap();
 
@@ -202,8 +202,8 @@ impl Shuttler {
                         let privkey_bytes = key.serialize().expect("key not serialized");
                         let pubkey_bytes = pubkey.serialize().expect("pubkey not serialized");
                         
-                        config::add_sign_key(&address.to_string(), key);
-                        config::add_pub_key(&address.to_string(), pubkey);
+                        config::add_sign_key(&address.to_string(), key.clone());
+                        config::add_pub_key(&address.to_string(), pubkey.clone());
 
                         self.config
                             .keys
@@ -213,14 +213,18 @@ impl Shuttler {
                             .insert(address.to_string(), encoding::to_base64(&pubkey_bytes));
                         self.config.save().expect("Failed to save generated keys");
 
-                        // submit the vault address to sidechain
-                        let cosm_msg = MsgCompleteDkg {
+                        let address_with_tweak = self.add_address_with_tweak(pubkey, key, self.config.get_default_tweak());
+
+                         // submit the vault address to sidechain
+                         let mut cosm_msg = MsgCompleteDkg {
                             id: round2_package.task_id.parse().unwrap(),
                             sender: self.relayer_address.to_string(),
-                            vaults: vec![address.to_string()],
-                            consensus_address: self.validator_address.to_hex_string(Case::Upper),
+                            vaults: vec![address.to_string(), address_with_tweak.to_string()],
+                            consensus_address: hex::encode_upper(&self.validator_address),
                             signature: "".to_string(),
                         };
+
+                        cosm_msg.signature = self.get_complete_dkg_signature(cosm_msg.id, &cosm_msg.vaults);
 
                         let any = Any::from_msg(&cosm_msg).unwrap();
                         match block_on(send_cosmos_transaction(self, any)) {
@@ -404,8 +408,12 @@ impl Shuttler {
                     // the following code will be executed or re-executed
                     let signing_package = frost::SigningPackage::new(
                         commitments.clone(), 
-                        &signing_variables.sighash
-                    );
+                        frost::SigningTarget::new(
+                            &signing_variables.sighash, 
+                            frost::SigningParameters{
+                                tapscript_merkle_root: config::get_tweak(&sign_message.address)
+                            }
+                        ));
         
                     store::set_sign_package(&sign_message.task_id, signing_package.clone());
         
@@ -495,7 +503,7 @@ impl Shuttler {
                     // let sighash = &hex::decode(sig_shares_message.message).unwrap();
                     let is_signature_valid = pubkeys
                         .verifying_key()
-                        .verify(signing_variables.sighash.as_slice(), &signature)
+                        .verify(signing_package.sig_target().clone(), &signature)
                         .is_ok();
                     info!(
                         "Signature: {:?} verified: {:?}",
@@ -512,13 +520,24 @@ impl Shuttler {
                             let sig_bytes = signature.serialize();
                             debug!("signature: {:?}, {}", sig_bytes, sig_bytes.len());
 
-                            // verify signature
                             let secp = secp256k1::Secp256k1::new();
                             let utpk = UntweakedPublicKey::from(pubkey.inner);
-                            let (tpk, _) = utpk.tap_tweak(&secp, None);
+
+                            let merkle_root = match signing_package.sig_target().sig_params().tapscript_merkle_root.clone() {
+                                Some(root) => {
+                                    if root.len() == 0 {
+                                        None
+                                    } else {
+                                        Some(TapNodeHash::from_slice(&root).unwrap())
+                                    }
+                                }
+                                None => None
+                            };
+
+                            let (tpk, _) = utpk.tap_tweak(&secp, merkle_root);
                             // let addr = Address::p2tr(&secp, tpk., None, Network::Bitcoin);
                             // let sig_b = group_signature.serialize();
-                            let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&sig_bytes[1..]).unwrap();
+                            let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&sig_bytes).unwrap();
                             let msg = bitcoin::secp256k1::Message::from_digest_slice(&signing_variables.sighash).unwrap();
                             match secp.verify_schnorr(&sig, &msg, &tpk.to_inner()) {
                                 Ok(_) => info!("Signature is valid"),
@@ -528,7 +547,7 @@ impl Shuttler {
                             // add sig to psbt
                             let hash_ty = bitcoin::sighash::TapSighashType::Default;
                             // let sighash_type =  bitcoin::psbt::PsbtSighashType::from(hash_ty);
-                            let sig = SchnorrSignature::from_slice(&sig_bytes[1..]).unwrap();
+                            let sig = SchnorrSignature::from_slice(&sig_bytes).unwrap();
                             let index = extract_index_from_task_id(sig_shares_message.task_id.as_str());
                             // psbt.inputs[index].sighash_type = Option::Some(sighash_type);
                             psbt.inputs[index].tap_key_sig = Option::Some(bitcoin::taproot::Signature {
@@ -552,13 +571,40 @@ impl Shuttler {
                                 let psbt_base64 = encoding::to_base64(&psbt_bytes);
                                 info!("Signed PSBT: {:?}", psbt_base64);
 
-                                // let msg = MsgSubmit {
-                                //     sender: self.config().signer_address(),
-                                //     txid: psbt.unsigned_tx.compute_txid().to_string(),
-                                //     psbt: psbt_base64,
-                                // };
-                                // let any = Any::from_msg(&msg).unwrap();
-                                // send_cosmos_transaction(self.config(), any ).await;
+                                // broadcast to bitcoin network
+                                let signed_tx = psbt.extract_tx().expect("failed to extract signed tx");
+                                match self.bitcoin_client.send_raw_transaction(&signed_tx) {
+                                    Ok(txid) => {
+                                        info!("Tx broadcasted: {}", txid);
+                                    }
+                                    Err(err) => {
+                                        error! ("Failed to broadcast tx: {:?}, err: {:?}", signed_tx.compute_txid(), err);
+                                        return;
+                                    }
+                                }
+
+                                // submit signed psbt to side chain
+                                let msg = MsgSubmitWithdrawSignatures {
+                                    sender: self.config().signer_address(),
+                                    txid: signed_tx.compute_txid().to_string(),
+                                    psbt: psbt_base64,
+                                };
+
+                                let any = Any::from_msg(&msg).unwrap();
+                                match send_cosmos_transaction(self, any).await {
+                                   Ok(resp) => {
+                                       let tx_response = resp.into_inner().tx_response.unwrap();
+                                       if tx_response.code != 0 {
+                                           error!("Failed to submit signatures: {:?}", tx_response);
+                                           return
+                                       }
+                                       info!("Submitted signatures: {:?}", tx_response);
+                                   },
+                                   Err(e) => {
+                                       error!("Failed to submit signatures: {:?}", e);
+                                       return
+                                   },
+                               };
                             } else {
                                 info!("PSBT is incomplete");
                             }
@@ -579,6 +625,10 @@ impl Shuttler {
 
     pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    pub fn config_mut(&mut self) -> Config {
+        self.config.clone()
     }
 
     pub fn identifier(&self) -> &Identifier {
@@ -627,6 +677,36 @@ impl Shuttler {
             }
         }
     }
+
+    pub fn add_address_with_tweak(&mut self, pubkey: PublicKeyPackage<Secp256K1Sha256>, key: KeyPackage<Secp256K1Sha256>, tweak: Vec<u8>) -> Address {
+        let address_with_tweak = get_group_address_by_tweak(&pubkey.verifying_key(), tweak.clone(), self.config.bitcoin.network);
+
+        let privkey_bytes = key.serialize().expect("key not serialized");
+        let pubkey_bytes = pubkey.serialize().expect("pubkey not serialized");
+
+        config::add_sign_key(&address_with_tweak.to_string(),key);
+        config::add_pub_key(&address_with_tweak.to_string(), pubkey);
+        config::add_tweak(&address_with_tweak.to_string(), tweak.clone());
+
+        self.config.keys.insert(address_with_tweak.to_string(), encoding::to_base64(&privkey_bytes));
+        self.config.pubkeys.insert(address_with_tweak.to_string(), encoding::to_base64(&pubkey_bytes));
+        self.config.tweaks.insert(address_with_tweak.to_string(), String::from_utf8(tweak).expect("invalid tweak"));
+        self.config.save().expect("Failed to save generated keys");
+
+        address_with_tweak
+    }
+
+    pub fn get_complete_dkg_signature(&self, id: u64, vaults: &[String]) -> String {
+        let mut sig_msg = id.to_be_bytes().to_vec();
+
+        for v in vaults {
+            sig_msg.extend(v.as_bytes())
+        }
+
+        sig_msg = hex::decode(sha256::digest(sig_msg)).unwrap();
+
+        hex::encode(self.identity_key.sign(sig_msg, None))
+    }
 }
 
 fn extract_index_from_task_id(task_id: &str) -> usize {
@@ -666,7 +746,7 @@ pub fn broadcast_dkg_commitments(
 
         for (receiver_identifier, round2_package) in round2_packages {
             let bz = receiver_identifier.serialize();
-            let target = x25519::PublicKey::from_slice(bz.as_slice()).unwrap();
+            let target = x25519::PublicKey::from_ed25519(&ed25519_compact::PublicKey::from_slice(bz.as_slice()).unwrap()).unwrap();
 
             let share_key = target.dh(&x25519::SecretKey::from_ed25519(&signer.identity_key).unwrap()).unwrap();
 
@@ -679,7 +759,7 @@ pub fn broadcast_dkg_commitments(
                 // max_signers: round1_package.max_signers,
                 from_party_id: signer.identifier.clone(),
                 to_party_id: Some(receiver_identifier.clone()),
-                packet: packet,
+                packet,
             };
 
             let new_msg =
