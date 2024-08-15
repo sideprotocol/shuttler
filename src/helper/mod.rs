@@ -4,6 +4,7 @@ pub mod messages;
 pub mod store;
 pub mod bitcoin;
 pub mod http;
-pub mod ticker;
+pub mod loop_tasks;
+pub mod tick_tasks;
 pub mod client_bitcoin;
 pub mod client_side;

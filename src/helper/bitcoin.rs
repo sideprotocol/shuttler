@@ -1,7 +1,11 @@
+use std::u64;
+
 use bitcoin::{
-    key::Secp256k1, opcodes, script::Instruction, Address, BlockHash, Network, PublicKey,
-    ScriptBuf, TapNodeHash, Transaction, Txid, XOnlyPublicKey,
+    key::Secp256k1, opcodes, script::Instruction, transaction::Version, Address, Amount, BlockHash,
+    Network, OutPoint, PublicKey, ScriptBuf, TapNodeHash, Transaction, TxIn, TxOut, Txid,
+    XOnlyPublicKey,
 };
+use bitcoin_hashes::Hash;
 use bitcoincore_rpc::RpcApi;
 use frost_secp256k1_tr::VerifyingKey;
 
@@ -78,7 +82,7 @@ pub fn may_be_withdraw_tx(tx: &Transaction) -> bool {
                     return false;
                 }
             }
-            Ok((2, Instruction::PushBytes(bytes))) => {
+            Ok((6, Instruction::PushBytes(bytes))) => {
                 if bytes.len() > 8 {
                     return false;
                 }
@@ -90,4 +94,36 @@ pub fn may_be_withdraw_tx(tx: &Transaction) -> bool {
     }
 
     return true;
+}
+
+#[test]
+fn test_withdraw_tx_check() {
+    let mut protocol = [0u8; 4];
+    protocol.copy_from_slice("side".as_bytes());
+
+    let sequence = u64::MAX;
+
+    let tx = Transaction {
+        version: Version::TWO,
+        lock_time: bitcoin::absolute::LockTime::ZERO,
+        input: [TxIn {
+            previous_output: OutPoint {
+                txid: Txid::all_zeros(),
+                vout: 0,
+            },
+            ..Default::default()
+        }]
+        .to_vec(),
+        output: [TxOut {
+            value: Amount::from_sat(1000),
+            script_pubkey: ScriptBuf::builder()
+                .push_opcode(opcodes::all::OP_RETURN)
+                .push_slice(protocol)
+                .push_slice(sequence.to_be_bytes())
+                .into_script(),
+        }]
+        .to_vec(),
+    };
+
+    assert!(may_be_withdraw_tx(&tx), "may be a withdrawal tx")
 }
