@@ -674,7 +674,7 @@ impl Shuttler {
                         base_account
                     }
                     Err(_) => {
-                        panic!("Failed to get relayer account");
+                        panic!("===============================================\n Relayer account don't exist on side chain \n===============================================");
                     }
                 }
             }
