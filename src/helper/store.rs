@@ -1,12 +1,15 @@
 use std::collections::BTreeMap;
 
+use cosmos_sdk_proto::side::btcbridge::DkgRequest;
 use frost_secp256k1_tr::{keys::dkg, round1, round2, Identifier, SigningPackage};
 use bitcoin::Psbt;
+use serde::{Deserialize, Serialize};
 use sled::Db;
+use tracing::info;
 use std::sync::Mutex;
 use lazy_static::lazy_static;
 
-use crate::app::config::get_database_path;
+use crate::{app::config::{get_database_path, get_task_database_path}, protocols::dkg::DKGTask};
 
 use super::messages::{SigningSteps, Task};
 
@@ -55,6 +58,12 @@ lazy_static! {
         let path = get_database_path();
         sled::open(path).unwrap()
     };
+
+    static ref TASK_DB: Db = {
+        let path = get_task_database_path();
+        info!("Task database path: {}", path);
+        sled::open(path).unwrap()
+    };
 }
 
 const LAST_SCANNED_HEIGHT_KEY: &str = "last_scanned_height";
@@ -78,19 +87,35 @@ fn get_from_db(key: &str) -> Option<String> {
     }
 }
 
-pub fn save_task(task_id: &str, task: &Task) {
-    save_to_db(task_id, &serde_json::to_string(task).unwrap());
+pub fn save_task(task: &DKGTask) {
+   let se =  &serde_json::to_string(task).unwrap();
+   TASK_DB.insert(task.id.as_str(), se.as_bytes()).expect("Failed to save task to database");
 }
 
-pub fn get_task(task_id: &str) -> Option<Task> {
-    match get_from_db(task_id) {
-        Some(task) => {
-            Some(serde_json::from_str(&task).unwrap())
+pub fn get_task(task_id: &str) -> Option<DKGTask> {
+    match TASK_DB.get(task_id) {
+        Ok(Some(task)) => {
+            Some(serde_json::from_slice(&task).unwrap())
         },
-        None => {
+        _ => {
             None
         }
     }
+}
+
+pub fn list_tasks() -> Vec<DKGTask> {
+    let mut tasks = vec![];
+    info!("Listing tasks from database, total: {:?}", TASK_DB.iter().count());
+    for task in TASK_DB.iter() {
+        let (_, task) = task.unwrap();
+        tasks.push(serde_json::from_slice(&task).unwrap());
+    }
+    tasks
+}
+
+pub fn delete_tasks() {
+    TASK_DB.clear().unwrap();
+    TASK_DB.flush().unwrap();
 }
 
 pub fn save_last_scanned_height(height: u64) {
@@ -109,7 +134,7 @@ pub fn get_last_scanned_height() -> Option<u64> {
 }
 
 pub fn has_dkg_preceeded(key: &str) -> bool {
-    match DB.contains_key(key) {
+    match TASK_DB.contains_key(key) {
         Ok(v) => {
             v
         },

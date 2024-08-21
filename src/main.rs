@@ -1,5 +1,5 @@
 use clap::Parser;
-use tssigner::commands::{address, dkg, init, sign, start, Cli, Commands};
+use tssigner::commands::{address, dkg, init, reset, sign, start, Cli, Commands};
 use tracing_subscriber::{FmtSubscriber, EnvFilter};
 
 #[tokio::main]
@@ -28,6 +28,9 @@ async fn main() {
         }
         Commands::Address => {
             address::execute(&cli);
+        }
+        Commands::Reset => {
+            reset::execute(&cli);
         }
     }
 }

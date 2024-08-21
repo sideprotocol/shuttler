@@ -39,6 +39,7 @@ pub enum Commands {
     /// Start a libp2p node
     Start,
     Address,
+    Reset,
 }
 
 pub mod init;
@@ -46,6 +47,7 @@ pub mod dkg;
 pub mod sign;
 pub mod start;
 pub mod address;
+pub mod reset;
 
 pub async fn publish(conf: &config::Config, task: crate::helper::messages::Task) {
     match TcpStream::connect(conf.mock_server.clone()).await {

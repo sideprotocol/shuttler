@@ -4,8 +4,9 @@ use futures::StreamExt;
 use libp2p::gossipsub::Message;
 
 use libp2p::identity::Keypair;
+use libp2p::request_response::{self, ProtocolSupport};
 use libp2p::swarm::SwarmEvent;
-use libp2p::{gossipsub, mdns, noise, tcp, yamux};
+use libp2p::{gossipsub, mdns, noise, tcp, yamux, StreamProtocol};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use tokio::io::AsyncReadExt as _;
@@ -14,7 +15,10 @@ use tokio::time::Instant;
 use crate::app::{config::Config, signer::Shuttler};
 use crate::helper::messages::{ now, SigningBehaviour, SigningBehaviourEvent, SigningSteps, Task};
 use crate::helper::{loop_tasks::start_loop_tasks, tick_tasks::tasks_fetcher};
+use crate::protocols::dkg::{dkg_event_handler, DKGRequest, DKGResponse};
+use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
 use std::error::Error;
+use std::iter;
 use std::time::Duration;
 use tokio::{io,  select};
 
@@ -31,7 +35,7 @@ pub async fn execute(cli: &Cli) {
 
     info!("Local peer id: {:?}", local_peer_id);
 
-    let mut swarm: libp2p::Swarm<SigningBehaviour> = libp2p::SwarmBuilder::with_new_identity()
+    let mut swarm: libp2p::Swarm<TSSBehaviour> = libp2p::SwarmBuilder::with_new_identity()
         .with_tokio()
         .with_tcp(
             tcp::Config::default(),
@@ -41,40 +45,25 @@ pub async fn execute(cli: &Cli) {
         .expect("Network setup failed")
         .with_quic()
         .with_behaviour(|key| {
-            // To content-address message, we can take the hash of message and use it as an ID.
-            let message_id_fn = |message: &gossipsub::Message| {
-                // let mut s = DefaultHasher::new();
-                // message.data.hash(&mut s);
-                // gossipsub::MessageId::from(s.finish().to_string())
-                // hash_msg(String::from_utf8(message.data)?.to_string())
-                gossipsub::MessageId::from(String::from_utf8_lossy(&message.data).to_string())
-            };
-
-            // Set a custom gossipsub configuration
-            let gossipsub_config = gossipsub::ConfigBuilder::default()
-                .heartbeat_interval(Duration::from_secs(10)) // This is set to aid debugging by not cluttering the log space
-                .validation_mode(gossipsub::ValidationMode::Strict) // This sets the kind of message validation. The default is Strict (enforce message signing)
-                .message_id_fn(message_id_fn) // content-address messages. No two messages of the same content will be propagated.
-                .build()
-                .map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?; // Temporary hack because `build` does not return a proper `std::error::Error`.
-
-            // build a gossipsub network behaviour
-            let gossipsub = gossipsub::Behaviour::new(
-                gossipsub::MessageAuthenticity::Signed(key.clone()),
-                gossipsub_config,
-            )?;
 
             let mdns =
                 mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?;
-            Ok(SigningBehaviour { gossipsub, mdns })
+
+            let protocols = iter::once((StreamProtocol::new("/dkg/1"), ProtocolSupport::Full));
+            let cfg = request_response::Config::default();
+
+            let dkg = request_response::cbor::Behaviour::<DKGRequest, DKGResponse>::new(protocols.clone(), cfg.clone());
+            
+            Ok(TSSBehaviour { mdns, dkg })
         })
         .expect("swarm behaviour config failed")
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
+
         .build();
 
     // start libp2p swarm
     // subscribes to topics
-    subscribes(swarm.behaviour_mut());
+    // subscribes(swarm.behaviour_mut());
     // Listen on all interfaces and whatever port the OS assigns
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse().expect("address parser error")).expect("failed to listen on all interfaces");
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().expect("Address parse error")).expect("failed to listen on all interfaces");
@@ -95,9 +84,6 @@ pub async fn execute(cli: &Cli) {
         }
     };
 
-    let mut stream = subscribe_async(&["tcp://149.28.156.79:38332"]).unwrap();
-
-    
     // this is to ensure that each node fetches tasks at the same time    
     let d = 6 as u64;
     let start = Instant::now() + (Duration::from_secs(d) - Duration::from_secs(now() % d));
@@ -119,21 +105,20 @@ pub async fn execute(cli: &Cli) {
                     info!("Local node is listening on {address}");
                 },
                 SwarmEvent::ConnectionEstablished { peer_id, .. } => {
-                    info!("Connected to {peer_id}");
+                    info!("Connected to {peer_id}, request");
+                    if shuttler.peer_ids.iter().find(|p| *p == &peer_id).is_none() {
+                        info!("Adding peer to peer_ids: {peer_id}");
+                        shuttler.peer_ids.push(peer_id);
+                    }
+                    
                 },
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                     info!("Connection {peer_id} closed.{:?}", cause);
+                    // shuttler.peer_ids.retain(|p| -> bool { p != &peer_id });
                 },
                 _ => {
                     // debug!("Swarm event: {:?}", swarm_event);
                 },
-            },
-
-            zmq_msg = stream.next() => match zmq_msg {
-                Some(block) => {
-                    info!("block: {:?}", block)
-                },
-                None => {}
             },
 
             _ = interval.tick() => {
@@ -143,7 +128,7 @@ pub async fn execute(cli: &Cli) {
             socket = listener.accept() => match socket {
                 Ok((mut tcpstream, _)) => {
                     debug!("Accepted connection from: {:?}", tcpstream.peer_addr().unwrap());
-                    command_handler(&mut tcpstream, swarm.behaviour_mut(), &mut shuttler).await;
+                    command_handler(&mut tcpstream, &mut shuttler).await;
                 }
                 Err(e) => {
                     error!("Failed to accept connection: {:?}", e);
@@ -156,33 +141,42 @@ pub async fn execute(cli: &Cli) {
 
 
 // handle events from the swarm
-async fn event_handler(event: SigningBehaviourEvent, behave: &mut SigningBehaviour, shuttler: &mut Shuttler) {
+async fn event_handler(event: TSSBehaviourEvent, behave: &mut TSSBehaviour, shuttler: &mut Shuttler) {
     match event {
-        SigningBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
+        TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, _multiaddr) in list {
                 info!("mDNS discovered a new peer: {peer_id}");
-                behave.gossipsub.add_explicit_peer(&peer_id); 
+                if shuttler.peer_ids.iter().find(|p| *p == &peer_id).is_none() {
+                    info!("Adding peer to peer_ids: {peer_id}");
+                    shuttler.peer_ids.push(peer_id);
+                }
+                
             }
         }
-        SigningBehaviourEvent::Mdns(mdns::Event::Expired(list)) => {
+        TSSBehaviourEvent::Mdns(mdns::Event::Expired(list)) => {
             for (peer_id, _multiaddr) in list {
                 info!("mDNS discover peer has expired: {peer_id}");
-                behave.gossipsub.remove_explicit_peer(&peer_id);
             }
         }
-        SigningBehaviourEvent::Gossipsub(gossipsub::Event::Message {
-            propagation_source: _peer_id,
-            message_id: _id,
-            message,
-        }) => {
-            // debug!("Received: {:?}", String::from_utf8_lossy(&message.data));
-            topic_handler(&message, behave, shuttler).await.expect("topic processing failed");
+        TSSBehaviourEvent::Dkg(request_response::Event::Message { peer, message }) => {;
+            info!("Received DKG response from {peer}: {:?}", &message);
+            dkg_event_handler( behave, &peer, &shuttler.identity_key, message);
+        }
+        TSSBehaviourEvent::Dkg(request_response::Event::ResponseSent { peer, request_id }) => {
+            info!("Sent DKG Response to {peer}: {request_id}");
+        }
+        TSSBehaviourEvent::Dkg(request_response::Event::InboundFailure { peer, request_id, error}) => {
+            info!("Inbound Failure {peer}: {request_id} - {error}");
+        }
+        TSSBehaviourEvent::Dkg(request_response::Event::OutboundFailure { peer, request_id, error}) => {
+            info!("Outbound Failure {peer}: {request_id} - {error}");
+            
         }
         _ => {}
     }
 }
 
-pub async fn command_handler(steam: &mut TcpStream, behave: &mut SigningBehaviour, shuttler: &mut Shuttler) {
+pub async fn command_handler(steam: &mut TcpStream, shuttler: &mut Shuttler) {
 
     debug!("Accepted connection from: {:?}", steam.peer_addr().unwrap());
     let mut buf = [0; 1024];
@@ -199,22 +193,6 @@ pub async fn command_handler(steam: &mut TcpStream, behave: &mut SigningBehaviou
             let message = String::from_utf8_lossy(&buf[..n]);
             let task = serde_json::from_str::<crate::helper::messages::Task>(&message).unwrap();
 
-            // process the task on local node first
-            match task.step {
-                SigningSteps::DkgInit => shuttler.dkg_init(behave, &task),
-                SigningSteps::SignInit => shuttler.sign_init(behave, &task),
-                _ => {}
-            }
-
-            // publish the message to gossip to enable other nodes to process
-            match behave.gossipsub.publish(task.step.topic(), &buf[..n]) {
-                Ok(_) => {
-                    info!("Published message to gossip: {:?}", message);
-                }
-                Err(e) => {
-                    error!("Failed to publish message to gossip: {:?}", e);
-                }
-            } 
         }
         Err(e) => {
             error!("Failed to read from socket: {}", e);
@@ -222,40 +200,3 @@ pub async fn command_handler(steam: &mut TcpStream, behave: &mut SigningBehaviou
     }
 }
 
-fn subscribes(behave: &mut SigningBehaviour) {
-
-    let topics = vec![
-        SigningSteps::DkgInit,
-        SigningSteps::DkgRound1,
-        SigningSteps::DkgRound2,
-        SigningSteps::SignInit,
-        SigningSteps::SignRound1,
-        SigningSteps::SignRound2,
-    ];
-    
-    for topic in topics {
-        behave.gossipsub.subscribe(&topic.topic()).expect("Failed to subscribe to topic");
-    }
-}
-
-async fn topic_handler(message: &Message, behave: &mut SigningBehaviour, shuttler: &mut Shuttler) -> Result<(), Box<dyn Error>> {
-    let topic = message.topic.clone();
-    if topic == SigningSteps::SignInit.topic().into() {
-        let json = String::from_utf8_lossy(&message.data);
-        let task: Task = serde_json::from_str(&json).expect("msg not deserialized");
-        shuttler.sign_init(behave, &task);
-    } else if topic == SigningSteps::SignRound1.topic().into() {
-        shuttler.sign_round1(message);
-    } else if topic == SigningSteps::SignRound2.topic().into() {
-        shuttler.sign_round2(message).await;
-    } else if topic == SigningSteps::DkgInit.topic().into() {
-        let json = String::from_utf8_lossy(&message.data);
-        let task: Task = serde_json::from_str(&json).expect("msg not deserialized");
-        shuttler.dkg_init(behave, &task);
-    } else if topic == SigningSteps::DkgRound1.topic().into() {
-        shuttler.dkg_round1(message);
-    } else if topic == SigningSteps::DkgRound2.topic().into() {
-        shuttler.dkg_round2(message);
-    }
-    Ok(())
-}

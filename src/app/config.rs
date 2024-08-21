@@ -98,6 +98,12 @@ pub fn get_database_path() -> String {
     home
 }
 
+pub fn get_task_database_path() -> String {
+    let mut home = APPLICATION_PATH.lock().unwrap().clone();
+    home.push_str("/tasks.db");
+    home
+}
+
 pub fn get_sign_key(address: &str) -> Option<KeyPackage> {
     KEYS.lock().unwrap().get(address).cloned()
 }

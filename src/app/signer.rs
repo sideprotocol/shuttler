@@ -8,7 +8,7 @@ use bitcoincore_rpc::{Auth, Client, RpcApi};
 use cosmrs::{crypto::secp256k1::SigningKey, AccountId, Any};
 use frost_core::{keys::{PublicKeyPackage, KeyPackage}, Field};
 use futures::executor::block_on;
-use libp2p::gossipsub::Message;
+use libp2p::{gossipsub::Message, PeerId};
 use cosmos_sdk_proto::{cosmos::auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest}, side::btcbridge::{MsgCompleteDkg, MsgSubmitWithdrawSignatures}};
 use crate::{app::config::{self, Config, PrivValidatorKey}, helper::{client_side::send_cosmos_transaction, messages::now, bitcoin::{get_group_address, get_group_address_by_tweak}}};
 use crate::helper::{
@@ -33,13 +33,14 @@ lazy_static! {
 
 pub struct Shuttler {
     config: Config,
-    identity_key: SecretKey,
+    pub identity_key: SecretKey,
     identifier: Identifier,
     validator_address: Vec<u8>,
     relayer_key: SigningKey,
     relayer_address: AccountId,
 
     pub bitcoin_client: Client,
+    pub peer_ids: Vec<PeerId>,
 }
 
 impl Shuttler {
@@ -78,6 +79,7 @@ impl Shuttler {
             relayer_key, 
             relayer_address,
             config: conf,
+            peer_ids: vec![],
         }
     }
 
@@ -87,7 +89,7 @@ impl Shuttler {
             return
         }
 
-        store::save_task(&task.id, task);
+        // store::save_task(&task.id, task);
 
         let mut rng = thread_rng();
         let (round1_secret_package, round1_package) = frost::keys::dkg::part1(
@@ -175,7 +177,7 @@ impl Shuttler {
                     return;
                 }
             };
-            if received_round2_packages.len() as u16 == task.max_signers - 1 {
+            if received_round2_packages.len() == task.participants.len() - 1 {
                 let round2_secret_package =
                     store::get_dkg_round2_secret_packet(&round2_package.task_id);
                 match round2_secret_package {
@@ -735,7 +737,7 @@ pub fn broadcast_dkg_commitments(
         };
 
         // check if the task has recevied enough packets
-        if task.max_signers - 1 != received_round1_packages.len() as u16 {
+        if task.participants.len() - 1 != received_round1_packages.len() {
             return;
         }
 

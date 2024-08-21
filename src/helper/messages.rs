@@ -3,15 +3,28 @@ use std::time::SystemTime;
 
 use frost_core::serde::{Serialize, Deserialize};
 use libp2p::{gossipsub::IdentTopic, swarm::NetworkBehaviour};
-use libp2p::{gossipsub, mdns};
+use libp2p::{gossipsub, mdns, request_response};
 
 
 use frost_secp256k1_tr as frost;
+
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DKGRequest {
+    task_id: String,
+    step: SigningSteps,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DKGResponse {
+    
+}
 
 #[derive(NetworkBehaviour)]
 pub struct SigningBehaviour {
     pub gossipsub: gossipsub::Behaviour,
     pub mdns: mdns::tokio::Behaviour,
+    pub dkg: request_response::cbor::Behaviour<DKGRequest, DKGResponse>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]

@@ -25,7 +25,7 @@ pub async fn start_loop_tasks(config: Config) {
     let shuttler = Shuttler::new(config);
 
     // scan vault txs
-    scan_vault_txs_loop(&shuttler).await;
+    // scan_vault_txs_loop(&shuttler).await;
 }
 
 async fn scan_vault_txs_loop(shuttler: &Shuttler) {

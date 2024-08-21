@@ -1,10 +1,13 @@
-use std::sync::Mutex;
+use std::{str::FromStr, sync::Mutex};
 
 use bitcoincore_rpc::RpcApi;
 use chrono::{Timelike, Utc};
+use cosmrs::tendermint::node::info;
+use libp2p::PeerId;
 use prost_types::Any;
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
+use serde_json::de;
 use tonic::{Response, Status};
 use tracing::{debug, error, info};
 
@@ -17,12 +20,11 @@ use crate::{
     helper::{
         client_side::get_withdraw_requests,
         messages::{SigningSteps, Task},
-    },
+    }, protocols::{dkg::{collect_dkg_packages, generate_round1_package, DKGRequest, DKGTask}, Round, TSSBehaviour},
 };
 
 use super::{
-    client_side::{self, send_cosmos_transaction},
-    messages::SigningBehaviour,
+    client_side::{self, send_cosmos_transaction}, messages::SigningBehaviour, store,
 };
 use cosmos_sdk_proto::{
     cosmos::{
@@ -33,8 +35,7 @@ use cosmos_sdk_proto::{
         tx::v1beta1::BroadcastTxResponse,
     },
     side::btcbridge::{
-        query_client::QueryClient as BtcQueryClient, BlockHeader, DkgRequestStatus,
-        MsgSubmitBlockHeaders, QueryDkgRequestsRequest,
+        query_client::QueryClient as BtcQueryClient, BlockHeader, DkgRequest, DkgRequestStatus, MsgSubmitBlockHeaders, QueryDkgRequestsRequest
     },
 };
 use lazy_static::lazy_static;
@@ -219,7 +220,7 @@ async fn send_block_headers(
     send_cosmos_transaction(shuttler, any_msg).await
 }
 
-async fn fetch_dkg_requests(shuttler: &mut Shuttler, behave: &mut SigningBehaviour) {
+async fn fetch_dkg_requests(shuttler: &mut Shuttler) {
     let host = shuttler.config().side_chain.grpc.clone();
     let mut client = BtcQueryClient::connect(host.to_owned()).await.unwrap();
     if let Ok(requests) = client
@@ -228,6 +229,7 @@ async fn fetch_dkg_requests(shuttler: &mut Shuttler, behave: &mut SigningBehavio
         })
         .await
     {
+        // debug!("Fetched DKG requests: {:?}", &requests);
         for request in requests.into_inner().requests {
             if request
                 .participants
@@ -236,11 +238,13 @@ async fn fetch_dkg_requests(shuttler: &mut Shuttler, behave: &mut SigningBehavio
                 .is_some()
             {
                 // create a dkg task
-                let mut task = Task::new(SigningSteps::DkgInit, request.id.to_string());
-                task.id = request.id.to_string();
-                task.max_signers = request.participants.len() as u16;
-                task.min_signers = request.threshold as u16;
-                shuttler.dkg_init(behave, &task)
+                let task = DKGTask::from_request(&request);
+                if store::has_dkg_preceeded(task.id.as_str()) {
+                    continue;
+                };
+                generate_round1_package(shuttler.identifier().clone(), &task);
+                debug!("generated a new key: {:?}", request);
+                store::save_task(&task);
             }
         }
     };
@@ -274,40 +278,43 @@ async fn is_coordinator(
 
 pub async fn tasks_fetcher(
     cli: &Cli,
-    behave: &mut SigningBehaviour,
+    behave: &mut TSSBehaviour,
     shuttler: &mut Shuttler,
     rng: &mut ChaCha8Rng,
 ) {
-    // fetch latest active validator setx
-    let host = shuttler.config().side_chain.grpc.clone();
-    let mut client = TendermintServiceClient::connect(host.to_owned())
-        .await
-        .unwrap();
-    let response = client
-        .get_latest_validator_set(GetLatestValidatorSetRequest { pagination: None })
-        .await
-        .unwrap();
 
-    let mut validator_set = response.into_inner().validators;
-    validator_set.sort_by(|a, b| a.voting_power.cmp(&b.voting_power));
+    
+    // fetch latest active validator setx
+    // let host = shuttler.config().side_chain.grpc.clone();
+    // let mut client = TendermintServiceClient::connect(host.to_owned())
+    //     .await
+    //     .unwrap();
+    // let response = client
+    //     .get_latest_validator_set(GetLatestValidatorSetRequest { pagination: None })
+    //     .await
+    //     .unwrap();
+
+    // let mut validator_set = response.into_inner().validators;
+    // validator_set.sort_by(|a, b| a.voting_power.cmp(&b.voting_power));
 
     // ===========================
     // all participants tasks:
     // ===========================
 
     // 1. fetch dkg requests
-    fetch_dkg_requests(shuttler, behave).await;
-    broadcast_dkg_commitments(behave, shuttler);
+    fetch_dkg_requests(shuttler).await;
+    collect_dkg_packages(&shuttler.peer_ids, behave)
+    // broadcast_dkg_commitments(behave, shuttler);
 
     // ===========================
     // coordinator tasks:
     // ===========================
-    if !is_coordinator(&validator_set, shuttler.validator_address(), rng).await {
-        info!("Not a coordinator in this round, skip!");
-        return;
-    }
+    // if !is_coordinator(&validator_set, shuttler.validator_address(), rng).await {
+    //     info!("Not a coordinator in this round, skip!");
+    //     return;
+    // }
 
-    broadcast_signing_commitments(behave, shuttler);
-    fetch_latest_withdraw_requests(cli, behave, shuttler).await;
-    sync_btc_blocks(shuttler).await;
+    // broadcast_signing_commitments(behave, shuttler);
+    // fetch_latest_withdraw_requests(cli, behave, shuttler).await;
+    // sync_btc_blocks(shuttler).await;
 }
