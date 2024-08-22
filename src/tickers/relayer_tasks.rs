@@ -7,7 +7,7 @@ use tonic::{Response, Status};
 use tracing::{error, info};
 
 use crate::{
-    app::{config::Config, signer::Shuttler},
+    app::{config::Config, shuttler::Shuttler},
     helper::{
         bitcoin::{self as bitcoin_utils},
         client_side::{self, send_cosmos_transaction},

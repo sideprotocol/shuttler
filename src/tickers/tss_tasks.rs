@@ -11,7 +11,7 @@ use tracing::{debug, error, info};
 use crate::{
     app::{
         config,
-        signer::{broadcast_dkg_commitments, broadcast_signing_commitments, Shuttler},
+        shuttler::{broadcast_dkg_commitments, broadcast_signing_commitments, Shuttler},
     },
     commands::Cli,
     helper::{

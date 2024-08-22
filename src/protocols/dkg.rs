@@ -17,7 +17,7 @@ use frost::{keys, Identifier, Secp256K1Sha256};
 
 use frost_core::{keys::{dkg::round1::{self, Package}, KeyPackage, PublicKeyPackage}, Field};
 use super::{Round, TSSBehaviour};
-use crate::{app::{config::{self, get_database_path, Keypair}, signer::Shuttler}, helper::{bitcoin::get_group_address, cipher::{decrypt, encrypt}, client_side::send_cosmos_transaction, encoding, store::{self, list_tasks}}};
+use crate::{app::{config::{self, get_database_path, Keypair}, shuttler::Shuttler}, helper::{bitcoin::get_group_address, cipher::{decrypt, encrypt}, client_side::send_cosmos_transaction, encoding, store::{self, list_tasks}}};
 
 use lazy_static::lazy_static;
 

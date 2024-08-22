@@ -12,7 +12,7 @@ use rand_chacha::ChaCha8Rng;
 use tokio::io::AsyncReadExt as _;
 use tokio::time::Instant;
 
-use crate::app::{config::Config, signer::Shuttler};
+use crate::app::{config::Config, shuttler::Shuttler};
 use crate::helper::messages::now;
 use crate::tickers::{relayer_tasks::start_loop_tasks, tss_tasks::tasks_fetcher};
 use crate::protocols::dkg::{dkg_event_handler, DKGRequest, DKGResponse};

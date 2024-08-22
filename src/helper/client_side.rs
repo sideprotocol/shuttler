@@ -8,7 +8,7 @@ use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_client::Service
 use reqwest::Error;
 use tonic::{Response, Status};
 use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, QueryChainTipRequest, QueryChainTipResponse, QueryParamsRequest, QueryParamsResponse, QueryWithdrawRequestsRequest, QueryWithdrawRequestsResponse, QueryWithdrawRequestByTxHashRequest, QueryWithdrawRequestByTxHashResponse};
-use crate::app::signer::Shuttler;
+use crate::app::shuttler::Shuttler;
 
 use prost_types::Any;
 
