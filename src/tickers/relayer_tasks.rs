@@ -156,7 +156,7 @@ async fn send_withdraw_tx(
     proof: Vec<String>,
 ) -> Result<Response<BroadcastTxResponse>, Status> {
     let msg = MsgSubmitWithdrawTransaction {
-        sender: shuttler.relayer_address().as_ref().to_string(),
+        sender: shuttler.config().signer_cosmos_address().to_string(),
         blockhash: block_hash.to_string(),
         tx_bytes: to_base64(encode::serialize(tx).as_slice()),
         proof,
@@ -176,7 +176,7 @@ async fn send_deposit_tx(
     proof: Vec<String>,
 ) -> Result<Response<BroadcastTxResponse>, Status> {
     let msg = MsgSubmitDepositTransaction {
-        sender: shuttler.relayer_address().as_ref().to_string(),
+        sender: shuttler.config().signer_cosmos_address().to_string(),
         blockhash: block_hash.to_string(),
         prev_tx_bytes: to_base64(encode::serialize(prev_tx).as_slice()),
         tx_bytes: to_base64(encode::serialize(tx).as_slice()),

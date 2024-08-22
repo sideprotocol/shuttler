@@ -101,7 +101,7 @@ pub async fn send_cosmos_transaction(shuttler: &Shuttler, msg : Any) -> Result<R
 
     // Generate sender private key.
     // In real world usage, this account would need to be funded before use.
-    let sender_private_key = shuttler.relayer_key();
+    let sender_private_key = shuttler.config().signer_priv_key();
     // let sender_account_id = shuttler.relayer_address();
 
     ///////////////////////////

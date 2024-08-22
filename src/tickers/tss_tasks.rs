@@ -2,6 +2,7 @@ use std:: sync::Mutex;
 
 use bitcoincore_rpc::RpcApi;
 use chrono::{Timelike, Utc};
+use libp2p::{PeerId, Swarm};
 use prost_types::Any;
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
@@ -86,20 +87,20 @@ async fn fetch_latest_withdraw_requests(
     match get_withdraw_requests(&host).await {
         Ok(response) => {
             for request in response.into_inner().requests {
-                let task = Task::new(SigningSteps::SignInit, request.psbt);
-                signer.sign_init(behave, &task);
-                let message = serde_json::to_string(&task).unwrap();
-                match behave
-                    .gossipsub
-                    .publish(task.step.topic(), message.as_bytes())
-                {
-                    Ok(_) => {
-                        info!("Published sign init message to gossip: {:?}", message);
-                    }
-                    Err(e) => {
-                        error!("Failed to publish sign init message to gossip: {:?}", e);
-                    }
-                }
+                // let task = Task::new(SigningSteps::SignInit, request.psbt);
+                // signer.sign_init(behave, &task);
+                // let message = serde_json::to_string(&task).unwrap();
+                // match behave
+                //     .gossipsub
+                //     .publish(task.step.topic(), message.as_bytes())
+                // {
+                //     Ok(_) => {
+                //         info!("Published sign init message to gossip: {:?}", message);
+                //     }
+                //     Err(e) => {
+                //         error!("Failed to publish sign init message to gossip: {:?}", e);
+                //     }
+                // }
             }
         }
         Err(e) => {
@@ -206,7 +207,7 @@ async fn send_block_headers(
     block_headers: &Vec<BlockHeader>,
 ) -> Result<Response<BroadcastTxResponse>, Status> {
     let submit_block_msg = MsgSubmitBlockHeaders {
-        sender: shuttler.relayer_address().as_ref().to_string(),
+        sender: shuttler.config().signer_cosmos_address().to_string(),
         block_headers: block_headers.clone(),
     };
 
@@ -224,7 +225,7 @@ async fn fetch_dkg_requests(shuttler: &mut Shuttler) {
         })
         .await
     {
-        // debug!("Fetched DKG requests: {:?}", &requests);
+        debug!("Fetched DKG requests: {:?}", &requests);
         for request in requests.into_inner().requests {
             if request
                 .participants
@@ -273,7 +274,9 @@ async fn is_coordinator(
 
 pub async fn tasks_fetcher(
     cli: &Cli,
-    behave: &mut TSSBehaviour,
+    // peers: Vec<&PeerId>,
+    // behave: &mut TSSBehaviour,
+    swarm : &mut Swarm<TSSBehaviour>,
     shuttler: &mut Shuttler,
     rng: &mut ChaCha8Rng,
 ) {
@@ -298,7 +301,7 @@ pub async fn tasks_fetcher(
 
     // 1. fetch dkg requests
     fetch_dkg_requests(shuttler).await;
-    collect_dkg_packages(&shuttler.peer_ids, behave)
+    collect_dkg_packages(swarm);
     // broadcast_dkg_commitments(behave, shuttler);
 
     // ===========================

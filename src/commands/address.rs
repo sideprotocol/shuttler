@@ -5,10 +5,12 @@ use super::Cli;
 pub fn execute(cli: &Cli) {
     let conf = Config::from_file(&cli.home).unwrap();
 
-    println!("=============================================================");
-    println!("Signer address: {}", conf.signer_address());
-    println!("Please fund signer address before using it.");
-    println!("=============================================================");
+    println!("Relayer address");
+    println!("-------------------------------------------------------------");
+    println!("Bitcoin: {}", conf.signer_bitcoin_address());
+    println!("Sidechain: {}", conf.signer_cosmos_address());
+    println!("\n NOTE: Please fund relayer address before using it.");
+    println!("-------------------------------------------------------------");
 
     println!("\nVault addresses: ({})", conf.keypairs.len());
     println!("-------------------------------------------------------------");

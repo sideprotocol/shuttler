@@ -2,8 +2,8 @@ use std::time;
 use std::time::SystemTime;
 
 use frost_core::serde::{Serialize, Deserialize};
-use libp2p::{gossipsub::IdentTopic, swarm::NetworkBehaviour};
-use libp2p::{gossipsub, mdns, request_response};
+use libp2p::swarm::NetworkBehaviour;
+use libp2p::{ mdns, request_response};
 
 
 use frost_secp256k1_tr as frost;
@@ -22,7 +22,6 @@ pub enum DKGResponse {
 
 #[derive(NetworkBehaviour)]
 pub struct SigningBehaviour {
-    pub gossipsub: gossipsub::Behaviour,
     pub mdns: mdns::tokio::Behaviour,
     pub dkg: request_response::cbor::Behaviour<DKGRequest, DKGResponse>,
 }
@@ -37,11 +36,6 @@ pub enum SigningSteps {
     SignRound2,
 }
 
-impl SigningSteps {
-    pub fn topic(&self) -> IdentTopic {
-        IdentTopic::new(format!("{:?}", self))
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {

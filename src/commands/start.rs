@@ -53,8 +53,12 @@ pub async fn execute(cli: &Cli) {
             let cfg = request_response::Config::default();
 
             let dkg = request_response::cbor::Behaviour::<DKGRequest, DKGResponse>::new(protocols.clone(), cfg.clone());
+
+            let ping_cfg = libp2p::ping::Config::new();
             
-            Ok(TSSBehaviour { mdns, dkg })
+            let ping = libp2p::ping::Behaviour::new(ping_cfg);
+            
+            Ok(TSSBehaviour { mdns, dkg , ping})
         })
         .expect("swarm behaviour config failed")
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
@@ -68,6 +72,7 @@ pub async fn execute(cli: &Cli) {
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse().expect("address parser error")).expect("failed to listen on all interfaces");
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().expect("Address parse error")).expect("failed to listen on all interfaces");
 
+    // swarm.connected_peers().
     let conf = Config::from_file(&cli.home).unwrap();
     let mut shuttler = Shuttler::new(conf.clone());
 
@@ -92,16 +97,10 @@ pub async fn execute(cli: &Cli) {
                     info!("Local node is listening on {address}");
                 },
                 SwarmEvent::ConnectionEstablished { peer_id, .. } => {
-                    info!("Connected to {peer_id}, request");
-                    if shuttler.peer_ids.iter().find(|p| *p == &peer_id).is_none() {
-                        info!("Adding peer to peer_ids: {peer_id}");
-                        shuttler.peer_ids.push(peer_id);
-                    }
-                    
+                    info!("Connected to {peer_id}, request");                  
                 },
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                     info!("Connection {peer_id} closed.{:?}", cause);
-                    // shuttler.peer_ids.retain(|p| -> bool { p != &peer_id });
                 },
                 _ => {
                     // debug!("Swarm event: {:?}", swarm_event);
@@ -109,7 +108,8 @@ pub async fn execute(cli: &Cli) {
             },
 
             _ = interval.tick() => {
-                tasks_fetcher(cli, swarm.behaviour_mut(), &mut shuttler, &mut rng).await;
+                // let peers = swarm.connected_peers().collect::<Vec<_>>();
+                tasks_fetcher(cli, &mut swarm, &mut shuttler, &mut rng).await;
             },
 
         }
@@ -125,8 +125,21 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
             for (peer_id, multiaddr) in list {
                 info!("mDNS discovered a new peer: {peer_id}");
 
-                let opt = DialOpts::peer_id(peer_id).addresses(vec![multiaddr]).condition(PeerCondition::Disconnected).build();
-                swarm.dial(opt).expect("Failed to dial peer");
+                if swarm.is_connected(&peer_id) {
+                    continue;
+                }
+                let opt = DialOpts::peer_id(peer_id)
+                    .addresses(vec![multiaddr])
+                    .condition(PeerCondition::DisconnectedAndNotDialing)
+                    .build();
+                match swarm.dial(opt) {
+                    Ok(_) => {
+                        info!("Dialed {peer_id}");
+                    }
+                    Err(e) => {
+                        error!("Failed to dial {peer_id}: {e}");
+                    }
+                };
                 
             }
         }
@@ -139,14 +152,22 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
             // debug!("Received DKG response from {peer}: {:?}", &message);
             dkg_event_handler( shuttler, swarm.behaviour_mut(), &peer, message);
         }
-        TSSBehaviourEvent::Dkg(request_response::Event::ResponseSent { peer, request_id }) => {
-            debug!("Sent DKG Response to {peer}: {request_id}");
-        }
         TSSBehaviourEvent::Dkg(request_response::Event::InboundFailure { peer, request_id, error}) => {
             debug!("Inbound Failure {peer}: {request_id} - {error}");
         }
         TSSBehaviourEvent::Dkg(request_response::Event::OutboundFailure { peer, request_id, error}) => {
             debug!("Outbound Failure {peer}: {request_id} - {error}");
+            // let opt = DialOpts::peer_id(peer)
+            // .condition(PeerCondition::DisconnectedAndNotDialing)
+            // .build();
+            // match swarm.dial(opt) {
+            //     Ok(_) => {
+            //         info!("Dialed {peer}");
+            //     }
+            //     Err(e) => {
+            //         error!("Failed to dial {peer}: {e}");
+            //     }
+            // };
             
         }
         _ => {}

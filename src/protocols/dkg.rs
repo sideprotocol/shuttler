@@ -1,7 +1,7 @@
 
 
 use core::fmt;
-use std::{collections::BTreeMap};
+use std::{collections::BTreeMap, fmt::Debug};
 use cosmos_sdk_proto::side::btcbridge::{DkgRequest, DkgRequestStatus, MsgCompleteDkg};
 use cosmrs::Any;
 use ed25519_compact::{x25519, SecretKey};
@@ -35,10 +35,12 @@ pub struct DKGTask {
     pub threshold: u16,
     pub round: Round,
     pub timestamp: i64,
+    pub address_num: u16,
 }
 
 impl DKGTask {
     pub fn from_request(request: &DkgRequest) -> Self {
+
         Self {
             id: format!("dkg-{}", request.id),
             participants: request.participants.iter().map(|p| {
@@ -53,6 +55,7 @@ impl DKGTask {
                 Some(expiration) => expiration.seconds,
                 None => 0,
             },
+            address_num: request.vault_types.len() as u16,
         }
     }
     
@@ -78,11 +81,6 @@ pub enum DKGResponse {
 }
 
 pub fn generate_round1_package(identifier: Identifier, task: &DKGTask) {
-
-    // if !task.participants.contains(&identifier) {
-    //     debug!("I am not a participant in DKG: {}", task.id);
-    //     return;
-    // }
 
     if store::has_dkg_preceeded(task.id.to_string().as_str()) {
         debug!("DKG has already preceeded: {}", task.id);
@@ -179,18 +177,23 @@ pub fn generate_round2_packages(identifier: &Identifier, enc_key: &SecretKey, ta
     Ok(())
 }
 
-pub fn collect_dkg_packages(peers: &Vec<PeerId>, behave: &mut TSSBehaviour) {
+pub fn collect_dkg_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>) {
+    let peers = swarm.connected_peers().map(|p| *p ).collect::<Vec<_>>();
+    if peers.len() == 0 {
+        debug!("No connected peers found for collecting dkg packages");
+        return;
+    }
     let tasks = list_tasks();
     for t in tasks.iter() {
         if t.round == Round::Round1 || t.round == Round::Round2 {
-            debug!("Collecting dkg packages: {}, from {:?}", t.id, peers);
+            // debug!("Collecting dkg packages: {}, from {:?}", t.id, peers);
             peers.iter().for_each(|p| {
                 let request = DKGRequest {
                     task_id: t.id.clone(),
                     round: t.round.clone(),
                 };
                 debug!("Sent DKG Request to {p}: {:?}", &request);
-                behave.dkg.send_request(p, request);
+                swarm.behaviour_mut().dkg.send_request(p, request);
             })
         }
     }
@@ -349,7 +352,7 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
                     let bz = sender.serialize();
                     let source = x25519::PublicKey::from_ed25519(&ed25519_compact::PublicKey::from_slice(bz.as_slice()).unwrap()).unwrap();
                     let share_key = source.dh(&x25519::SecretKey::from_ed25519(&shuttler.identity_key).unwrap()).unwrap();
-                    // let share_key = identifier.dh(&sender).unwrap();
+
                     let packet = decrypt(packet.as_slice(), share_key.as_slice().try_into().unwrap());
                     let received_round2_package = frost::keys::dkg::round2::Package::deserialize(&packet).unwrap();
                     debug!("Received round2 package: {:?}", received_round2_package);
@@ -398,13 +401,6 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
             }
         };
 
-        let address = get_group_address(pubkey.verifying_key(), shuttler.config().bitcoin.network);
-        info!(
-            "Genetrated a new threshold key: {:?}, {:?}",
-            address.to_string(),
-            &pubkey,
-        );
-
         // let privkey_bytes = key.serialize().expect("key not serialized");
         // let pubkey_bytes = pubkey.serialize().expect("pubkey not serialized");
         
@@ -424,12 +420,12 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
         // });
         // conf.save().expect("Failed to save generated keys");
 
-        let address_with_tweak = shuttler.generate_vault_addresses(pubkey, key, 2);
+        let address_with_tweak = shuttler.generate_vault_addresses(pubkey, key, task.address_num);
 
          // submit the vault address to sidechain
          let mut cosm_msg = MsgCompleteDkg {
             id: task_id.replace("dkg-", "").parse().unwrap(),
-            sender: shuttler.relayer_address().to_string(),
+            sender: shuttler.config().signer_cosmos_address().to_string(),
             vaults: address_with_tweak,
             consensus_address: hex::encode_upper(&shuttler.validator_address()),
             signature: "".to_string(),
