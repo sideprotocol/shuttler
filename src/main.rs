@@ -1,5 +1,5 @@
 use clap::Parser;
-use tssigner::commands::{address, dkg, init, reset, sign, start, Cli, Commands};
+use tssigner::commands::{address, init, reset, start, Cli, Commands};
 use tracing_subscriber::{FmtSubscriber, EnvFilter};
 
 #[tokio::main]
@@ -17,12 +17,12 @@ async fn main() {
         Commands::Init { port, network } => {
             init::execute(&cli, port.to_owned(), network.to_owned());
         }
-        Commands::DKG { max_signers, min_signers } => {
-            dkg::execute(&cli, *min_signers, *max_signers).await;
-        }
-        Commands::Sign { pbst } => {
-            sign::execute(&cli, pbst.to_owned()).await;
-        }
+        // Commands::DKG { max_signers, min_signers } => {
+        //     dkg::execute(&cli, *min_signers, *max_signers).await;
+        // }
+        // Commands::Sign { pbst } => {
+        //     sign::execute(&cli, pbst.to_owned()).await;
+        // }
         Commands::Start => {
             start::execute(&cli).await;
         }

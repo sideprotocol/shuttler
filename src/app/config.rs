@@ -4,9 +4,8 @@ use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, path::PathBuf, sync::Mutex};
-use tracing::{debug, error};
 
-use crate::helper::{cipher::random_bytes, encoding::from_base64};
+use crate::helper::cipher::random_bytes;
 
 const CONFIG_FILE: &str = "config.toml";
 
@@ -22,13 +21,20 @@ pub struct Config {
 
     pub bitcoin: BitcoinCfg,
     pub side_chain: CosmosChain,
-    pub keys: BTreeMap<String, String>,
-    pub pubkeys: BTreeMap<String, String>,
+    // pub keys: BTreeMap<String, String>,
+    // pub pubkeys: BTreeMap<String, String>,
 
-    pub tweaks: BTreeMap<String, String>,
-    pub default_tweak: String,
+    // pub tweaks: BTreeMap<String, String>,
+    pub keypairs: BTreeMap<String, Keypair>,
 
     pub last_scanned_height: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Keypair {
+    pub priv_key: KeyPackage,
+    pub pub_key: PublicKeyPackage,
+    pub tweak: String,
 }
 
 /// Bitcoin Configuration
@@ -156,36 +162,36 @@ impl Config {
         let contents = fs::read_to_string(home_dir(app_home).join(CONFIG_FILE))?;
         let config: Config = toml::from_str(&contents).expect("Failed to parse config file");
 
-        config.keys.iter().for_each(|(k, v)| {
-            let b = from_base64(v).unwrap();
-            let kp = match KeyPackage::deserialize(&b) {
-                Ok(kp) => kp,
-                Err(e) => {
-                    error!("failed to load key package: {:?} {:?}", k, e);
-                    return;
-                }            
-            };
-            debug!("Loaded key package for {}, {:?}", k, kp);
-            KEYS.lock().unwrap().insert(k.clone(), kp);
-        });
+        // config.keys.iter().for_each(|(k, v)| {
+        //     let b = from_base64(v).unwrap();
+        //     let kp = match KeyPackage::deserialize(&b) {
+        //         Ok(kp) => kp,
+        //         Err(e) => {
+        //             error!("failed to load key package: {:?} {:?}", k, e);
+        //             return;
+        //         }            
+        //     };
+        //     debug!("Loaded key package for {}, {:?}", k, kp);
+        //     KEYS.lock().unwrap().insert(k.clone(), kp);
+        // });
 
-        config.pubkeys.iter().for_each(|(k, v)| {
-            let b = from_base64(v).unwrap();
-            let pkp = match PublicKeyPackage::deserialize(&b) {
-                Ok(pkp) => pkp,
-                Err(e) => {
-                    error!("failed to load pubkey package: {:?} {:?}", k, e);
-                    return;
-                }            
-            };
-            debug!("Loaded public key package for {}, {:?}", k, pkp);
-            PUBKEYS.lock().unwrap().insert(k.clone(), pkp);
-        });
+        // config.pubkeys.iter().for_each(|(k, v)| {
+        //     let b = from_base64(v).unwrap();
+        //     let pkp = match PublicKeyPackage::deserialize(&b) {
+        //         Ok(pkp) => pkp,
+        //         Err(e) => {
+        //             error!("failed to load pubkey package: {:?} {:?}", k, e);
+        //             return;
+        //         }            
+        //     };
+        //     debug!("Loaded public key package for {}, {:?}", k, pkp);
+        //     PUBKEYS.lock().unwrap().insert(k.clone(), pkp);
+        // });
 
-        config.tweaks.iter().for_each(|(k, v)| {
-            let b = v.as_bytes().to_vec();
-            TWEAKS.lock().unwrap().insert(k.clone(), b);
-        });
+        // config.tweaks.iter().for_each(|(k, v)| {
+        //     let b = v.as_bytes().to_vec();
+        //     TWEAKS.lock().unwrap().insert(k.clone(), b);
+        // });
 
         Ok(config)
     }
@@ -199,8 +205,8 @@ impl Config {
             log_level: "debug".to_string(),
             mnemonic: mnemonic.to_string(),
             priv_validator_key_path: "priv_validator_key.json".to_string(),
-            keys: BTreeMap::new(),
-            pubkeys: BTreeMap::new(),
+            // keys: BTreeMap::new(),
+            // pubkeys: BTreeMap::new(),
             bitcoin: BitcoinCfg {
                 network,
                 rpc: "http://signet:38332".to_string(),
@@ -217,9 +223,9 @@ impl Config {
                 },
                 address_prefix: "side".to_string(),
             },
-            tweaks: BTreeMap::new(),
-            default_tweak: "runes".to_string(),
+            // tweaks: BTreeMap::new(),
             last_scanned_height: 0,
+            keypairs: BTreeMap::new(),
         }
     }
 
@@ -254,9 +260,6 @@ impl Config {
         // sender_account_id.to_string()
     }
 
-    pub fn get_default_tweak(&self) -> Vec<u8> {
-        self.default_tweak.as_bytes().to_vec()
-    }
 }
 
 pub fn compute_relayer_address(mnemonic: &str, network: Network) -> Address {

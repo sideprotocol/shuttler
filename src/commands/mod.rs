@@ -27,15 +27,15 @@ pub enum Commands {
         network: Network    
     },
     /// Remove an item
-    DKG {
-        #[clap(long, default_value = "2")]
-        min_signers: u16,
-        #[clap(long, default_value = "3")]
-        max_signers: u16,
-    },
-    Sign {
-        pbst: String,
-    },
+    // DKG {
+    //     #[clap(long, default_value = "2")]
+    //     min_signers: u16,
+    //     #[clap(long, default_value = "3")]
+    //     max_signers: u16,
+    // },
+    // Sign {
+    //     pbst: String,
+    // },
     /// Start a libp2p node
     Start,
     Address,
@@ -43,8 +43,8 @@ pub enum Commands {
 }
 
 pub mod init;
-pub mod dkg;
-pub mod sign;
+// pub mod dkg;
+// pub mod sign;
 pub mod start;
 pub mod address;
 pub mod reset;

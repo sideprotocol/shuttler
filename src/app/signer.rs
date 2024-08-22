@@ -25,6 +25,8 @@ use ed25519_compact::{x25519, SecretKey};
 
 use lazy_static::lazy_static;
 
+use super::config::Keypair;
+
 lazy_static! {
     static ref BASE_ACCOUNT: Mutex<Option<BaseAccount>> = {
         Mutex::new(None)
@@ -83,182 +85,182 @@ impl Shuttler {
         }
     }
 
-    pub fn dkg_init(&mut self, behave: &mut SigningBehaviour, task: &Task) {
+    // pub fn dkg_init(&mut self, behave: &mut SigningBehaviour, task: &Task) {
 
-        if store::has_dkg_preceeded(&task.id) {
-            return
-        }
+    //     if store::has_dkg_preceeded(&task.id) {
+    //         return
+    //     }
 
-        // store::save_task(&task.id, task);
+    //     // store::save_task(&task.id, task);
 
-        let mut rng = thread_rng();
-        let (round1_secret_package, round1_package) = frost::keys::dkg::part1(
-            self.identifier.clone(),
-            task.max_signers,
-            task.min_signers,
-            &mut rng,
-        )
-        .expect("error in DKG round 1");
-        debug!(
-            "round1_secret_package: {:?}, {:?}",
-            &round1_secret_package, &round1_package
-        );
+    //     let mut rng = thread_rng();
+    //     let (round1_secret_package, round1_package) = frost::keys::dkg::part1(
+    //         self.identifier.clone(),
+    //         task.max_signers,
+    //         task.min_signers,
+    //         &mut rng,
+    //     )
+    //     .expect("error in DKG round 1");
+    //     debug!(
+    //         "round1_secret_package: {:?}, {:?}",
+    //         &round1_secret_package, &round1_package
+    //     );
         
 
-        store::set_dkg_round1_secret_packet(&task.id, round1_secret_package.clone());
+    //     store::set_dkg_round1_secret_packet(&task.id, round1_secret_package.clone());
 
-        let round1_message = DKGRoundMessage {
-            task_id: task.id.clone(),
-            from_party_id: self.identifier,
-            to_party_id: None,
-            packet: &round1_package,
-        };
+    //     let round1_message = DKGRoundMessage {
+    //         task_id: task.id.clone(),
+    //         from_party_id: self.identifier,
+    //         to_party_id: None,
+    //         packet: &round1_package,
+    //     };
 
-        let new_msg = serde_json::to_string(&round1_message).expect("msg not serialized");
-        match behave
-            .gossipsub
-            .publish(SigningSteps::DkgRound1.topic(), new_msg.as_bytes())
-        {
-            Ok(_) => {
-                info!("Published dkg round1 message to gossip: {:?}", new_msg);
-            }
-            Err(e) => {
-                error!("Failed to publish dkg round1 message to gossip: {:?}", e);
-            }
-        }
-    }
+    //     let new_msg = serde_json::to_string(&round1_message).expect("msg not serialized");
+    //     match behave
+    //         .gossipsub
+    //         .publish(SigningSteps::DkgRound1.topic(), new_msg.as_bytes())
+    //     {
+    //         Ok(_) => {
+    //             info!("Published dkg round1 message to gossip: {:?}", new_msg);
+    //         }
+    //         Err(e) => {
+    //             error!("Failed to publish dkg round1 message to gossip: {:?}", e);
+    //         }
+    //     }
+    // }
 
-    pub fn dkg_round1(&mut self, msg: &Message) {
-        let round1_package: DKGRoundMessage<frost::keys::dkg::round1::Package> =
-            serde_json::from_slice(&msg.data).expect("msg not deserialized");
-        debug!("round1_package: {:?}", round1_package);
+    // pub fn dkg_round1(&mut self, msg: &Message) {
+    //     let round1_package: DKGRoundMessage<frost::keys::dkg::round1::Package> =
+    //         serde_json::from_slice(&msg.data).expect("msg not deserialized");
+    //     debug!("round1_package: {:?}", round1_package);
 
-        store::set_dkg_round1_packets(
-            &round1_package.task_id,
-            round1_package.from_party_id,
-            round1_package.packet.clone(),
-        );
+    //     store::set_dkg_round1_packets(
+    //         &round1_package.task_id,
+    //         round1_package.from_party_id,
+    //         round1_package.packet.clone(),
+    //     );
 
-    }
+    // }
 
-    pub fn dkg_round2(&mut self, msg: &Message) {
-        let round2_package: DKGRoundMessage<Vec<u8>> =
-            serde_json::from_slice(&msg.data).expect("msg not deserialized");
-        debug!("round2_package: {:?}", String::from_utf8_lossy(&msg.data));
+    // pub fn dkg_round2(&mut self, msg: &Message) {
+    //     let round2_package: DKGRoundMessage<Vec<u8>> =
+    //         serde_json::from_slice(&msg.data).expect("msg not deserialized");
+    //     debug!("round2_package: {:?}", String::from_utf8_lossy(&msg.data));
 
-        if let Some(to) = round2_package.to_party_id {
-            if to != self.identifier {
-                return;
-            }
-        }
+    //     if let Some(to) = round2_package.to_party_id {
+    //         if to != self.identifier {
+    //             return;
+    //         }
+    //     }
 
-        let bz = round2_package.from_party_id.serialize();
-        let source = x25519::PublicKey::from_ed25519(&ed25519_compact::PublicKey::from_slice(bz.as_slice()).unwrap()).unwrap();
+    //     let bz = round2_package.from_party_id.serialize();
+    //     let source = x25519::PublicKey::from_ed25519(&ed25519_compact::PublicKey::from_slice(bz.as_slice()).unwrap()).unwrap();
 
-        let share_key = source.dh(&x25519::SecretKey::from_ed25519(&self.identity_key).unwrap()).unwrap();
+    //     let share_key = source.dh(&x25519::SecretKey::from_ed25519(&self.identity_key).unwrap()).unwrap();
 
-        let packet = decrypt(round2_package.packet.as_slice(), share_key.as_slice().try_into().unwrap());
-        let received_round2_package =
-            frost::keys::dkg::round2::Package::deserialize(&packet).unwrap();
+    //     let packet = decrypt(round2_package.packet.as_slice(), share_key.as_slice().try_into().unwrap());
+    //     let received_round2_package =
+    //         frost::keys::dkg::round2::Package::deserialize(&packet).unwrap();
 
-        store::set_dkg_round2_packets(
-            &round2_package.task_id,
-            round2_package.from_party_id.clone(),
-            received_round2_package,
-        );
+    //     store::set_dkg_round2_packets(
+    //         &round2_package.task_id,
+    //         round2_package.from_party_id.clone(),
+    //         received_round2_package,
+    //     );
 
-        if let Some(received_round2_packages) =
-            store::get_dkg_round2_packets(&round2_package.task_id)
-        {
-            let task = match store::get_task(&round2_package.task_id) {
-                Some(task) => task,
-                None => {
-                    error!("Failed to get dkg task: {}", round2_package.task_id);
-                    return;
-                }
-            };
-            if received_round2_packages.len() == task.participants.len() - 1 {
-                let round2_secret_package =
-                    store::get_dkg_round2_secret_packet(&round2_package.task_id);
-                match round2_secret_package {
-                    Some(secret_package) => {
-                        let received_round1_packages =
-                            match store::get_dkg_round1_packets(round2_package.task_id.as_str()) {
-                                Some(packages) => packages,
-                                None => {
-                                    error!("round1_secret_package not found");
-                                    return;
-                                }
-                            };
+    //     if let Some(received_round2_packages) =
+    //         store::get_dkg_round2_packets(&round2_package.task_id)
+    //     {
+    //         let task = match store::get_task(&round2_package.task_id) {
+    //             Some(task) => task,
+    //             None => {
+    //                 error!("Failed to get dkg task: {}", round2_package.task_id);
+    //                 return;
+    //             }
+    //         };
+    //         if received_round2_packages.len() == task.participants.len() - 1 {
+    //             let round2_secret_package =
+    //                 store::get_dkg_round2_secret_packet(&round2_package.task_id);
+    //             match round2_secret_package {
+    //                 Some(secret_package) => {
+    //                     let received_round1_packages =
+    //                         match store::get_dkg_round1_packets(round2_package.task_id.as_str()) {
+    //                             Some(packages) => packages,
+    //                             None => {
+    //                                 error!("round1_secret_package not found");
+    //                                 return;
+    //                             }
+    //                         };
 
-                        let (key, pubkey) = frost::keys::dkg::part3(
-                            &secret_package,
-                            &received_round1_packages,
-                            &received_round2_packages,
-                        )
-                        .expect("msg not deserialized");
+    //                     let (key, pubkey) = frost::keys::dkg::part3(
+    //                         &secret_package,
+    //                         &received_round1_packages,
+    //                         &received_round2_packages,
+    //                     )
+    //                     .expect("msg not deserialized");
 
-                        // clean caches
-                        // store::clear_dkg_variables(&round2_package.task_id);
+    //                     // clean caches
+    //                     // store::clear_dkg_variables(&round2_package.task_id);
 
-                        let address = get_group_address(pubkey.verifying_key(), self.config.bitcoin.network);
-                        info!(
-                            "DKG Completed: {:?}, {:?}",
-                            address.to_string(),
-                            &pubkey,
-                        );
+    //                     let address = get_group_address(pubkey.verifying_key(), self.config.bitcoin.network);
+    //                     info!(
+    //                         "DKG Completed: {:?}, {:?}",
+    //                         address.to_string(),
+    //                         &pubkey,
+    //                     );
 
-                        let privkey_bytes = key.serialize().expect("key not serialized");
-                        let pubkey_bytes = pubkey.serialize().expect("pubkey not serialized");
+    //                     let privkey_bytes = key.serialize().expect("key not serialized");
+    //                     let pubkey_bytes = pubkey.serialize().expect("pubkey not serialized");
                         
-                        config::add_sign_key(&address.to_string(), key.clone());
-                        config::add_pub_key(&address.to_string(), pubkey.clone());
+    //                     config::add_sign_key(&address.to_string(), key.clone());
+    //                     config::add_pub_key(&address.to_string(), pubkey.clone());
 
-                        self.config
-                            .keys
-                            .insert(address.to_string(), encoding::to_base64(&privkey_bytes));
-                        self.config
-                            .pubkeys
-                            .insert(address.to_string(), encoding::to_base64(&pubkey_bytes));
-                        self.config.save().expect("Failed to save generated keys");
+    //                     self.config
+    //                         .keys
+    //                         .insert(address.to_string(), encoding::to_base64(&privkey_bytes));
+    //                     self.config
+    //                         .pubkeys
+    //                         .insert(address.to_string(), encoding::to_base64(&pubkey_bytes));
+    //                     self.config.save().expect("Failed to save generated keys");
 
-                        let address_with_tweak = self.add_address_with_tweak(pubkey, key, self.config.get_default_tweak());
+    //                     let address_with_tweak = self.add_address_with_tweak(pubkey, key, self.config.get_default_tweak());
 
-                         // submit the vault address to sidechain
-                         let mut cosm_msg = MsgCompleteDkg {
-                            id: round2_package.task_id.parse().unwrap(),
-                            sender: self.relayer_address.to_string(),
-                            vaults: vec![address.to_string(), address_with_tweak.to_string()],
-                            consensus_address: hex::encode_upper(&self.validator_address),
-                            signature: "".to_string(),
-                        };
+    //                      // submit the vault address to sidechain
+    //                      let mut cosm_msg = MsgCompleteDkg {
+    //                         id: round2_package.task_id.parse().unwrap(),
+    //                         sender: self.relayer_address.to_string(),
+    //                         vaults: vec![address.to_string(), address_with_tweak.to_string()],
+    //                         consensus_address: hex::encode_upper(&self.validator_address),
+    //                         signature: "".to_string(),
+    //                     };
 
-                        cosm_msg.signature = self.get_complete_dkg_signature(cosm_msg.id, &cosm_msg.vaults);
+    //                     cosm_msg.signature = self.get_complete_dkg_signature(cosm_msg.id, &cosm_msg.vaults);
 
-                        let any = Any::from_msg(&cosm_msg).unwrap();
-                        match block_on(send_cosmos_transaction(self, any)) {
-                            Ok(resp) => {
-                                let tx_response = resp.into_inner().tx_response.unwrap();
-                                if tx_response.code != 0 {
-                                    error!("Failed to send dkg vault: {:?}", tx_response);
-                                    return
-                                }
-                                info!("Sent dkg vault: {:?}", tx_response);
-                            },
-                            Err(e) => {
-                                error!("Failed to send dkg vault: {:?}", e);
-                                return
-                            },
-                        };
+    //                     let any = Any::from_msg(&cosm_msg).unwrap();
+    //                     match block_on(send_cosmos_transaction(self, any)) {
+    //                         Ok(resp) => {
+    //                             let tx_response = resp.into_inner().tx_response.unwrap();
+    //                             if tx_response.code != 0 {
+    //                                 error!("Failed to send dkg vault: {:?}", tx_response);
+    //                                 return
+    //                             }
+    //                             info!("Sent dkg vault: {:?}", tx_response);
+    //                         },
+    //                         Err(e) => {
+    //                             error!("Failed to send dkg vault: {:?}", e);
+    //                             return
+    //                         },
+    //                     };
 
-                    }
-                    None => {
-                        error!("round2_secret_package not found");
-                    }
-                }
-            }
-        }
-    }
+    //                 }
+    //                 None => {
+    //                     error!("round2_secret_package not found");
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 
     pub fn sign_init(&mut self, behave: &mut SigningBehaviour, task: &Task) {
 
@@ -683,22 +685,22 @@ impl Shuttler {
         }
     }
 
-    pub fn add_address_with_tweak(&mut self, pubkey: PublicKeyPackage<Secp256K1Sha256>, key: KeyPackage<Secp256K1Sha256>, tweak: Vec<u8>) -> Address {
-        let address_with_tweak = get_group_address_by_tweak(&pubkey.verifying_key(), tweak.clone(), self.config.bitcoin.network);
+    pub fn generate_vault_addresses(&mut self, pubkey: PublicKeyPackage<Secp256K1Sha256>, key: KeyPackage<Secp256K1Sha256>, address_num: u16) -> Vec<String> {
 
-        let privkey_bytes = key.serialize().expect("key not serialized");
-        let pubkey_bytes = pubkey.serialize().expect("pubkey not serialized");
+        let mut addrs = vec![];
+        for _ in 0..address_num {
+            let tweak = "".as_bytes().to_vec();
+            let address_with_tweak = get_group_address_by_tweak(&pubkey.verifying_key(), tweak.clone(), self.config.bitcoin.network);
 
-        config::add_sign_key(&address_with_tweak.to_string(),key);
-        config::add_pub_key(&address_with_tweak.to_string(), pubkey);
-        config::add_tweak(&address_with_tweak.to_string(), tweak.clone());
-
-        self.config.keys.insert(address_with_tweak.to_string(), encoding::to_base64(&privkey_bytes));
-        self.config.pubkeys.insert(address_with_tweak.to_string(), encoding::to_base64(&pubkey_bytes));
-        self.config.tweaks.insert(address_with_tweak.to_string(), String::from_utf8(tweak).expect("invalid tweak"));
+            addrs.push(address_with_tweak.to_string());
+            self.config.keypairs.insert(address_with_tweak.to_string(), Keypair{
+                priv_key: key.clone(),
+                pub_key: pubkey.clone(),
+                tweak: "".to_lowercase(),
+            });
+        }
         self.config.save().expect("Failed to save generated keys");
-
-        address_with_tweak
+        addrs
     }
 
     pub fn get_complete_dkg_signature(&self, id: u64, vaults: &[String]) -> String {

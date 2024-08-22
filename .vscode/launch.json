@@ -9,7 +9,7 @@
             "request": "launch",
             "name": "Start Network",
             "program": "${workspaceFolder}/target/debug/tssigner",
-            "args": ["start"],
+            "args": ["--home", "/Users/developer/.side3", "start"],
             "cwd": "${workspaceFolder}"
         }
     ]

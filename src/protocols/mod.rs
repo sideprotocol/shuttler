@@ -15,5 +15,6 @@ pub struct TSSBehaviour {
 pub enum Round {
     Round1,
     Round2,
+    Closed,
 }
 

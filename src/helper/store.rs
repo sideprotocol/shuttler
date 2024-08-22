@@ -116,6 +116,8 @@ pub fn list_tasks() -> Vec<DKGTask> {
 pub fn delete_tasks() {
     TASK_DB.clear().unwrap();
     TASK_DB.flush().unwrap();
+    DB.clear().unwrap();
+    DB.flush().unwrap();
 }
 
 pub fn save_last_scanned_height(height: u64) {

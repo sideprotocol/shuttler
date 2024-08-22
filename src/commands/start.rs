@@ -1,26 +1,26 @@
-use bitcoincore_zmq::subscribe_async;
+
 use chrono::{Timelike, Utc};
 use futures::StreamExt;
-use libp2p::gossipsub::Message;
 
 use libp2p::identity::Keypair;
 use libp2p::request_response::{self, ProtocolSupport};
-use libp2p::swarm::SwarmEvent;
-use libp2p::{gossipsub, mdns, noise, tcp, yamux, StreamProtocol};
+use libp2p::swarm::dial_opts::PeerCondition;
+use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
+use libp2p::{ mdns, noise, tcp, yamux, StreamProtocol, Swarm};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use tokio::io::AsyncReadExt as _;
 use tokio::time::Instant;
 
 use crate::app::{config::Config, signer::Shuttler};
-use crate::helper::messages::{ now, SigningBehaviour, SigningBehaviourEvent, SigningSteps, Task};
-use crate::helper::{loop_tasks::start_loop_tasks, tick_tasks::tasks_fetcher};
+use crate::helper::messages::now;
+use crate::tickers::{relayer_tasks::start_loop_tasks, tss_tasks::tasks_fetcher};
 use crate::protocols::dkg::{dkg_event_handler, DKGRequest, DKGResponse};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
-use std::error::Error;
+
 use std::iter;
 use std::time::Duration;
-use tokio::{io,  select};
+use tokio::select;
 
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{debug, info, error};
@@ -71,19 +71,6 @@ pub async fn execute(cli: &Cli) {
     let conf = Config::from_file(&cli.home).unwrap();
     let mut shuttler = Shuttler::new(conf.clone());
 
-    // start the command server
-    // listen for local incoming commands
-    let listener = match TcpListener::bind(&conf.mock_server).await {
-        Ok(listener) => {
-            info!("Listening on: {:?}", listener.local_addr().unwrap());
-            listener
-        }
-        Err(e) => {
-            error!("Failed to bind: {:?}", e);
-            return;
-        }
-    };
-
     // this is to ensure that each node fetches tasks at the same time    
     let d = 6 as u64;
     let start = Instant::now() + (Duration::from_secs(d) - Duration::from_secs(now() % d));
@@ -99,7 +86,7 @@ pub async fn execute(cli: &Cli) {
         select! {
             swarm_event = swarm.select_next_some() => match swarm_event {
                 SwarmEvent::Behaviour(evt) => {
-                    event_handler(evt, swarm.behaviour_mut(), &mut shuttler).await;
+                    event_handler(evt, &mut swarm, &mut shuttler).await;
                 },
                 SwarmEvent::NewListenAddr { address, .. } => {
                     info!("Local node is listening on {address}");
@@ -125,31 +112,21 @@ pub async fn execute(cli: &Cli) {
                 tasks_fetcher(cli, swarm.behaviour_mut(), &mut shuttler, &mut rng).await;
             },
 
-            socket = listener.accept() => match socket {
-                Ok((mut tcpstream, _)) => {
-                    debug!("Accepted connection from: {:?}", tcpstream.peer_addr().unwrap());
-                    command_handler(&mut tcpstream, &mut shuttler).await;
-                }
-                Err(e) => {
-                    error!("Failed to accept connection: {:?}", e);
-                }
-            }
         }
     }
 }
 
 
 
-// handle events from the swarm
-async fn event_handler(event: TSSBehaviourEvent, behave: &mut TSSBehaviour, shuttler: &mut Shuttler) {
+// handle sub events from the swarm
+async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>, shuttler: &mut Shuttler) {
     match event {
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
-            for (peer_id, _multiaddr) in list {
+            for (peer_id, multiaddr) in list {
                 info!("mDNS discovered a new peer: {peer_id}");
-                if shuttler.peer_ids.iter().find(|p| *p == &peer_id).is_none() {
-                    info!("Adding peer to peer_ids: {peer_id}");
-                    shuttler.peer_ids.push(peer_id);
-                }
+
+                let opt = DialOpts::peer_id(peer_id).addresses(vec![multiaddr]).condition(PeerCondition::Disconnected).build();
+                swarm.dial(opt).expect("Failed to dial peer");
                 
             }
         }
@@ -159,17 +136,17 @@ async fn event_handler(event: TSSBehaviourEvent, behave: &mut TSSBehaviour, shut
             }
         }
         TSSBehaviourEvent::Dkg(request_response::Event::Message { peer, message }) => {;
-            info!("Received DKG response from {peer}: {:?}", &message);
-            dkg_event_handler( behave, &peer, &shuttler.identity_key, message);
+            // debug!("Received DKG response from {peer}: {:?}", &message);
+            dkg_event_handler( shuttler, swarm.behaviour_mut(), &peer, message);
         }
         TSSBehaviourEvent::Dkg(request_response::Event::ResponseSent { peer, request_id }) => {
-            info!("Sent DKG Response to {peer}: {request_id}");
+            debug!("Sent DKG Response to {peer}: {request_id}");
         }
         TSSBehaviourEvent::Dkg(request_response::Event::InboundFailure { peer, request_id, error}) => {
-            info!("Inbound Failure {peer}: {request_id} - {error}");
+            debug!("Inbound Failure {peer}: {request_id} - {error}");
         }
         TSSBehaviourEvent::Dkg(request_response::Event::OutboundFailure { peer, request_id, error}) => {
-            info!("Outbound Failure {peer}: {request_id} - {error}");
+            debug!("Outbound Failure {peer}: {request_id} - {error}");
             
         }
         _ => {}

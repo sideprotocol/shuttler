@@ -8,14 +8,13 @@ use tracing::{error, info};
 
 use crate::{
     app::{config::Config, signer::Shuttler},
-    helper::encoding::to_base64,
+    helper::{
+        bitcoin::{self as bitcoin_utils},
+        client_side::{self, send_cosmos_transaction},
+        store, encoding::to_base64,
+    },
 };
 
-use super::{
-    bitcoin::{self as bitcoin_utils},
-    client_side::{self, send_cosmos_transaction},
-    store,
-};
 use cosmos_sdk_proto::{
     cosmos::tx::v1beta1::BroadcastTxResponse,
     side::btcbridge::{MsgSubmitDepositTransaction, MsgSubmitWithdrawTransaction},
