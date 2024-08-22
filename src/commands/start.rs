@@ -6,7 +6,7 @@ use libp2p::identity::Keypair;
 use libp2p::request_response::{self, ProtocolSupport};
 use libp2p::swarm::dial_opts::PeerCondition;
 use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
-use libp2p::{ mdns, noise, tcp, yamux, StreamProtocol, Swarm};
+use libp2p::{ mdns, gossipsub, noise, tcp, yamux, StreamProtocol, Swarm};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use tokio::io::AsyncReadExt as _;
@@ -54,11 +54,9 @@ pub async fn execute(cli: &Cli) {
 
             let dkg = request_response::cbor::Behaviour::<DKGRequest, DKGResponse>::new(protocols.clone(), cfg.clone());
 
-            let ping_cfg = libp2p::ping::Config::new();
+            let gossip = gossipsub::Behaviour::new(gossipsub::Config::default()).expect("msgsub setup failed");
             
-            let ping = libp2p::ping::Behaviour::new(ping_cfg);
-            
-            Ok(TSSBehaviour { mdns, dkg , ping})
+            Ok(TSSBehaviour { mdns, dkg , gossip})
         })
         .expect("swarm behaviour config failed")
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
