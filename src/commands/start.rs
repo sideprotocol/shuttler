@@ -54,7 +54,7 @@ pub async fn execute(cli: &Cli) {
 
             let dkg = request_response::cbor::Behaviour::<DKGRequest, DKGResponse>::new(protocols.clone(), cfg.clone());
 
-            let gossip = gossipsub::Behaviour::new(gossipsub::Config::default()).expect("msgsub setup failed");
+            let gossip: gossipsub::Behaviour = gossipsub::Behaviour::new(gossipsub::Config::default()).expect("msgsub setup failed");
             
             Ok(TSSBehaviour { mdns, dkg , gossip})
         })
