@@ -1,5 +1,4 @@
 
-use base64::engine::general_purpose;
 use libp2p::{mdns, request_response, gossipsub, swarm::NetworkBehaviour};
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +10,7 @@ pub struct TSSBehaviour {
     pub mdns: mdns::tokio::Behaviour,
     pub gossip: gossipsub::Behaviour,
     pub dkg: request_response::cbor::Behaviour<dkg::DKGRequest, dkg::DKGResponse>,
+    pub signer: request_response::cbor::Behaviour<sign::SignRequest, sign::SignResponse>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

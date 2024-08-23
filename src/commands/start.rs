@@ -1,12 +1,12 @@
 
 use chrono::{Timelike, Utc};
-use futures::StreamExt;
+use futures::{lock, StreamExt};
 
-use libp2p::identity::Keypair;
+use libp2p::identity::{ed25519, Keypair};
 use libp2p::request_response::{self, ProtocolSupport};
 use libp2p::swarm::dial_opts::PeerCondition;
 use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
-use libp2p::{ mdns, gossipsub, noise, tcp, yamux, StreamProtocol, Swarm};
+use libp2p::{ gossipsub, mdns, noise, tcp, yamux, PeerId, StreamProtocol, Swarm};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use tokio::io::AsyncReadExt as _;
@@ -14,11 +14,14 @@ use tokio::time::Instant;
 
 use crate::app::{config::Config, shuttler::Shuttler};
 use crate::helper::messages::now;
+use crate::protocols::sign::{SignRequest, SignResponse};
 use crate::tickers::{relayer_tasks::start_loop_tasks, tss_tasks::tasks_fetcher};
 use crate::protocols::dkg::{dkg_event_handler, DKGRequest, DKGResponse};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
 
-use std::iter;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io::Read;
+use std::{io, iter};
 use std::time::Duration;
 use tokio::select;
 
@@ -30,8 +33,19 @@ use super::Cli;
 pub async fn execute(cli: &Cli) {
 
     // Generate a random peer ID
-    let kb = Keypair::generate_ed25519();
-    let local_peer_id = kb.public().to_peer_id();
+
+    let conf = Config::from_file(&cli.home).unwrap();
+    let mut shuttler = Shuttler::new(conf.clone());
+
+    // let keyy = shuttler..as_mut_slice();
+    // // let b = keyy.by_ref();
+    // let priv_k = from_base64(shuttler.priv_validator_key.priv_key.value).unwrap();
+    // let kp = Keypair::ed25519_from_bytes(keyy).expect("Failed to create keypair from bytes");
+    // let bytes = from_base64(&shuttler.priv_validator_key.priv_key.value).unwrap();
+    // let kp = Keypair::ed25519_from_bytes(bytes).expect("msg");
+    // let local_peer_id = kp.public().to_peer_id();
+    let local_peer_id = PeerId::random();
+    //let local_peer_id = PeerId::from_public_key(&shuttler.identifier().serialize()[0..32]).expect("msg");
 
     info!("Local peer id: {:?}", local_peer_id);
 
@@ -48,15 +62,37 @@ pub async fn execute(cli: &Cli) {
 
             let mdns =
                 mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?;
-
-            let protocols = iter::once((StreamProtocol::new("/dkg/1"), ProtocolSupport::Full));
             let cfg = request_response::Config::default();
 
-            let dkg = request_response::cbor::Behaviour::<DKGRequest, DKGResponse>::new(protocols.clone(), cfg.clone());
+            let dkg = request_response::cbor::Behaviour::<DKGRequest, DKGResponse>::new(
+                iter::once((StreamProtocol::new("/dkg/1"), ProtocolSupport::Full)), cfg.clone()
+            );
+            let signer = request_response::cbor::Behaviour::<SignRequest, SignResponse>::new(
+                iter::once((StreamProtocol::new("/tss/1"), ProtocolSupport::Full)), cfg
+            );
 
-            let gossip: gossipsub::Behaviour = gossipsub::Behaviour::new(gossipsub::Config::default()).expect("msgsub setup failed");
+            // To content-address message, we can take the hash of message and use it as an ID.
+            let message_id_fn = |message: &gossipsub::Message| {
+                let mut s = DefaultHasher::new();
+                message.data.hash(&mut s);
+                gossipsub::MessageId::from(s.finish().to_string())
+            };
+
+            // Set a custom gossipsub configuration
+            let gossipsub_config = gossipsub::ConfigBuilder::default()
+                .heartbeat_interval(Duration::from_secs(10)) // This is set to aid debugging by not cluttering the log space
+                .validation_mode(gossipsub::ValidationMode::Strict) // This sets the kind of message validation. The default is Strict (enforce message signing)
+                .message_id_fn(message_id_fn) // content-address messages. No two messages of the same content will be propagated.
+                .build()
+                .map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?; // Temporary hack because `build` does not return a proper `std::error::Error`.
+
+            // build a gossipsub network behaviour
+            let gossip = gossipsub::Behaviour::new(
+                gossipsub::MessageAuthenticity::Signed(key.clone()),
+                gossipsub_config,
+            )?;
             
-            Ok(TSSBehaviour { mdns, dkg , gossip})
+            Ok(TSSBehaviour { mdns, dkg , gossip, signer})
         })
         .expect("swarm behaviour config failed")
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
@@ -71,8 +107,6 @@ pub async fn execute(cli: &Cli) {
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().expect("Address parse error")).expect("failed to listen on all interfaces");
 
     // swarm.connected_peers().
-    let conf = Config::from_file(&cli.home).unwrap();
-    let mut shuttler = Shuttler::new(conf.clone());
 
     // this is to ensure that each node fetches tasks at the same time    
     let d = 6 as u64;
@@ -120,24 +154,25 @@ pub async fn execute(cli: &Cli) {
 async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>, shuttler: &mut Shuttler) {
     match event {
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
-            for (peer_id, multiaddr) in list {
+            for (peer_id, _multiaddr) in list {
                 info!("mDNS discovered a new peer: {peer_id}");
 
-                if swarm.is_connected(&peer_id) {
-                    continue;
-                }
-                let opt = DialOpts::peer_id(peer_id)
-                    .addresses(vec![multiaddr])
-                    .condition(PeerCondition::DisconnectedAndNotDialing)
-                    .build();
-                match swarm.dial(opt) {
-                    Ok(_) => {
-                        info!("Dialed {peer_id}");
-                    }
-                    Err(e) => {
-                        error!("Failed to dial {peer_id}: {e}");
-                    }
-                };
+                swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
+                // if swarm.is_connected(&peer_id) {
+                //     continue;
+                // }
+                // let opt = DialOpts::peer_id(peer_id)
+                //     .addresses(vec![multiaddr])
+                //     .condition(PeerCondition::DisconnectedAndNotDialing)
+                //     .build();
+                // match swarm.dial(opt) {
+                //     Ok(_) => {
+                //         info!("Dialed {peer_id}");
+                //     }
+                //     Err(e) => {
+                //         error!("Failed to dial {peer_id}: {e}");
+                //     }
+                // };
                 
             }
         }
@@ -155,18 +190,9 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
         }
         TSSBehaviourEvent::Dkg(request_response::Event::OutboundFailure { peer, request_id, error}) => {
             debug!("Outbound Failure {peer}: {request_id} - {error}");
-            // let opt = DialOpts::peer_id(peer)
-            // .condition(PeerCondition::DisconnectedAndNotDialing)
-            // .build();
-            // match swarm.dial(opt) {
-            //     Ok(_) => {
-            //         info!("Dialed {peer}");
-            //     }
-            //     Err(e) => {
-            //         error!("Failed to dial {peer}: {e}");
-            //     }
-            // };
-            
+        }
+        TSSBehaviourEvent::Signer(request_response::Event::Message { peer, message }) => {
+            debug!("Received Signer response from {peer}: {:?}", &message);
         }
         _ => {}
     }

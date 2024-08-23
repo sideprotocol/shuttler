@@ -17,13 +17,17 @@ use frost::{keys, Identifier, Secp256K1Sha256};
 
 use frost_core::{keys::{dkg::round1::{self, Package}, KeyPackage, PublicKeyPackage}, Field};
 use super::{Round, TSSBehaviour};
-use crate::{app::{config::{self, get_database_path, Keypair}, shuttler::Shuttler}, helper::{bitcoin::get_group_address, cipher::{decrypt, encrypt}, client_side::send_cosmos_transaction, encoding, store::{self, list_tasks}}};
+use crate::{app::{config::{self, get_database_path, get_database_with_name, Keypair}, shuttler::Shuttler}, helper::{bitcoin::get_group_address, cipher::{decrypt, encrypt}, client_side::send_cosmos_transaction, encoding, store::{self, list_tasks}}};
 
 use lazy_static::lazy_static;
 
 lazy_static! {
     static ref DB: sled::Db = {
-        let path = get_database_path();
+        let path = get_database_with_name("dkg-variables");
+        sled::open(path).unwrap()
+    };
+    static ref DB_TASK: sled::Db = {
+        let path = get_database_with_name("dkg-task");
         sled::open(path).unwrap()
     };
 }
@@ -427,7 +431,7 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
             id: task_id.replace("dkg-", "").parse().unwrap(),
             sender: shuttler.config().signer_cosmos_address().to_string(),
             vaults: address_with_tweak,
-            consensus_address: hex::encode_upper(&shuttler.validator_address()),
+            consensus_address: shuttler.validator_address(),
             signature: "".to_string(),
         };
 

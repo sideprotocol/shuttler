@@ -17,8 +17,6 @@ use crate::helper::{
 use frost::Identifier; 
 use frost_secp256k1_tr::{self as frost, Secp256K1Sha256};
 
-use ::bitcoin::secp256k1::schnorr::Signature as SchnorrSignature;
-
 use tracing::{debug, error, info};
 use rand::thread_rng;
 use ed25519_compact::{x25519, SecretKey};
@@ -37,9 +35,8 @@ pub struct Shuttler {
     config: Config,
     pub identity_key: SecretKey,
     identifier: Identifier,
-    validator_address: Vec<u8>,
+    pub priv_validator_key: PrivValidatorKey,
     pub bitcoin_client: Client,
-    pub peer_ids: Vec<PeerId>,
 }
 
 impl Shuttler {
@@ -73,10 +70,9 @@ impl Shuttler {
         Self {
             identity_key: local_key,
             identifier,
-            validator_address: hex::decode(validator_key.address).unwrap(),
+            priv_validator_key: validator_key,
             bitcoin_client,
             config: conf,
-            peer_ids: vec![],
         }
     }
 
@@ -645,8 +641,8 @@ impl Shuttler {
     //     &self.relayer_address
     // }
 
-    pub fn validator_address(&self) -> &[u8] {
-        &self.validator_address
+    pub fn validator_address(&self) -> String {
+        self.priv_validator_key.address.clone()
     }
 
     pub async fn get_relayer_account(&self) -> BaseAccount {

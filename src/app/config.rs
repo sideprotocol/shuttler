@@ -99,6 +99,13 @@ pub fn get_app_home() -> String {
     APPLICATION_PATH.lock().unwrap().clone()
 }
 
+pub fn get_database_with_name(db_name: &str) -> String {
+    let mut home = APPLICATION_PATH.lock().unwrap().clone();
+    home.push_str("/data/");
+    home.push_str(db_name);
+    home
+}
+
 pub fn get_database_path() -> String {
     let mut home = APPLICATION_PATH.lock().unwrap().clone();
     home.push_str("/history.db");

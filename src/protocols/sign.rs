@@ -1,0 +1,503 @@
+use std::collections::BTreeMap;
+
+use bitcoin::{key::TapTweak, secp256k1::{self, schnorr}, sighash::{self, SighashCache}, Address, Psbt, TapNodeHash, TapSighashType, TxOut, Witness};
+use bitcoin_hashes::Hash;
+use bitcoincore_rpc::RpcApi;
+use cosmos_sdk_proto::side::btcbridge::{BitcoinWithdrawRequest, MsgSubmitWithdrawSignatures};
+use cosmrs::Any;
+use libp2p::{request_response, PeerId};
+use rand::thread_rng;
+use serde::{Deserialize, Serialize};
+use tracing::{debug, error, info};
+
+use frost::{Identifier, Secp256K1Sha256, round1, round2}; 
+use frost_secp256k1_tr::{self as frost, round1::SigningNonces};
+use crate::{app::{config::{self, get_database_with_name}, shuttler::{self, Shuttler}}, helper::{client_side::send_cosmos_transaction, encoding::{self, from_base64}, messages::{SignMessage, SigningSteps}, store}};
+
+use super::{Round, TSSBehaviour};
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref DB: sled::Db = {
+        let path = get_database_with_name("sign-variables");
+        sled::open(path).unwrap()
+    };
+    static ref DB_TASK: sled::Db = {
+        let path = get_database_with_name("sign-task");
+        sled::open(path).unwrap()
+    };
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignRequest {
+    pub task_id: String,
+    pub round: Round,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SignResponse {
+    Round1 {
+        task_id: String,
+        packets: Vec<BTreeMap<Identifier, round1::SigningCommitments>>,
+    },
+    Round2 {
+        task_id: String,
+        // <sender, <receiver, package>>
+        packets: Vec<BTreeMap<Identifier, round2::SignatureShare>>,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignTask {
+    pub id: String,
+    pub psbt: String,
+    pub round: Round,
+    pub sessions: Vec<SignSession>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignSession {
+    pub task_id: String,
+    pub index: usize,
+    pub sig_hash: Vec<u8>,
+    pub address: String,
+    /// NOTE: Should not share this with other parties
+    pub nonces: SigningNonces,
+    pub commitments: BTreeMap<Identifier, round1::SigningCommitments>,
+    pub signatures: BTreeMap<Identifier, round2::SignatureShare>,
+}
+
+pub fn generate_nonce_and_commitments(request: BitcoinWithdrawRequest, identifier: Identifier, network: bitcoin::Network) {
+
+    match DB_TASK.contains_key(request.txid.as_bytes()) {
+        Ok(false) => {
+            debug!("Fetched a new signing task: {:?}", request);
+        }
+        _ => {
+            return;
+        }
+    }
+
+    let psbt_bytes = from_base64(&request.psbt).unwrap();
+    let group_task_id = request.txid.clone();
+
+    let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
+        Ok(psbt) => psbt,
+        Err(e) => {
+            error!("Failed to deserialize PSBT: {}", e);
+            return;
+        }
+    };
+
+    let len = psbt.inputs.len();
+    debug!("(signing round 0) prepare for signing: {:?} transactions of {:?}", len, request.txid );
+    let mut txs = Vec::new();
+    for i in 0..len {
+
+        let input = &psbt.inputs[i];
+        if input.witness_utxo.is_none() {
+            continue;
+        }
+
+        let prev_utxo = match psbt.inputs[i].witness_utxo.clone() {
+            Some(utxo) => utxo,
+            None => {
+                error!("Failed to get witness_utxo");
+                return;
+            }
+        };
+
+        info!("prev_tx: {:?}", prev_utxo.script_pubkey);
+        let script = input.witness_utxo.clone().unwrap().script_pubkey;
+        let address: Address = Address::from_script(&script, network).unwrap();
+
+        // get the message to sign
+        let hash_ty = input
+            .sighash_type
+            .and_then(|psbt_sighash_type| psbt_sighash_type.taproot_hash_ty().ok())
+            .unwrap_or(bitcoin::TapSighashType::Default);
+        let hash = match SighashCache::new(&psbt.unsigned_tx).taproot_key_spend_signature_hash(
+            i,
+            &sighash::Prevouts::All(&[TxOut {
+                value: prev_utxo.value,
+                script_pubkey: script,
+            }]),
+            hash_ty,
+        ) {
+            Ok(hash) => hash,
+            Err(e) => {
+                error!("failed to compute sighash: {}", e);
+                return;
+            }
+        };
+
+        let sign_key = match config::get_sign_key(address.to_string().as_str()) {
+            Some(key) => {
+                debug!("loaded key: {:?}", key);
+                key
+            }
+            None => {
+                error!("Failed to get signing key for address: {}", address);
+                continue;
+            }
+        };
+
+        let mut rng = thread_rng();
+        let (nonce, commitments) = frost::round1::commit(sign_key.signing_share(), &mut rng);
+
+        let mut commitments_map = BTreeMap::new();
+        commitments_map.insert(identifier, commitments.clone());
+        let trasaction = SignSession {
+            task_id: group_task_id.clone(),
+            index: i,
+            sig_hash: hash.to_raw_hash().to_byte_array().to_vec(),
+            address: address.to_string(),
+            nonces: nonce,
+            commitments: commitments_map,
+            signatures: BTreeMap::new(),
+        };
+
+        txs.push(trasaction);
+ 
+    }
+
+    let task = SignTask {
+        id: group_task_id.clone(),
+        psbt: request.psbt.clone(),
+        round: Round::Round1,
+        sessions: txs,
+    };
+
+    save_sign_task(&task);
+
+}
+
+pub fn prepare_response_for_request(task_id: String, req_round: Round) -> Option<SignResponse> {
+    let task = match get_sign_task(&task_id) {
+        Some(task) => task,
+        None => return None,
+    };
+    match req_round {
+        Round::Round1 => {
+            let commits = task.sessions.iter().map(|session| session.commitments.clone()).collect::<Vec<_>>();
+            Some(SignResponse::Round1 {
+                task_id: task.id.clone(),
+                packets: commits,
+            })
+        },
+        Round::Round2 => {
+            let signatures = task.sessions.iter().map(|session| session.signatures.clone()).collect::<Vec<_>>();
+            Some(SignResponse::Round2 {
+                task_id: task.id.clone(),
+                packets: signatures,
+            })
+        },
+        _ => None,
+    }
+}
+
+pub fn received_response(response: SignResponse) {
+    match response {
+        SignResponse::Round1 { task_id, packets } => {
+            let mut task = match get_sign_task(&task_id) {
+                Some(task) => task,
+                None => {
+                    debug!("task does not exist: {}", task_id);
+                    return;
+                }
+            };
+            task.sessions.iter_mut().enumerate().for_each(|(i, tx)| {
+                let packet = packets.get(i).unwrap();
+                tx.commitments.extend(packet); // merge received commitments
+            });
+
+            // if task.transactions[0].commitments.len() >= 3 {
+            //     task.round = Round::Round2;
+            //     // generate co
+            // }
+
+            save_sign_task(&task);
+        },
+        SignResponse::Round2 { task_id, packets } => {
+            let mut task = match get_sign_task(&task_id) {
+                Some(task) => task,
+                None => {
+                    debug!("task does not exist: {}", task_id);
+                    return;
+                }
+            };
+            task.sessions.iter_mut().enumerate().for_each(|(i, tx)| {
+                let packet = packets.get(i).unwrap();
+                tx.signatures.extend(packet); // merge received commitments
+            });
+
+            save_sign_task(&task);
+        }
+    }
+}
+
+pub fn generate_signature_shares(task: &mut SignTask, identifier: Identifier, conf: &config::Config) {
+
+    task.sessions.iter_mut().for_each(|session: &mut SignSession| {
+        // filter packets from unknown parties
+        match conf.keypairs.get(&session.address) {
+            Some(keypair) => {
+                // when number of receved commitments is larger than min_signers
+                // the following code will be executed or re-executed
+                let signing_package = frost::SigningPackage::new(
+                    session.commitments.clone(), 
+                    frost::SigningTarget::new(
+                        &session.sig_hash, 
+                        frost::SigningParameters{
+                            tapscript_merkle_root: match keypair.tweak {
+                                Some(tweak) => Some(tweak.to_vec()),
+                                None => None,
+                            },
+                        }
+                    ));
+
+                let signature_shares =
+                    match frost::round2::sign(&signing_package, &session.nonces, &keypair.priv_key) {
+                        Ok(shares) => shares,
+                        Err(e) => {
+                            error!("Error: {:?}", e);
+                            return;
+                        }
+                    };
+                session.signatures.insert(identifier, signature_shares);
+            }
+            None => {
+                error!("skip task, no pubkey found for task: {:?}", task.id);
+            }
+        };
+    });
+
+    save_sign_task(task)
+
+}
+
+pub async fn aggregate_signature_shares(task: &mut SignTask, conf: &config::Config) {
+    
+    let psbt_bytes = from_base64(&task.psbt).unwrap();
+    let mut psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
+        Ok(psbt) => psbt,
+        Err(e) => {
+            error!("Failed to deserialize PSBT: {}", e);
+            return;
+        }
+    };
+
+    task.sessions.iter().enumerate().for_each(|(index, session)| {
+        if session.commitments.len() != session.signatures.len() {
+            return;
+        }
+        let keypair = match conf.keypairs.get(&session.address) {
+            Some(keypair) => keypair,
+            None => {
+                error!("Failed to get keypair for address: {}", session.address);
+                return;
+            }
+        };
+        let sig_target = frost::SigningTarget::new(
+            &session.sig_hash,
+            frost::SigningParameters {
+                tapscript_merkle_root:  match keypair.tweak {
+                        Some(tweak) => Some(tweak.to_vec()),
+                        None => None,
+                    },
+                }
+        );
+        let signing_package = frost::SigningPackage::new(
+            session.commitments.clone(),
+            sig_target
+        );
+
+        match frost::aggregate(&signing_package, &session.signatures, &keypair.pub_key) {
+            Ok(signature) => {
+                // println!("public key: {:?}", pub)
+                // let sighash = &hex::decode(sig_shares_message.message).unwrap();
+                let is_signature_valid = keypair.pub_key
+                    .verifying_key()
+                    .verify(signing_package.sig_target().clone(), &signature)
+                    .is_ok();
+                info!(
+                    "Signature: {:?} verified: {:?}",
+                    signature, is_signature_valid
+                );
+
+                if !is_signature_valid {
+                    error!("Signature is invalid");
+                    return;
+                }
+
+                // Convert frost public key to bitcoin public key
+                let pubkey = match bitcoin::PublicKey::from_slice(&keypair.pub_key.verifying_key().serialize()) {
+                    Ok(pk) => pk,
+                    Err(e) => {
+                        error!("Failed to convert frost public key to bitcoin public key: {:?}", e);
+                        return;
+                    }
+                };
+                // let sig_bytes = signature.serialize();
+                let secp = secp256k1::Secp256k1::new();
+                let utpk = bitcoin::key::UntweakedPublicKey::from(pubkey.inner);
+
+                let merkle_root = match signing_package.sig_target().sig_params().tapscript_merkle_root.clone() {
+                    Some(root) => {
+                        if root.len() == 0 {
+                            None
+                        } else {
+                            Some(TapNodeHash::from_slice(&root).unwrap())
+                        }
+                    }
+                    None => None
+                };
+
+                let (tpk, _) = utpk.tap_tweak(&secp, merkle_root);
+
+                // convert signature to schnorr signature
+                let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&signature.serialize()).unwrap();
+                let msg = bitcoin::secp256k1::Message::from_digest_slice(&session.sig_hash).unwrap();
+                match secp.verify_schnorr(&sig, &msg, &tpk.to_inner()) {
+                    Ok(_) => info!("Signature is valid"),
+                    Err(e) => error!("Signature is invalid: {}", e),
+                }
+
+                psbt.inputs[index].tap_key_sig = Option::Some(bitcoin::taproot::Signature {
+                    signature: sig,
+                    sighash_type: TapSighashType::Default,
+                });
+
+                let witness = Witness::p2tr_key_spend(&psbt.inputs[index].tap_key_sig.unwrap());
+                psbt.inputs[index].final_script_witness = Some(witness);
+                psbt.inputs[index].partial_sigs = BTreeMap::new();
+                psbt.inputs[index].sighash_type = None;
+            }
+            Err(e) => {
+                error!("Signature aggregation error: {:?}", e);
+            }
+        };
+    });
+
+    save_sign_task(task);
+
+    let is_complete = psbt.inputs.iter().all(|input| {
+        input.final_script_witness.is_some()
+    });
+    debug!("is_complete: {:?}", is_complete);
+
+    if is_complete {
+
+       
+    } else {
+        info!("PSBT is incomplete");
+    }
+}
+
+async fn submit_signatures(psbt: &Psbt, shuttler: &Shuttler) {
+
+    // broadcast to bitcoin network
+    let signed_tx = psbt.clone().extract_tx().expect("failed to extract signed tx");
+    match shuttler.bitcoin_client.send_raw_transaction(&signed_tx) {
+        Ok(txid) => {
+            info!("Tx broadcasted: {}", txid);
+        }
+        Err(err) => {
+            error! ("Failed to broadcast tx: {:?}, err: {:?}", signed_tx.compute_txid(), err);
+            return;
+        }
+    }
+
+    let psbt_bytes = psbt.serialize();
+    let psbt_base64 = encoding::to_base64(&psbt_bytes);
+    info!("Signed PSBT: {:?}", psbt_base64);
+
+    // submit signed psbt to side chain
+    let msg = MsgSubmitWithdrawSignatures {
+        sender: shuttler.config().signer_cosmos_address().to_string(),
+        txid: signed_tx.compute_txid().to_string(),
+        psbt: psbt_base64,
+    };
+
+    let any = Any::from_msg(&msg).unwrap();
+    match send_cosmos_transaction(shuttler, any).await {
+        Ok(resp) => {
+            let tx_response = resp.into_inner().tx_response.unwrap();
+            if tx_response.code != 0 {
+                error!("Failed to submit signatures: {:?}", tx_response);
+                return
+            }
+            info!("Submitted signatures: {:?}", tx_response);
+        },
+        Err(e) => {
+            error!("Failed to submit signatures: {:?}", e);
+            return
+        },
+    };
+    // send message to the network
+}
+
+pub fn collect_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>) {
+    let peers = swarm.connected_peers().map(|p| p.clone() ).collect::<Vec<_>>();
+    if peers.len() == 0 {
+        debug!("No connected peers found for collecting dkg packages");
+        return;
+    }
+
+    // collect tss packages
+    for item in DB_TASK.iter() {
+        let task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
+        let request = SignRequest {
+            task_id: task.id.clone(),
+            round: task.round.clone(),
+        };
+        if task.round == Round::Round1 || task.round == Round::Round2 {
+            peers.iter().for_each(|p| {
+                debug!("Sent Signer Request to {p}: {:?}", &request);
+                swarm.behaviour_mut().signer.send_request(p, request.clone());
+            })
+        }
+    };
+}
+pub fn tss_event_handler(shuttler: &mut Shuttler, behave: &mut TSSBehaviour, peer: &PeerId, message: request_response::Message<SignRequest, SignResponse>) {
+    // handle dkg events
+    debug!("Received TSS response from {peer}: {:?}", &message);
+    match message {
+        request_response::Message::Request { request_id, request, channel } => {
+            debug!("Received TSS Request from {peer}: {request_id}");
+            if let Some(response) = match request {SignRequest { task_id, round } => {
+                prepare_response_for_request(task_id, round)
+            }} {
+                match behave.signer.send_response(channel, response) {
+                    Ok(_) => {
+                        debug!("Sent TSS Response to {peer}: {request_id}");
+                    }
+                    Err(e) => {
+                        error!("Failed to send TSS Response to {peer}: {request_id} - {:?}", e);
+                    }
+                };
+            }
+        }
+
+        request_response::Message::Response { request_id, response } => {
+            debug!("Received TSS Response from {peer}: {request_id}");
+            received_response(response);
+        }
+    }
+}
+
+
+fn get_sign_task(id: &str) -> Option<SignTask> {
+    match DB_TASK.get(id) {
+        Ok(Some(task)) => {
+            let task: SignTask = serde_json::from_slice(&task).unwrap();
+            Some(task)
+        },
+        _ => None,
+    }
+}
+
+fn save_sign_task(task: &SignTask) {
+    let value = serde_json::to_vec(&task).unwrap();
+    DB_TASK.insert(task.id.as_bytes(), value).unwrap();
+}

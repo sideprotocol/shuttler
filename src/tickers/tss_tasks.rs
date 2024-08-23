@@ -47,7 +47,7 @@ lazy_static! {
 
 async fn fetch_latest_withdraw_requests(
     cli: &Cli,
-    behave: &mut SigningBehaviour,
+    behave: &mut TSSBehaviour,
     signer: &mut Shuttler,
 ) {
     let host = signer.config().side_chain.grpc.as_str();
@@ -56,37 +56,10 @@ async fn fetch_latest_withdraw_requests(
         return;
     }
 
-    let seed = Utc::now().minute() as usize;
-    debug!("Seed: {:?}", seed);
-
-    match config::get_pub_key_by_index(0) {
-        Some(k) => {
-            let n = k.verifying_shares().len();
-
-            debug!("Key: {:?} {}", k, seed % n);
-            let coordinator = match k.verifying_shares().iter().nth(seed % n) {
-                Some((k, v)) => {
-                    debug!("Verifying share: {:?} {:?}", k, v);
-                    k
-                }
-                None => {
-                    error!("No verifying share found");
-                    return;
-                }
-            };
-            if coordinator != signer.identifier() {
-                return;
-            }
-        }
-        None => {
-            error!("No public key found, skip!");
-            return;
-        }
-    }
-
     match get_withdraw_requests(&host).await {
         Ok(response) => {
-            for request in response.into_inner().requests {
+            let requests = response.into_inner().requests;
+            for request in requests {
                 // let task = Task::new(SigningSteps::SignInit, request.psbt);
                 // signer.sign_init(behave, &task);
                 // let message = serde_json::to_string(&task).unwrap();
@@ -219,18 +192,20 @@ async fn send_block_headers(
 async fn fetch_dkg_requests(shuttler: &mut Shuttler) {
     let host = shuttler.config().side_chain.grpc.clone();
     let mut client = BtcQueryClient::connect(host.to_owned()).await.unwrap();
-    if let Ok(requests) = client
+    if let Ok(requests_response) = client
         .query_dkg_requests(QueryDkgRequestsRequest {
             status: DkgRequestStatus::Pending as i32,
         })
         .await
     {
+
+        let requests = requests_response.into_inner().requests;
         debug!("Fetched DKG requests: {:?}", &requests);
-        for request in requests.into_inner().requests {
+        for request in requests {
             if request
                 .participants
                 .iter()
-                .find(|p| p.consensus_address == hex::encode_upper(shuttler.validator_address()))
+                .find(|p| p.consensus_address == shuttler.validator_address())
                 .is_some()
             {
                 // create a dkg task
@@ -302,6 +277,7 @@ pub async fn tasks_fetcher(
     // 1. fetch dkg requests
     fetch_dkg_requests(shuttler).await;
     collect_dkg_packages(swarm);
+    fetch_latest_withdraw_requests(cli, behave, signer)
     // broadcast_dkg_commitments(behave, shuttler);
 
     // ===========================
