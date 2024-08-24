@@ -31,20 +31,14 @@ lazy_static! {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignRequest {
     pub task_id: String,
-    pub round: Round,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SignResponse {
-    Round1 {
-        task_id: String,
-        packets: Vec<BTreeMap<Identifier, round1::SigningCommitments>>,
-    },
-    Round2 {
-        task_id: String,
-        // <sender, <receiver, package>>
-        packets: Vec<BTreeMap<Identifier, round2::SignatureShare>>,
-    }
+pub struct SignResponse {
+    task_id: String,
+    commitments: Vec<BTreeMap<Identifier, round1::SigningCommitments>>,
+    // <sender, <receiver, package>>
+    signatures_shares: Vec<BTreeMap<Identifier, round2::SignatureShare>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,7 +61,7 @@ pub struct SignSession {
     pub signatures: BTreeMap<Identifier, round2::SignatureShare>,
 }
 
-pub fn generate_nonce_and_commitments(request: BitcoinWithdrawRequest, identifier: Identifier, network: bitcoin::Network) {
+pub fn generate_nonce_and_commitments(request: BitcoinWithdrawRequest, shuttler: &Shuttler) {
 
     match DB_TASK.contains_key(request.txid.as_bytes()) {
         Ok(false) => {
@@ -90,8 +84,12 @@ pub fn generate_nonce_and_commitments(request: BitcoinWithdrawRequest, identifie
     };
 
     let len = psbt.inputs.len();
-    debug!("(signing round 0) prepare for signing: {:?} transactions of {:?}", len, request.txid );
-    let mut txs = Vec::new();
+    debug!("(signing round 0) prepare for signing: {:?} sessions of {:?}", len, request.txid );
+    let mut sessions = Vec::new();
+    let preouts = psbt.inputs.iter()
+        .filter(|i| i.witness_utxo.is_some())
+        .map(|input| input.witness_utxo.clone().unwrap())
+        .collect::<Vec<_>>();
     for i in 0..len {
 
         let input = &psbt.inputs[i];
@@ -109,7 +107,7 @@ pub fn generate_nonce_and_commitments(request: BitcoinWithdrawRequest, identifie
 
         info!("prev_tx: {:?}", prev_utxo.script_pubkey);
         let script = input.witness_utxo.clone().unwrap().script_pubkey;
-        let address: Address = Address::from_script(&script, network).unwrap();
+        let address: Address = Address::from_script(&script, shuttler.config().bitcoin.network).unwrap();
 
         // get the message to sign
         let hash_ty = input
@@ -118,10 +116,7 @@ pub fn generate_nonce_and_commitments(request: BitcoinWithdrawRequest, identifie
             .unwrap_or(bitcoin::TapSighashType::Default);
         let hash = match SighashCache::new(&psbt.unsigned_tx).taproot_key_spend_signature_hash(
             i,
-            &sighash::Prevouts::All(&[TxOut {
-                value: prev_utxo.value,
-                script_pubkey: script,
-            }]),
+            &sighash::Prevouts::All(&preouts),
             hash_ty,
         ) {
             Ok(hash) => hash,
@@ -131,10 +126,10 @@ pub fn generate_nonce_and_commitments(request: BitcoinWithdrawRequest, identifie
             }
         };
 
-        let sign_key = match config::get_sign_key(address.to_string().as_str()) {
+        let sign_key = match shuttler.config().keypairs.get(address.to_string().as_str()) {
             Some(key) => {
-                debug!("loaded key: {:?}", key);
-                key
+                debug!("loaded key for address: {:?}", address);
+                &key.priv_key
             }
             None => {
                 error!("Failed to get signing key for address: {}", address);
@@ -146,7 +141,7 @@ pub fn generate_nonce_and_commitments(request: BitcoinWithdrawRequest, identifie
         let (nonce, commitments) = frost::round1::commit(sign_key.signing_share(), &mut rng);
 
         let mut commitments_map = BTreeMap::new();
-        commitments_map.insert(identifier, commitments.clone());
+        commitments_map.insert(shuttler.identifier().clone(), commitments.clone());
         let trasaction = SignSession {
             task_id: group_task_id.clone(),
             index: i,
@@ -157,7 +152,7 @@ pub fn generate_nonce_and_commitments(request: BitcoinWithdrawRequest, identifie
             signatures: BTreeMap::new(),
         };
 
-        txs.push(trasaction);
+        sessions.push(trasaction);
  
     }
 
@@ -165,83 +160,77 @@ pub fn generate_nonce_and_commitments(request: BitcoinWithdrawRequest, identifie
         id: group_task_id.clone(),
         psbt: request.psbt.clone(),
         round: Round::Round1,
-        sessions: txs,
+        sessions,
     };
 
     save_sign_task(&task);
 
 }
 
-pub fn prepare_response_for_request(task_id: String, req_round: Round) -> Option<SignResponse> {
+pub fn prepare_response_for_request(task_id: String) -> Option<SignResponse> {
     let task = match get_sign_task(&task_id) {
         Some(task) => task,
         None => return None,
     };
-    match req_round {
-        Round::Round1 => {
-            let commits = task.sessions.iter().map(|session| session.commitments.clone()).collect::<Vec<_>>();
-            Some(SignResponse::Round1 {
-                task_id: task.id.clone(),
-                packets: commits,
-            })
-        },
-        Round::Round2 => {
-            let signatures = task.sessions.iter().map(|session| session.signatures.clone()).collect::<Vec<_>>();
-            Some(SignResponse::Round2 {
-                task_id: task.id.clone(),
-                packets: signatures,
-            })
-        },
-        _ => None,
-    }
+    Some(SignResponse {
+        task_id: task.id.clone(),
+        commitments: task.sessions.iter().map(|session| session.commitments.clone()).collect::<Vec<_>>(),
+        signatures_shares: task.sessions.iter().map(|session| session.signatures.clone()).collect::<Vec<_>>(),
+    })
 }
 
 pub fn received_response(response: SignResponse) {
-    match response {
-        SignResponse::Round1 { task_id, packets } => {
-            let mut task = match get_sign_task(&task_id) {
-                Some(task) => task,
-                None => {
-                    debug!("task does not exist: {}", task_id);
-                    return;
-                }
-            };
-            task.sessions.iter_mut().enumerate().for_each(|(i, tx)| {
-                let packet = packets.get(i).unwrap();
-                tx.commitments.extend(packet); // merge received commitments
-            });
 
-            // if task.transactions[0].commitments.len() >= 3 {
-            //     task.round = Round::Round2;
-            //     // generate co
-            // }
+    let task_id = response.task_id.clone();
 
-            save_sign_task(&task);
-        },
-        SignResponse::Round2 { task_id, packets } => {
-            let mut task = match get_sign_task(&task_id) {
-                Some(task) => task,
-                None => {
-                    debug!("task does not exist: {}", task_id);
-                    return;
-                }
-            };
-            task.sessions.iter_mut().enumerate().for_each(|(i, tx)| {
-                let packet = packets.get(i).unwrap();
-                tx.signatures.extend(packet); // merge received commitments
-            });
-
-            save_sign_task(&task);
+    let mut task = match get_sign_task(&task_id) {
+        Some(task) => task,
+        None => {
+            debug!("task does not exist: {}", task_id);
+            return;
         }
-    }
+    };
+    task.sessions.iter_mut().enumerate().for_each(|(i, session)| {
+        let packet = response.commitments.get(i).unwrap();
+        session.commitments.extend(packet); // merge received commitments
+    });
+
+    task.sessions.iter_mut().enumerate().for_each(|(i, session)| {
+        let packet = response.signatures_shares.get(i).unwrap();
+        session.signatures.extend(packet); // merge received commitments
+    });
+
+    // let s = task.sessions.iter().map(|s| s.signatures.clone()).collect::<Vec<_>>();
+    debug!("Received response for task: {:?} {:?} {:?}", task_id, 
+        task.sessions.iter().map(|s| s.commitments.clone()).collect::<Vec<_>>(),
+        task.sessions.iter().map(|s| s.signatures.clone()).collect::<Vec<_>>(),
+    );
+
+    save_sign_task(&task);
+
 }
 
 pub fn generate_signature_shares(task: &mut SignTask, identifier: Identifier, conf: &config::Config) {
 
-    task.sessions.iter_mut().for_each(|session: &mut SignSession| {
+    if task.round == Round::Closed {
+        return;
+    }
+
+    task.sessions.iter_mut().enumerate().for_each(|(i, session)| {
         // filter packets from unknown parties
         match conf.keypairs.get(&session.address) {
             Some(keypair) => {
+
+                if session.commitments.len() < *keypair.priv_key.min_signers() as usize {
+                    error!("skip task, not enough commitments for task: {:?} {}", task.id, i);
+                    return;
+                }
+
+                if session.signatures.contains_key(&identifier) {
+                    debug!("skip task, already signed for task: {:?} {}", task.id, i);
+                    return;
+                }
+
                 // when number of receved commitments is larger than min_signers
                 // the following code will be executed or re-executed
                 let signing_package = frost::SigningPackage::new(
@@ -267,7 +256,7 @@ pub fn generate_signature_shares(task: &mut SignTask, identifier: Identifier, co
                 session.signatures.insert(identifier, signature_shares);
             }
             None => {
-                error!("skip task, no pubkey found for task: {:?}", task.id);
+                error!("skip task, not found keypair for task: {:?}", task.id);
             }
         };
     });
@@ -276,18 +265,23 @@ pub fn generate_signature_shares(task: &mut SignTask, identifier: Identifier, co
 
 }
 
-pub async fn aggregate_signature_shares(task: &mut SignTask, conf: &config::Config) {
+pub fn aggregate_signature_shares(task: &mut SignTask, conf: &config::Config) -> Option<Psbt> {
+
+    if task.round == Round::Closed {
+        return None;
+    }
     
     let psbt_bytes = from_base64(&task.psbt).unwrap();
     let mut psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
         Ok(psbt) => psbt,
         Err(e) => {
             error!("Failed to deserialize PSBT: {}", e);
-            return;
+            return None;
         }
     };
 
     task.sessions.iter().enumerate().for_each(|(index, session)| {
+
         if session.commitments.len() != session.signatures.len() {
             return;
         }
@@ -298,6 +292,9 @@ pub async fn aggregate_signature_shares(task: &mut SignTask, conf: &config::Conf
                 return;
             }
         };
+        if session.signatures.len() < *keypair.priv_key.min_signers() as usize {
+            return;
+        }
         let sig_target = frost::SigningTarget::new(
             &session.sig_hash,
             frost::SigningParameters {
@@ -379,22 +376,22 @@ pub async fn aggregate_signature_shares(task: &mut SignTask, conf: &config::Conf
         };
     });
 
-    save_sign_task(task);
-
     let is_complete = psbt.inputs.iter().all(|input| {
         input.final_script_witness.is_some()
     });
-    debug!("is_complete: {:?}", is_complete);
+    debug!("Is {} complete: {:?}", task.id, is_complete);
 
     if is_complete {
-
-       
-    } else {
-        info!("PSBT is incomplete");
+        task.round = Round::Closed;
+        save_sign_task(task);
+        return Some(psbt.to_owned())
     }
+
+    save_sign_task(task);
+    None
 }
 
-async fn submit_signatures(psbt: &Psbt, shuttler: &Shuttler) {
+pub async fn submit_signatures(psbt: Psbt, shuttler: &Shuttler) {
 
     // broadcast to bitcoin network
     let signed_tx = psbt.clone().extract_tx().expect("failed to extract signed tx");
@@ -437,37 +434,44 @@ async fn submit_signatures(psbt: &Psbt, shuttler: &Shuttler) {
     // send message to the network
 }
 
-pub fn collect_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>) {
+pub async fn collect_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, shuttler: &Shuttler) {
     let peers = swarm.connected_peers().map(|p| p.clone() ).collect::<Vec<_>>();
     if peers.len() == 0 {
-        debug!("No connected peers found for collecting dkg packages");
+        debug!("No connected peers found for collecting tss packages");
         return;
     }
 
     // collect tss packages
     for item in DB_TASK.iter() {
-        let task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
-        let request = SignRequest {
-            task_id: task.id.clone(),
-            round: task.round.clone(),
-        };
-        if task.round == Round::Round1 || task.round == Round::Round2 {
-            peers.iter().for_each(|p| {
-                debug!("Sent Signer Request to {p}: {:?}", &request);
-                swarm.behaviour_mut().signer.send_request(p, request.clone());
-            })
+        let mut task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
+
+        generate_signature_shares(&mut task, shuttler.identifier().clone(), shuttler.config());
+        if let Some(psbt) = aggregate_signature_shares(&mut task, shuttler.config()) {
+            submit_signatures(psbt, shuttler).await;
         }
+
+        if task.round == Round::Closed {
+            continue;
+        }
+
+        let request = SignRequest {
+            task_id: task.id.clone()
+        };
+
+        peers.iter().for_each(|p| {
+            debug!("Sent Signer Request to {p}: {:?}", &request);
+            swarm.behaviour_mut().signer.send_request(p, request.clone());
+        })
     };
 }
-pub fn tss_event_handler(shuttler: &mut Shuttler, behave: &mut TSSBehaviour, peer: &PeerId, message: request_response::Message<SignRequest, SignResponse>) {
+
+pub fn tss_event_handler(behave: &mut TSSBehaviour, peer: &PeerId, message: request_response::Message<SignRequest, SignResponse>) {
     // handle dkg events
     debug!("Received TSS response from {peer}: {:?}", &message);
     match message {
         request_response::Message::Request { request_id, request, channel } => {
             debug!("Received TSS Request from {peer}: {request_id}");
-            if let Some(response) = match request {SignRequest { task_id, round } => {
-                prepare_response_for_request(task_id, round)
-            }} {
+            if let Some(response) = prepare_response_for_request(request.task_id) {
                 match behave.signer.send_response(channel, response) {
                     Ok(_) => {
                         debug!("Sent TSS Response to {peer}: {request_id}");

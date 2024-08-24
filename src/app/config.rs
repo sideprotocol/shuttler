@@ -3,6 +3,7 @@ use bip39::{self, Mnemonic};
 use cosmrs::{crypto::secp256k1::SigningKey, AccountId};
 use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
 use lazy_static::lazy_static;
+use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, path::PathBuf, str::FromStr, sync::Mutex};
 
@@ -13,8 +14,8 @@ const CONFIG_FILE: &str = "config.toml";
 /// Threshold Signature Configuration
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
-    /// Internal command listener
-    pub mock_server: String,
+    pub peer_id: String,
+    pub port: u32,
     /// logger level
     pub log_level: String,
     pub mnemonic: String,
@@ -170,46 +171,16 @@ impl Config {
         let contents = fs::read_to_string(home_dir(app_home).join(CONFIG_FILE))?;
         let config: Config = toml::from_str(&contents).expect("Failed to parse config file");
 
-        // config.keys.iter().for_each(|(k, v)| {
-        //     let b = from_base64(v).unwrap();
-        //     let kp = match KeyPackage::deserialize(&b) {
-        //         Ok(kp) => kp,
-        //         Err(e) => {
-        //             error!("failed to load key package: {:?} {:?}", k, e);
-        //             return;
-        //         }            
-        //     };
-        //     debug!("Loaded key package for {}, {:?}", k, kp);
-        //     KEYS.lock().unwrap().insert(k.clone(), kp);
-        // });
-
-        // config.pubkeys.iter().for_each(|(k, v)| {
-        //     let b = from_base64(v).unwrap();
-        //     let pkp = match PublicKeyPackage::deserialize(&b) {
-        //         Ok(pkp) => pkp,
-        //         Err(e) => {
-        //             error!("failed to load pubkey package: {:?} {:?}", k, e);
-        //             return;
-        //         }            
-        //     };
-        //     debug!("Loaded public key package for {}, {:?}", k, pkp);
-        //     PUBKEYS.lock().unwrap().insert(k.clone(), pkp);
-        // });
-
-        // config.tweaks.iter().for_each(|(k, v)| {
-        //     let b = v.as_bytes().to_vec();
-        //     TWEAKS.lock().unwrap().insert(k.clone(), b);
-        // });
-
         Ok(config)
     }
 
-    pub fn default(port: u16, network: Network) -> Self {
+    pub fn default(port: u32, network: Network) -> Self {
         let entropy = random_bytes(32);
         let mnemonic = bip39::Mnemonic::from_entropy(entropy.as_slice()).expect("failed to create mnemonic");
 
         Self {
-            mock_server: format!("localhost:{}", port),
+            peer_id: PeerId::random().to_base58(),
+            port: port as u32,
             log_level: "debug".to_string(),
             mnemonic: mnemonic.to_string(),
             priv_validator_key_path: "priv_validator_key.json".to_string(),

@@ -14,7 +14,7 @@ use tokio::time::Instant;
 
 use crate::app::{config::Config, shuttler::Shuttler};
 use crate::helper::messages::now;
-use crate::protocols::sign::{SignRequest, SignResponse};
+use crate::protocols::sign::{tss_event_handler, SignRequest, SignResponse};
 use crate::tickers::{relayer_tasks::start_loop_tasks, tss_tasks::tasks_fetcher};
 use crate::protocols::dkg::{dkg_event_handler, DKGRequest, DKGResponse};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
@@ -44,7 +44,7 @@ pub async fn execute(cli: &Cli) {
     // let bytes = from_base64(&shuttler.priv_validator_key.priv_key.value).unwrap();
     // let kp = Keypair::ed25519_from_bytes(bytes).expect("msg");
     // let local_peer_id = kp.public().to_peer_id();
-    let local_peer_id = PeerId::random();
+    let local_peer_id = PeerId::from_bytes(data);
     //let local_peer_id = PeerId::from_public_key(&shuttler.identifier().serialize()[0..32]).expect("msg");
 
     info!("Local peer id: {:?}", local_peer_id);
@@ -103,7 +103,7 @@ pub async fn execute(cli: &Cli) {
     // subscribes to topics
     // subscribes(swarm.behaviour_mut());
     // Listen on all interfaces and whatever port the OS assigns
-    swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse().expect("address parser error")).expect("failed to listen on all interfaces");
+    // swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse().expect("address parser error")).expect("failed to listen on all interfaces");
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().expect("Address parse error")).expect("failed to listen on all interfaces");
 
     // swarm.connected_peers().
@@ -154,25 +154,25 @@ pub async fn execute(cli: &Cli) {
 async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>, shuttler: &mut Shuttler) {
     match event {
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
-            for (peer_id, _multiaddr) in list {
+            for (peer_id, multiaddr) in list {
                 info!("mDNS discovered a new peer: {peer_id}");
 
                 swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-                // if swarm.is_connected(&peer_id) {
-                //     continue;
-                // }
-                // let opt = DialOpts::peer_id(peer_id)
-                //     .addresses(vec![multiaddr])
-                //     .condition(PeerCondition::DisconnectedAndNotDialing)
-                //     .build();
-                // match swarm.dial(opt) {
-                //     Ok(_) => {
-                //         info!("Dialed {peer_id}");
-                //     }
-                //     Err(e) => {
-                //         error!("Failed to dial {peer_id}: {e}");
-                //     }
-                // };
+                if swarm.is_connected(&peer_id) {
+                    continue;
+                }
+                let opt = DialOpts::peer_id(peer_id)
+                    .addresses(vec![multiaddr])
+                    .condition(PeerCondition::DisconnectedAndNotDialing)
+                    .build();
+                match swarm.dial(opt) {
+                    Ok(_) => {
+                        info!("Dialed {peer_id}");
+                    }
+                    Err(e) => {
+                        error!("Failed to dial {peer_id}: {e}");
+                    }
+                };
                 
             }
         }
@@ -193,6 +193,7 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
         }
         TSSBehaviourEvent::Signer(request_response::Event::Message { peer, message }) => {
             debug!("Received Signer response from {peer}: {:?}", &message);
+            tss_event_handler( swarm.behaviour_mut(), &peer, message);
         }
         _ => {}
     }

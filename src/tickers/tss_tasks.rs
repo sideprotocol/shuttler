@@ -1,25 +1,20 @@
 use std:: sync::Mutex;
 
-use bitcoincore_rpc::RpcApi;
-use chrono::{Timelike, Utc};
+
 use libp2p::{PeerId, Swarm};
-use prost_types::Any;
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
-use tonic::{Response, Status};
 use tracing::{debug, error, info};
 
 use crate::{
     app::{
         config,
-        shuttler::{broadcast_dkg_commitments, broadcast_signing_commitments, Shuttler},
+        shuttler::{self, Shuttler},
     },
     commands::Cli,
     helper::{
-        client_side::{self, send_cosmos_transaction}, messages::SigningBehaviour, store,
-        client_side::get_withdraw_requests,
-        messages::{SigningSteps, Task},
-    }, protocols::{dkg::{collect_dkg_packages, generate_round1_package, DKGRequest, DKGTask}, Round, TSSBehaviour},
+        client_side::get_withdraw_requests, store,
+    }, protocols::{dkg::{collect_dkg_packages, generate_round1_package, DKGRequest, DKGTask}, sign::{collect_tss_packages, generate_nonce_and_commitments}, Round, TSSBehaviour},
 };
 
 use cosmos_sdk_proto::{
@@ -31,7 +26,7 @@ use cosmos_sdk_proto::{
         tx::v1beta1::BroadcastTxResponse,
     },
     side::btcbridge::{
-        query_client::QueryClient as BtcQueryClient, BlockHeader, DkgRequest, DkgRequestStatus, MsgSubmitBlockHeaders, QueryDkgRequestsRequest
+        query_client::QueryClient as BtcQueryClient, BitcoinWithdrawRequest, DkgRequestStatus, QueryDkgRequestsRequest
     },
 };
 use lazy_static::lazy_static;
@@ -46,34 +41,26 @@ lazy_static! {
 }
 
 async fn fetch_latest_withdraw_requests(
-    cli: &Cli,
     behave: &mut TSSBehaviour,
-    signer: &mut Shuttler,
+    shuttler: &mut Shuttler,
 ) {
-    let host = signer.config().side_chain.grpc.as_str();
-
-    if cli.mock {
-        return;
-    }
+    let host = shuttler.config().side_chain.grpc.as_str();
 
     match get_withdraw_requests(&host).await {
         Ok(response) => {
-            let requests = response.into_inner().requests;
+            let mut requests = response.into_inner().requests;
+            // mock for testing
+            if requests.len() == 0 {
+                requests.push(BitcoinWithdrawRequest {
+                    address: "tb1pr8auk03a54w547e3q7w4xqu0wj57skgp3l8sfeus0skhdhltrq5qxtur6k".to_string(),
+                    psbt: "cHNidP8BAI8CAAAAA+67aDQ4JUktcSgEunL5O7FG5T2plGO95wYDt2aIajrAAQAAAAD/////7rtoNDglSS1xKAS6cvk7sUblPamUY73nBgO3ZohqOsABAAAAAP/////uu2g0OCVJLXEoBLpy+TuxRuU9qZRjvecGA7dmiGo6wAEAAAAA/////wEAAAAAAAAAAAFqAAAAAAABASsQJwAAAAAAACJRIBn7yz49pV1K+zEHnVMDj3Sp6FkBj88E55B8LXbf6xgoAAEBKxAnAAAAAAAAIlEgGfvLPj2lXUr7MQedUwOPdKnoWQGPzwTnkHwtdt/rGCgAAQErECcAAAAAAAAiUSAZ+8s+PaVdSvsxB51TA490qehZAY/PBOeQfC123+sYKAAA".to_string(),
+                    status: 1,
+                    sequence: 0,
+                    txid: "123455".to_string(),
+                });
+            }
             for request in requests {
-                // let task = Task::new(SigningSteps::SignInit, request.psbt);
-                // signer.sign_init(behave, &task);
-                // let message = serde_json::to_string(&task).unwrap();
-                // match behave
-                //     .gossipsub
-                //     .publish(task.step.topic(), message.as_bytes())
-                // {
-                //     Ok(_) => {
-                //         info!("Published sign init message to gossip: {:?}", message);
-                //     }
-                //     Err(e) => {
-                //         error!("Failed to publish sign init message to gossip: {:?}", e);
-                //     }
-                // }
+                generate_nonce_and_commitments(request, shuttler);
             }
         }
         Err(e) => {
@@ -81,112 +68,6 @@ async fn fetch_latest_withdraw_requests(
             return;
         }
     };
-}
-
-async fn sync_btc_blocks(signer: &mut Shuttler) {
-    let tip_on_bitcoin = match signer.bitcoin_client.get_block_count() {
-        Ok(height) => height,
-        Err(e) => {
-            error!(error=%e);
-            return;
-        }
-    };
-
-    let mut tip_on_side =
-        match client_side::get_bitcoin_tip_on_side(&signer.config().side_chain.grpc).await {
-            Ok(res) => res.get_ref().height,
-            Err(e) => {
-                error!(error=%e);
-                return;
-            }
-        };
-
-    let mut lock = LOADING.lock().unwrap();
-    if lock.loading {
-        info!("a previous task is running, skip!");
-        return;
-    }
-    lock.loading = true;
-
-    let mut block_headers: Vec<BlockHeader> = vec![];
-
-    let batch = if tip_on_side + 10 > tip_on_bitcoin {
-        tip_on_bitcoin
-    } else {
-        tip_on_side + 10
-    };
-
-    info!("==========================================================");
-    info!("Syncing blocks from {} to {}", tip_on_side, batch);
-    info!("==========================================================");
-
-    while tip_on_side < batch {
-        tip_on_side = tip_on_side + 1;
-        let hash = match signer.bitcoin_client.get_block_hash(tip_on_side) {
-            Ok(hash) => hash,
-            Err(e) => {
-                error!(error=%e);
-                return;
-            }
-        };
-
-        let header = match signer.bitcoin_client.get_block_header(&hash) {
-            Ok(b) => b,
-            Err(e) => {
-                error!(error=%e);
-                return;
-            }
-        };
-
-        block_headers.push(BlockHeader {
-            version: header.version.to_consensus() as u64,
-            hash: header.block_hash().to_string(),
-            height: tip_on_side,
-            previous_block_hash: header.prev_blockhash.to_string(),
-            merkle_root: header.merkle_root.to_string(),
-            nonce: header.nonce as u64,
-            bits: format!("{:x}", header.bits.to_consensus()),
-            time: header.time as u64,
-            ntx: 0u64,
-        });
-
-        // setup a batch of 1 block headers
-        // if block_headers.len() >= 1 {
-        //     break;
-        // }
-
-        match send_block_headers(signer, &block_headers).await {
-            Ok(resp) => {
-                let tx_response = resp.into_inner().tx_response.unwrap();
-                if tx_response.code != 0 {
-                    error!("Failed to send block headers: {:?}", tx_response);
-                    return;
-                }
-                info!("Sent block headers: {:?}", tx_response);
-                block_headers = vec![] //reset
-            }
-            Err(e) => {
-                error!("Failed to send block headers: {:?}", e);
-                return;
-            }
-        };
-    }
-
-    lock.loading = false;
-}
-
-async fn send_block_headers(
-    shuttler: &Shuttler,
-    block_headers: &Vec<BlockHeader>,
-) -> Result<Response<BroadcastTxResponse>, Status> {
-    let submit_block_msg = MsgSubmitBlockHeaders {
-        sender: shuttler.config().signer_cosmos_address().to_string(),
-        block_headers: block_headers.clone(),
-    };
-
-    info!("Submitting block headers: {:?}", submit_block_msg);
-    let any_msg = Any::from_msg(&submit_block_msg).unwrap();
-    send_cosmos_transaction(shuttler, any_msg).await
 }
 
 async fn fetch_dkg_requests(shuttler: &mut Shuttler) {
@@ -277,7 +158,8 @@ pub async fn tasks_fetcher(
     // 1. fetch dkg requests
     fetch_dkg_requests(shuttler).await;
     collect_dkg_packages(swarm);
-    fetch_latest_withdraw_requests(cli, behave, signer)
+    fetch_latest_withdraw_requests( swarm.behaviour_mut(), shuttler).await;
+    collect_tss_packages(swarm, shuttler).await;
     // broadcast_dkg_commitments(behave, shuttler);
 
     // ===========================
