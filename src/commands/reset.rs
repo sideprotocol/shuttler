@@ -1,11 +1,11 @@
 use tracing::info;
 
-use crate::{app::config, helper::store};
+use crate::{app::config, protocols::dkg};
 
 use super::Cli;
 
 pub fn execute(cli: &Cli) {
     config::update_app_home(&cli.home);
-    store::delete_tasks();
+    dkg::delete_tasks();
     info!("Reset all tasks");
 }

@@ -1,30 +1,17 @@
 use std:: sync::Mutex;
 
-
-use libp2p::{PeerId, Swarm};
+use libp2p:: Swarm;
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 use tracing::{debug, error, info};
 
-use crate::{
-    app::{
-        config,
-        shuttler::{self, Shuttler},
-    },
-    commands::Cli,
-    helper::{
-        client_side::get_withdraw_requests, store,
-    }, protocols::{dkg::{collect_dkg_packages, generate_round1_package, DKGRequest, DKGTask}, sign::{collect_tss_packages, generate_nonce_and_commitments}, Round, TSSBehaviour},
-};
+use crate::{app::shuttler::Shuttler, helper::client_side::get_withdraw_requests, protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, DKGTask}, sign::{collect_tss_packages, generate_nonce_and_commitments}, TSSBehaviour}};
 
 use cosmos_sdk_proto::{
-    cosmos::{
-        base::tendermint::v1beta1::{
+    cosmos:: base::tendermint::v1beta1::{
             service_client::ServiceClient as TendermintServiceClient, GetLatestValidatorSetRequest,
             Validator,
         },
-        tx::v1beta1::BroadcastTxResponse,
-    },
     side::btcbridge::{
         query_client::QueryClient as BtcQueryClient, BitcoinWithdrawRequest, DkgRequestStatus, QueryDkgRequestsRequest
     },
@@ -40,7 +27,7 @@ lazy_static! {
     static ref LOADING: Mutex<Lock> = Mutex::new(Lock { loading: false });
 }
 
-async fn fetch_latest_withdraw_requests(
+async fn fetch_withdraw_signing_requests(
     behave: &mut TSSBehaviour,
     shuttler: &mut Shuttler,
 ) {
@@ -97,75 +84,38 @@ async fn fetch_dkg_requests(shuttler: &mut Shuttler) {
             {
                 // create a dkg task
                 let task = DKGTask::from_request(&request);
-                if store::has_dkg_preceeded(task.id.as_str()) {
+                if dkg::has_task_preceeded(task.id.as_str()) {
                     continue;
                 };
                 generate_round1_package(shuttler.identifier().clone(), &task);
                 debug!("generated a new key: {:?}", request);
-                store::save_task(&task);
+                dkg::save_task(&task);
             }
         }
     };
 }
 
-async fn is_coordinator(
-    validator_set: &Vec<Validator>,
-    address: &[u8],
-    rng: &mut ChaCha8Rng,
-) -> bool {
-    let len = if validator_set.len() > 21 {
-        21
-    } else {
-        validator_set.len()
-    };
-
-    let index = rng.gen_range(0..len);
-    debug!("generated index: {}", index);
-
-    match validator_set.iter().nth(index) {
-        Some(v) => {
-            debug!("Selected coordinator: {:?}", v);
-            let b = bech32::decode(v.address.as_str()).unwrap().1;
-            return b == address;
-        }
-        None => {
-            return false;
-        }
-    }
-}
 
 pub async fn tasks_fetcher(
-    cli: &Cli,
     // peers: Vec<&PeerId>,
     // behave: &mut TSSBehaviour,
     swarm : &mut Swarm<TSSBehaviour>,
     shuttler: &mut Shuttler,
-    rng: &mut ChaCha8Rng,
 ) {
 
     
-    // fetch latest active validator setx
-    // let host = shuttler.config().side_chain.grpc.clone();
-    // let mut client = TendermintServiceClient::connect(host.to_owned())
-    //     .await
-    //     .unwrap();
-    // let response = client
-    //     .get_latest_validator_set(GetLatestValidatorSetRequest { pagination: None })
-    //     .await
-    //     .unwrap();
-
-    // let mut validator_set = response.into_inner().validators;
-    // validator_set.sort_by(|a, b| a.voting_power.cmp(&b.voting_power));
 
     // ===========================
     // all participants tasks:
     // ===========================
 
     // 1. fetch dkg requests
-    fetch_dkg_requests(shuttler).await;
     collect_dkg_packages(swarm);
-    fetch_latest_withdraw_requests( swarm.behaviour_mut(), shuttler).await;
+
+    fetch_dkg_requests(shuttler).await;
+    fetch_withdraw_signing_requests( swarm.behaviour_mut(), shuttler).await;
     collect_tss_packages(swarm, shuttler).await;
+
     // broadcast_dkg_commitments(behave, shuttler);
 
     // ===========================

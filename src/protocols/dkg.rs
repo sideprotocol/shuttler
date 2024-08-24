@@ -2,7 +2,7 @@
 
 use core::fmt;
 use std::{collections::BTreeMap, fmt::Debug};
-use cosmos_sdk_proto::side::btcbridge::{DkgRequest, DkgRequestStatus, MsgCompleteDkg};
+use cosmos_sdk_proto::side::btcbridge::{DkgRequest, MsgCompleteDkg};
 use cosmrs::Any;
 use ed25519_compact::{x25519, SecretKey};
 use futures::executor::block_on;
@@ -15,9 +15,11 @@ use serde::{Deserialize, Serialize};
 use frost_secp256k1_tr::{self as frost};
 use frost::{keys, Identifier, Secp256K1Sha256};
 
-use frost_core::{keys::{dkg::round1::{self, Package}, KeyPackage, PublicKeyPackage}, Field};
+use frost_core::keys::dkg::round1::Package;
 use super::{Round, TSSBehaviour};
-use crate::{app::{config::{self, get_database_path, get_database_with_name, Keypair}, shuttler::Shuttler}, helper::{bitcoin::get_group_address, cipher::{decrypt, encrypt}, client_side::send_cosmos_transaction, encoding, store::{self, list_tasks}}};
+use crate::{app::{config:: get_database_with_name, shuttler::Shuttler}, helper::store};
+use crate::helper::{cipher::{decrypt, encrypt}, client_side::send_cosmos_transaction};
+
 
 use lazy_static::lazy_static;
 
@@ -84,9 +86,16 @@ pub enum DKGResponse {
     },
 }
 
+pub fn has_task_preceeded(task_id: &str) -> bool {
+    match DB_TASK.get(task_id) {
+        Ok(Some(_)) => true,
+        _ => false,
+    }
+}
+
 pub fn generate_round1_package(identifier: Identifier, task: &DKGTask) {
 
-    if store::has_dkg_preceeded(task.id.to_string().as_str()) {
+    if has_task_preceeded(task.id.to_string().as_str()) {
         debug!("DKG has already preceeded: {}", task.id);
         return;
     };
@@ -245,7 +254,7 @@ pub fn prepare_round2_package_for_request(task_id: String) -> DKGResponse {
 }
 
 pub fn received_round1_packages(task_id: String, packets: BTreeMap<Identifier, keys::dkg::round1::Package>, identifier: &Identifier, enc_key: &SecretKey) {
-    let mut task = match store::get_task(&task_id) {
+    let mut task = match get_task(&task_id) {
         Some(task) => task,
         None => {
             error!("No task found for DKG: {}", task_id);
@@ -287,11 +296,11 @@ pub fn received_round1_packages(task_id: String, packets: BTreeMap<Identifier, k
         match generate_round2_packages(identifier, enc_key, &mut task, local) {
             Ok(_) => {
                 task.round = Round::Round2;
-                store::save_task(&task);
+                save_task(&task);
             }
             Err(e) => {
                 task.round = Round::Closed;
-                store::save_task(&task);
+                save_task(&task);
                 error!("Failed to generate round2 packages: {task_id} - {:?}", e);
             }
         }
@@ -300,7 +309,7 @@ pub fn received_round1_packages(task_id: String, packets: BTreeMap<Identifier, k
 }
 
 pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>, shuttler: &mut Shuttler) {
-    let mut task = match store::get_task(&task_id) {
+    let mut task = match get_task(&task_id) {
         Some(task) => task,
         None => {
             error!("No task found for DKG: {}", task_id);
@@ -345,7 +354,7 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
     if task.participants.len() == local.len() {
         info!("Received round2 packets from all participants: {task_id}");
         task.round = Round::Closed;
-        store::save_task(&task);
+        save_task(&task);
 
         let mut round2_packages = BTreeMap::new();
         local.iter().for_each(|(sender, packages)| {
@@ -516,3 +525,37 @@ impl fmt::Display for DKGError {
         write!(f, "dkg error: {}", self.0 )
     }
 }
+
+
+pub fn save_task(task: &DKGTask) {
+    let se =  &serde_json::to_string(task).unwrap();
+    DB_TASK.insert(task.id.as_str(), se.as_bytes()).expect("Failed to save task to database");
+ }
+ 
+ pub fn get_task(task_id: &str) -> Option<DKGTask> {
+     match DB_TASK.get(task_id) {
+         Ok(Some(task)) => {
+             Some(serde_json::from_slice(&task).unwrap())
+         },
+         _ => {
+             None
+         }
+     }
+ }
+ 
+ pub fn list_tasks() -> Vec<DKGTask> {
+     let mut tasks = vec![];
+     info!("Listing tasks from database, total: {:?}", DB_TASK.iter().count());
+     for task in DB_TASK.iter() {
+         let (_, task) = task.unwrap();
+         tasks.push(serde_json::from_slice(&task).unwrap());
+     }
+     tasks
+ }
+ 
+ pub fn delete_tasks() {
+     DB_TASK.clear().unwrap();
+     DB_TASK.flush().unwrap();
+     DB.clear().unwrap();
+     DB.flush().unwrap();
+ }

@@ -2,20 +2,25 @@ use std::{sync::Mutex, thread::sleep, time::Duration};
 
 use bitcoin::{consensus::encode, BlockHash, Transaction};
 use bitcoincore_rpc::RpcApi;
+use futures::join;
 use prost_types::Any;
+use rand::Rng;
+use rand_chacha::ChaCha8Rng;
 use tonic::{Response, Status};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::{
-    app::{config::Config, shuttler::Shuttler},
+    app::{config::{get_database_with_name, Config}, shuttler::Shuttler},
     helper::{
-        bitcoin::{self as bitcoin_utils},
-        client_side::{self, send_cosmos_transaction},
-        store, encoding::to_base64,
+        bitcoin::{self as bitcoin_utils}, client_side::{self, send_cosmos_transaction}, encoding::to_base64, 
     },
 };
 
 use cosmos_sdk_proto::{
+    cosmos::base::tendermint::v1beta1::{
+        service_client::ServiceClient as TendermintServiceClient, GetLatestValidatorSetRequest,
+        Validator,
+    },
     cosmos::tx::v1beta1::BroadcastTxResponse,
     side::btcbridge::{BlockHeader, MsgSubmitBlockHeaders, MsgSubmitDepositTransaction, MsgSubmitWithdrawTransaction},
 };
@@ -26,12 +31,71 @@ struct Lock {
     loading: bool,
 }
 
+const BITCOIN_TIP: &str = "bitcoin_tip";
+
 lazy_static! {
     static ref LOADING: Mutex<Lock> = Mutex::new(Lock { loading: false });
+    static ref DB: sled::Db = {
+        let path = get_database_with_name("relayer");
+        sled::open(path).unwrap()
+    };
 }
 
-pub async fn sync_btc_blocks(signer: &mut Shuttler) {
-    let tip_on_bitcoin = match signer.bitcoin_client.get_block_count() {
+pub async fn start_relayer_tasks(shuttler: &Shuttler, rng: &mut ChaCha8Rng) {
+
+    // fetch latest active validator setx
+    let host = shuttler.config().side_chain.grpc.clone();
+    let mut client = TendermintServiceClient::connect(host.to_owned())
+        .await
+        .unwrap();
+    let response = client
+        .get_latest_validator_set(GetLatestValidatorSetRequest { pagination: None })
+        .await
+        .unwrap();
+
+    let mut validator_set = response.into_inner().validators;
+    validator_set.sort_by(|a, b| a.voting_power.cmp(&b.voting_power));
+
+    if !is_coordinator(&validator_set, shuttler.validator_address(), rng) {
+        info!("Not coordinator, skip!");
+        return;
+    }
+    
+    join!(
+        sync_btc_blocks(&shuttler),
+        scan_vault_txs_loop(&shuttler)
+    );
+}
+
+fn is_coordinator(
+    validator_set: &Vec<Validator>,
+    address: String,
+    rng: &mut ChaCha8Rng,
+) -> bool {
+    let len = if validator_set.len() > 21 {
+        21
+    } else {
+        validator_set.len()
+    };
+
+    let index = rng.gen_range(0..len);
+    debug!("generated index: {}", index);
+
+    match validator_set.iter().nth(index) {
+        Some(v) => {
+            debug!("Selected coordinator: {:?}", v);
+            // let b = bech32::decode(&v.address).unwrap().1;
+            // return b == address;
+            v.address == address
+        }
+        None => {
+            return false;
+        }
+    }
+}
+
+pub async fn sync_btc_blocks(shuttler: &Shuttler) {
+    let tip_on_bitcoin = match shuttler.bitcoin_client.get_block_count() {
         Ok(height) => height,
         Err(e) => {
             error!(error=%e);
@@ -40,7 +104,7 @@ pub async fn sync_btc_blocks(signer: &mut Shuttler) {
     };
 
     let mut tip_on_side =
-        match client_side::get_bitcoin_tip_on_side(&signer.config().side_chain.grpc).await {
+        match client_side::get_bitcoin_tip_on_side(&shuttler.config().side_chain.grpc).await {
             Ok(res) => res.get_ref().height,
             Err(e) => {
                 error!(error=%e);
@@ -69,7 +133,7 @@ pub async fn sync_btc_blocks(signer: &mut Shuttler) {
 
     while tip_on_side < batch {
         tip_on_side = tip_on_side + 1;
-        let hash = match signer.bitcoin_client.get_block_hash(tip_on_side) {
+        let hash = match shuttler.bitcoin_client.get_block_hash(tip_on_side) {
             Ok(hash) => hash,
             Err(e) => {
                 error!(error=%e);
@@ -77,7 +141,7 @@ pub async fn sync_btc_blocks(signer: &mut Shuttler) {
             }
         };
 
-        let header = match signer.bitcoin_client.get_block_header(&hash) {
+        let header = match shuttler.bitcoin_client.get_block_header(&hash) {
             Ok(b) => b,
             Err(e) => {
                 error!(error=%e);
@@ -102,7 +166,7 @@ pub async fn sync_btc_blocks(signer: &mut Shuttler) {
         //     break;
         // }
 
-        match send_block_headers(signer, &block_headers).await {
+        match send_block_headers(shuttler, &block_headers).await {
             Ok(resp) => {
                 let tx_response = resp.into_inner().tx_response.unwrap();
                 if tx_response.code != 0 {
@@ -136,15 +200,6 @@ pub async fn send_block_headers(
     send_cosmos_transaction(shuttler, any_msg).await
 }
 
-//
-
-pub async fn start_loop_tasks(config: Config) {
-    let shuttler = Shuttler::new(config);
-
-    // scan vault txs
-    // scan_vault_txs_loop(&shuttler).await;
-}
-
 pub async fn scan_vault_txs_loop(shuttler: &Shuttler) {
     let mut height = get_last_scanned_height(shuttler.config()) + 1;
 
@@ -169,7 +224,7 @@ pub async fn scan_vault_txs_loop(shuttler: &Shuttler) {
 
         scan_vault_txs(shuttler, height).await;
 
-        store::save_last_scanned_height(height);
+        save_last_scanned_height(height);
         height += 1;
     }
 }
@@ -308,5 +363,16 @@ pub async fn send_deposit_tx(
 }
 
 pub(crate) fn get_last_scanned_height(config: &Config) -> u64 {
-    store::get_last_scanned_height().unwrap_or(config.last_scanned_height)
+    match DB.get(BITCOIN_TIP) {
+        Ok(Some(tip)) => {
+            serde_json::from_slice(&tip).unwrap_or(config.last_scanned_height)
+        }
+        _ => {
+            config.last_scanned_height
+        }
+    }
+}
+
+fn save_last_scanned_height(height: u64) {
+    let _ = DB.insert(BITCOIN_TIP, serde_json::to_vec(&height).unwrap());
 }

@@ -1,31 +1,31 @@
 
 use chrono::{Timelike, Utc};
-use futures::{lock, StreamExt};
+use futures::StreamExt;
 
-use libp2p::identity::{ed25519, Keypair};
+use libp2p::identity::Keypair;
 use libp2p::request_response::{self, ProtocolSupport};
 use libp2p::swarm::dial_opts::PeerCondition;
 use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
-use libp2p::{ gossipsub, mdns, noise, tcp, yamux, PeerId, StreamProtocol, Swarm};
+use libp2p::{ gossipsub, mdns, noise, tcp, yamux, Multiaddr, StreamProtocol, Swarm};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
-use tokio::io::AsyncReadExt as _;
 use tokio::time::Instant;
 
 use crate::app::{config::Config, shuttler::Shuttler};
 use crate::helper::encoding::from_base64;
 use crate::helper::messages::now;
 use crate::protocols::sign::{tss_event_handler, SignRequest, SignResponse};
-use crate::tickers::{relayer_tasks::start_loop_tasks, tss_tasks::tasks_fetcher};
+use crate::tickers::relayer_tasks::start_relayer_tasks;
+use crate::tickers::tss_tasks::tasks_fetcher;
 use crate::protocols::dkg::{dkg_event_handler, DKGRequest, DKGResponse};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
 
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::str::FromStr;
 use std::{io, iter};
 use std::time::Duration;
 use tokio::select;
 
-use tokio::net::TcpStream;
 use tracing::{debug, info, error};
 
 use super::Cli;
@@ -94,7 +94,7 @@ pub async fn execute(cli: &Cli) {
     // swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse().expect("address parser error")).expect("failed to listen on all interfaces");
     swarm.listen_on(format!("/ip4/0.0.0.0/tcp/{}", conf.port).parse().expect("Address parse error")).expect("failed to listen on all interfaces");
 
-    // swarm.connected_peers().
+    dail_bootstrap_nodes(&mut swarm, &conf);
 
     // this is to ensure that each node fetches tasks at the same time    
     let d = 6 as u64;
@@ -104,8 +104,6 @@ pub async fn execute(cli: &Cli) {
 
     let seed = Utc::now().minute() as u64;
     let mut rng = ChaCha8Rng::seed_from_u64(seed );
-
-    tokio::spawn(start_loop_tasks(conf.clone()));
 
     loop {
         select! {
@@ -129,14 +127,32 @@ pub async fn execute(cli: &Cli) {
 
             _ = interval.tick() => {
                 // let peers = swarm.connected_peers().collect::<Vec<_>>();
-                tasks_fetcher(cli, &mut swarm, &mut shuttler, &mut rng).await;
+                // should use separate threads for each task
+                tasks_fetcher(&mut swarm, &mut shuttler).await;
+                start_relayer_tasks(&shuttler, &mut rng).await;
             },
 
         }
     }
 }
 
+fn dail_bootstrap_nodes(swarm: &mut Swarm<TSSBehaviour>, conf: &Config) {
+    for addr_text in conf.bootstrap_nodes.iter() {
+        let add = Multiaddr::from_str(addr_text).expect("invalid bootstrap node address");
 
+        let opt = DialOpts::unknown_peer_id()
+            .address(add)
+            .build();
+        match swarm.dial(opt) {
+            Ok(_) => {
+                info!("Dialed {addr_text}");
+            }
+            Err(e) => {
+                error!("Failed to dial {addr_text}: {e}");
+            }
+        };
+    }
+}
 
 // handle sub events from the swarm
 async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>, shuttler: &mut Shuttler) {
@@ -187,27 +203,27 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
     }
 }
 
-pub async fn command_handler(steam: &mut TcpStream, shuttler: &mut Shuttler) {
+// pub async fn command_handler(steam: &mut TcpStream, shuttler: &mut Shuttler) {
 
-    debug!("Accepted connection from: {:?}", steam.peer_addr().unwrap());
-    let mut buf = [0; 1024];
-    let result = steam.read(&mut buf).await;
+//     debug!("Accepted connection from: {:?}", steam.peer_addr().unwrap());
+//     let mut buf = [0; 1024];
+//     let result = steam.read(&mut buf).await;
 
-    match result {
-        Ok(0) => {
-            // Connection closed
-            error!("Connection closed");
-            return;
-        }
-        Ok(n) => {
-            // Print the received message
-            let message = String::from_utf8_lossy(&buf[..n]);
-            let task = serde_json::from_str::<crate::helper::messages::Task>(&message).unwrap();
+//     match result {
+//         Ok(0) => {
+//             // Connection closed
+//             error!("Connection closed");
+//             return;
+//         }
+//         Ok(n) => {
+//             // Print the received message
+//             let message = String::from_utf8_lossy(&buf[..n]);
+//             let task = serde_json::from_str::<crate::helper::messages::Task>(&message).unwrap();
 
-        }
-        Err(e) => {
-            error!("Failed to read from socket: {}", e);
-        }
-    }
-}
+//         }
+//         Err(e) => {
+//             error!("Failed to read from socket: {}", e);
+//         }
+//     }
+// }
 

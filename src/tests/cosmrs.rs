@@ -1,13 +1,10 @@
 use cosmos_sdk_proto::cosmos::{
-    self, 
     auth::v1beta1::{
         query_client::QueryClient as AuthQueryClient, 
         BaseAccount, QueryAccountRequest
     }, 
-    base::tendermint::v1beta1::{service_client::ServiceClient as TendermintServiceClient, GetLatestBlockRequest}, 
-    tx::v1beta1::{BroadcastMode, BroadcastTxRequest},
+    base::tendermint::v1beta1::{service_client::ServiceClient as TendermintServiceClient, GetLatestBlockRequest},
 };
-use cosmos_sdk_proto::side::btcbridge::query_client::QueryClient as BtcQueryClient;
 use cosmrs::{
     crypto::secp256k1, tx::{self, Fee, SignDoc, SignerInfo, Tx}, AccountId, Any, Coin
 };
@@ -23,7 +20,7 @@ struct TestMsg {
 #[tokio::test]
 async fn test_grpc_query() {
 
-    let btcClient = BtcQueryClient::connect("").await.unwrap();
+    // let btcClient = BtcQueryClient::connect("").await.unwrap();
     // btcClient.q
     
     let mut client = AuthQueryClient::connect("http://localhost:9090").await.unwrap();

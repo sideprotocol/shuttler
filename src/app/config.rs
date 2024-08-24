@@ -16,6 +16,7 @@ const CONFIG_FILE: &str = "config.toml";
 pub struct Config {
     pub p2p_keypair: String,
     pub port: u32,
+    pub bootstrap_nodes: Vec<String>,
     /// logger level
     pub log_level: String,
     pub mnemonic: String,
@@ -104,12 +105,14 @@ pub fn get_database_with_name(db_name: &str) -> String {
     home
 }
 
+/// @deprecated every module should have its own database
 pub fn get_database_path() -> String {
     let mut home = APPLICATION_PATH.lock().unwrap().clone();
     home.push_str("/history.db");
     home
 }
 
+/// @deprecated every module should have its own database
 pub fn get_task_database_path() -> String {
     let mut home = APPLICATION_PATH.lock().unwrap().clone();
     home.push_str("/tasks.db");
@@ -154,6 +157,7 @@ impl Config {
         Self {
             p2p_keypair ,
             port: port as u32,
+            bootstrap_nodes: vec!["/ip4/127.0.0.1/tcp/5158/p2p/12D3KooWDnpzHGad9V7THWtgfkVE5XgsB3yqnR4Qoxm9zDwhYoqQ".to_string()],
             log_level: "debug".to_string(),
             mnemonic: mnemonic.to_string(),
             priv_validator_key_path: "priv_validator_key.json".to_string(),
