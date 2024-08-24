@@ -3,18 +3,18 @@ use bip39::{self, Mnemonic};
 use cosmrs::{crypto::secp256k1::SigningKey, AccountId};
 use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
 use lazy_static::lazy_static;
-use libp2p::PeerId;
-use serde::{Deserialize, Serialize};
+use serde::{de::Error, Deserialize, Serialize};
+use tracing::error;
 use std::{collections::BTreeMap, fs, path::PathBuf, str::FromStr, sync::Mutex};
 
-use crate::helper::cipher::random_bytes;
+use crate::helper::{cipher::random_bytes, encoding::to_base64};
 
 const CONFIG_FILE: &str = "config.toml";
 
 /// Threshold Signature Configuration
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
-    pub peer_id: String,
+    pub p2p_keypair: String,
     pub port: u32,
     /// logger level
     pub log_level: String,
@@ -86,9 +86,6 @@ pub struct PrivValidatorKey {
 
 lazy_static! {
     static ref APPLICATION_PATH: Mutex<String> = Mutex::new(String::from(".tssigner"));
-    static ref KEYS : Mutex<BTreeMap<String, KeyPackage>> = Mutex::new(BTreeMap::new());
-    static ref PUBKEYS : Mutex<BTreeMap<String, PublicKeyPackage>> = Mutex::new(BTreeMap::new());
-    static ref TWEAKS : Mutex<BTreeMap<String, Vec<u8>>> = Mutex::new(BTreeMap::new());
 }
 
 pub fn update_app_home(app_home: &str) {
@@ -119,46 +116,22 @@ pub fn get_task_database_path() -> String {
     home
 }
 
-pub fn get_sign_key(address: &str) -> Option<KeyPackage> {
-    KEYS.lock().unwrap().get(address).cloned()
-}
-pub fn add_sign_key(address: &str, key: KeyPackage) {
-    KEYS.lock().unwrap().insert(address.to_string(), key);
-}
-
-pub fn get_pub_key(address: &str) -> Option<PublicKeyPackage> {
-    PUBKEYS.lock().unwrap().get(address).cloned()
-}
-
-pub fn add_pub_key(address: &str, key: PublicKeyPackage) {
-    PUBKEYS.lock().unwrap().insert(address.to_string(), key);
-}
-
-pub fn get_pub_key_by_index(index: usize) -> Option<PublicKeyPackage> {
-    PUBKEYS.lock().unwrap().values().nth(index).cloned()
-}
-
-pub fn address_exists(address: &str) -> bool {
-    PUBKEYS.lock().unwrap().contains_key(address)
-}
-
-pub fn add_tweak(address: &str, tweak: Vec<u8> ) {
-    TWEAKS.lock().unwrap().insert(address.to_string(), tweak);
-}
-
-pub fn get_tweak(address: &str) -> Option<Vec<u8>> {
-    match TWEAKS.lock().unwrap().get(address).cloned() {
-        Some(tweak) => {
-            let mut normalized_tweak= vec![0u8; 32];
-            normalized_tweak[0..tweak.len()].copy_from_slice(tweak.as_slice());
-            
-            Some(normalized_tweak)
-        }
-        None => Some(vec![]),
-    }
-}
-
 impl Config {
+    pub fn load_validator_key(&self) -> Result<PrivValidatorKey, serde_json::Error> {
+        let priv_key_path = if self.priv_validator_key_path.starts_with("/") {
+            self.priv_validator_key_path.clone()
+        } else {
+            format!("{}/{}", get_app_home(), self.priv_validator_key_path)
+        };
+        let text: String = match fs::read_to_string(priv_key_path.clone()) {
+            Ok(text) => text,
+            Err(e) => {
+                error!("Failed to read priv_validator_key.json: {}", e);
+                return Err(serde_json::Error::custom(format!("Failed to read {}", priv_key_path)));
+            }
+        };
+        serde_json::from_str::<PrivValidatorKey>(text.as_str())
+    }
     pub fn from_file(app_home: &str) -> Result<Self, std::io::Error> {
         update_app_home(app_home);
 
@@ -177,9 +150,9 @@ impl Config {
     pub fn default(port: u32, network: Network) -> Self {
         let entropy = random_bytes(32);
         let mnemonic = bip39::Mnemonic::from_entropy(entropy.as_slice()).expect("failed to create mnemonic");
-
+        let p2p_keypair = to_base64(libp2p::identity::Keypair::generate_ed25519().to_protobuf_encoding().unwrap().as_slice());
         Self {
-            peer_id: PeerId::random().to_base58(),
+            p2p_keypair ,
             port: port as u32,
             log_level: "debug".to_string(),
             mnemonic: mnemonic.to_string(),

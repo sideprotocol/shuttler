@@ -1,25 +1,16 @@
 
-use std::{collections::BTreeMap, fs, str::FromStr, sync::Mutex};
+use std:: sync::Mutex;
 
-use bip39::Mnemonic;
-use bitcoin::{key::{TapTweak as _, UntweakedPublicKey}, secp256k1, sighash::{self, SighashCache}, Address, TapNodeHash, Psbt, PublicKey, TxOut, Witness};
-use bitcoin_hashes::Hash;
-use bitcoincore_rpc::{Auth, Client, RpcApi};
-use cosmrs::{crypto::secp256k1::SigningKey, AccountId, Any};
+use bitcoincore_rpc::{Auth, Client};
+use cosmos_sdk_proto::cosmos::auth::v1beta1::{query_client::QueryClient as AuthQueryClient, QueryAccountRequest, BaseAccount};
 use frost_core::{keys::{PublicKeyPackage, KeyPackage}, Field};
-use futures::executor::block_on;
-use libp2p:: PeerId;
-use cosmos_sdk_proto::{cosmos::auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest}, side::btcbridge::{MsgCompleteDkg, MsgSubmitWithdrawSignatures}};
-use crate::{app::config::{self, Config, PrivValidatorKey}, helper::{client_side::send_cosmos_transaction, messages::now, bitcoin::{get_group_address, get_group_address_by_tweak}}};
-use crate::helper::{
-    cipher::{decrypt, encrypt}, encoding::{self, from_base64}, messages::{DKGRoundMessage, SignMessage, SigningBehaviour, SigningSteps, Task}, store
-};
+use crate::{app::config::{ AnyKey, Config, PrivValidatorKey}, helper::{bitcoin::get_group_address_by_tweak, cipher::random_bytes}};
+use crate::helper::encoding::from_base64;
 use frost::Identifier; 
 use frost_secp256k1_tr::{self as frost, Secp256K1Sha256};
 
-use tracing::{debug, error, info};
-use rand::thread_rng;
-use ed25519_compact::{x25519, SecretKey};
+use tracing::info;
+use ed25519_compact:: SecretKey;
 
 use lazy_static::lazy_static;
 
@@ -43,12 +34,36 @@ impl Shuttler {
     pub fn new(conf: Config) -> Self {
 
         // load private key from priv_validator_key_path
-        let text: String = fs::read_to_string(&conf.priv_validator_key_path).expect("failed to load priv_validator_key.json");
-        let validator_key: PrivValidatorKey = serde_json::from_str::<PrivValidatorKey>(text.as_str()).expect("unable to parse priv_validator_key.json");
 
-        let b = encoding::from_base64(&validator_key.priv_key.value).unwrap();
-        
-        let local_key = SecretKey::from_slice(b.as_slice()).expect("invalid secret key");
+        let validator_key = match conf.load_validator_key() {
+            Ok(key) => {
+                info!("You are running node in validator mode");
+                key
+            },
+            Err(_) => {
+                info!("You are running node in relayer mode");
+                // return a empty key
+                PrivValidatorKey {
+                    address: "".to_string(),
+                    priv_key: AnyKey {
+                        value: "".to_string(),
+                        r#type: "".to_string(),
+                    },
+                    pub_key: AnyKey {
+                        value: "".to_string(),
+                        r#type: "".to_string(),
+                    },
+                }
+            }
+        };
+
+        let local_key = if validator_key.priv_key.value.len() > 0 {
+            let b = from_base64(&validator_key.priv_key.value).expect("Decode private key failed");
+            SecretKey::from_slice(b.as_slice()).expect("invalid secret key")
+        } else {
+            SecretKey::from_slice(random_bytes(SecretKey::BYTES).as_slice()).expect("invalid secret key")
+        };
+
         let id = frost::Secp256K1ScalarField::deserialize(&local_key.public_key().as_slice().try_into().unwrap()).unwrap();
         let identifier = frost_core::Identifier::new(id).unwrap(); 
 

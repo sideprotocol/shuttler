@@ -72,7 +72,13 @@ async fn fetch_latest_withdraw_requests(
 
 async fn fetch_dkg_requests(shuttler: &mut Shuttler) {
     let host = shuttler.config().side_chain.grpc.clone();
-    let mut client = BtcQueryClient::connect(host.to_owned()).await.unwrap();
+    let mut client = match BtcQueryClient::connect(host.to_owned()).await {
+        Ok(client) => client,
+        Err(e) => {
+            error!("Failed to create btcbridge query client: {host} {}", e);
+            return;
+        }
+    };
     if let Ok(requests_response) = client
         .query_dkg_requests(QueryDkgRequestsRequest {
             status: DkgRequestStatus::Pending as i32,

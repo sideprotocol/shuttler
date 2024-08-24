@@ -45,12 +45,17 @@ pub fn compute_tx_proof(txids: Vec<Txid>, index: usize) -> Vec<String> {
     merkle_proof::compute_tx_proof(txids, index)
 }
 
+/// Check if the transaction is a deposit transaction
+/// A deposit transaction is a transaction that has a vault address as one of its output
+/// the vault address should be fetched from side chain. so none signer can also run a relayer
 pub fn is_deposit_tx(tx: &Transaction, network: Network) -> bool {
-    tx.output.iter().any(|out| {
-        config::address_exists(
-            get_address_from_pk_script(out.clone().script_pubkey, network).as_str(),
-        )
-    })
+    // tx.output.iter().any(|out| {
+    //     config::is_vault_address(
+    //         get_address_from_pk_script(out.clone().script_pubkey, network).as_str(),
+    //     )
+    // })
+    // improve it later
+    false
 }
 
 pub fn may_be_withdraw_tx(tx: &Transaction) -> bool {

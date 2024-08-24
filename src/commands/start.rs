@@ -13,6 +13,7 @@ use tokio::io::AsyncReadExt as _;
 use tokio::time::Instant;
 
 use crate::app::{config::Config, shuttler::Shuttler};
+use crate::helper::encoding::from_base64;
 use crate::helper::messages::now;
 use crate::protocols::sign::{tss_event_handler, SignRequest, SignResponse};
 use crate::tickers::{relayer_tasks::start_loop_tasks, tss_tasks::tasks_fetcher};
@@ -20,36 +21,23 @@ use crate::protocols::dkg::{dkg_event_handler, DKGRequest, DKGResponse};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
 
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io::Read;
 use std::{io, iter};
 use std::time::Duration;
 use tokio::select;
 
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpStream;
 use tracing::{debug, info, error};
 
 use super::Cli;
 
 pub async fn execute(cli: &Cli) {
 
-    // Generate a random peer ID
-
+    // load config
     let conf = Config::from_file(&cli.home).unwrap();
     let mut shuttler = Shuttler::new(conf.clone());
 
-    // let keyy = shuttler..as_mut_slice();
-    // // let b = keyy.by_ref();
-    // let priv_k = from_base64(shuttler.priv_validator_key.priv_key.value).unwrap();
-    // let kp = Keypair::ed25519_from_bytes(keyy).expect("Failed to create keypair from bytes");
-    // let bytes = from_base64(&shuttler.priv_validator_key.priv_key.value).unwrap();
-    // let kp = Keypair::ed25519_from_bytes(bytes).expect("msg");
-    // let local_peer_id = kp.public().to_peer_id();
-    let local_peer_id = PeerId::from_bytes(data);
-    //let local_peer_id = PeerId::from_public_key(&shuttler.identifier().serialize()[0..32]).expect("msg");
-
-    info!("Local peer id: {:?}", local_peer_id);
-
-    let mut swarm: libp2p::Swarm<TSSBehaviour> = libp2p::SwarmBuilder::with_new_identity()
+    let libp2p_keypair = Keypair::from_protobuf_encoding(from_base64(&conf.p2p_keypair).unwrap().as_slice()).unwrap();
+    let mut swarm: libp2p::Swarm<TSSBehaviour> = libp2p::SwarmBuilder::with_existing_identity(libp2p_keypair)
         .with_tokio()
         .with_tcp(
             tcp::Config::default(),
@@ -95,7 +83,7 @@ pub async fn execute(cli: &Cli) {
             Ok(TSSBehaviour { mdns, dkg , gossip, signer})
         })
         .expect("swarm behaviour config failed")
-        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
+        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60000)))
 
         .build();
 
@@ -104,7 +92,7 @@ pub async fn execute(cli: &Cli) {
     // subscribes(swarm.behaviour_mut());
     // Listen on all interfaces and whatever port the OS assigns
     // swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse().expect("address parser error")).expect("failed to listen on all interfaces");
-    swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().expect("Address parse error")).expect("failed to listen on all interfaces");
+    swarm.listen_on(format!("/ip4/0.0.0.0/tcp/{}", conf.port).parse().expect("Address parse error")).expect("failed to listen on all interfaces");
 
     // swarm.connected_peers().
 
