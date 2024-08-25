@@ -1,21 +1,11 @@
 use std:: sync::Mutex;
 
+use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, BitcoinWithdrawRequest, DkgRequestStatus, QueryDkgRequestsRequest};
 use libp2p:: Swarm;
-use rand::Rng;
-use rand_chacha::ChaCha8Rng;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
-use crate::{app::shuttler::Shuttler, helper::client_side::get_withdraw_requests, protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, DKGTask}, sign::{collect_tss_packages, generate_nonce_and_commitments}, TSSBehaviour}};
+use crate::{app::signer::Signer, helper::client_side::get_withdraw_requests, protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, DKGTask}, sign::{collect_tss_packages, generate_nonce_and_commitments}, TSSBehaviour}};
 
-use cosmos_sdk_proto::{
-    cosmos:: base::tendermint::v1beta1::{
-            service_client::ServiceClient as TendermintServiceClient, GetLatestValidatorSetRequest,
-            Validator,
-        },
-    side::btcbridge::{
-        query_client::QueryClient as BtcQueryClient, BitcoinWithdrawRequest, DkgRequestStatus, QueryDkgRequestsRequest
-    },
-};
 use lazy_static::lazy_static;
 
 #[derive(Debug)]
@@ -29,7 +19,7 @@ lazy_static! {
 
 async fn fetch_withdraw_signing_requests(
     behave: &mut TSSBehaviour,
-    shuttler: &mut Shuttler,
+    shuttler: &Signer,
 ) {
     let host = shuttler.config().side_chain.grpc.as_str();
 
@@ -57,7 +47,7 @@ async fn fetch_withdraw_signing_requests(
     };
 }
 
-async fn fetch_dkg_requests(shuttler: &mut Shuttler) {
+async fn fetch_dkg_requests(shuttler: &Signer) {
     let host = shuttler.config().side_chain.grpc.clone();
     let mut client = match BtcQueryClient::connect(host.to_owned()).await {
         Ok(client) => client,
@@ -96,37 +86,27 @@ async fn fetch_dkg_requests(shuttler: &mut Shuttler) {
 }
 
 
-pub async fn tasks_fetcher(
+pub async fn tss_tasks_fetcher(
     // peers: Vec<&PeerId>,
     // behave: &mut TSSBehaviour,
     swarm : &mut Swarm<TSSBehaviour>,
-    shuttler: &mut Shuttler,
+    shuttler: &Signer,
 ) {
 
-    
-
+    if shuttler.config().get_validator_key().is_none() {
+        return;
+    }
     // ===========================
     // all participants tasks:
     // ===========================
 
     // 1. fetch dkg requests
-    collect_dkg_packages(swarm);
-
     fetch_dkg_requests(shuttler).await;
+    // 2. collect dkg packages
+    collect_dkg_packages(swarm);
+    // 3. fetch withdraw signing requests
     fetch_withdraw_signing_requests( swarm.behaviour_mut(), shuttler).await;
+    // 4. collect withdraw tss packages
     collect_tss_packages(swarm, shuttler).await;
 
-    // broadcast_dkg_commitments(behave, shuttler);
-
-    // ===========================
-    // coordinator tasks:
-    // ===========================
-    // if !is_coordinator(&validator_set, shuttler.validator_address(), rng).await {
-    //     info!("Not a coordinator in this round, skip!");
-    //     return;
-    // }
-
-    // broadcast_signing_commitments(behave, shuttler);
-    // fetch_latest_withdraw_requests(cli, behave, shuttler).await;
-    // sync_btc_blocks(shuttler).await;
 }

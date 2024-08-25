@@ -17,7 +17,7 @@ use frost::{keys, Identifier, Secp256K1Sha256};
 
 use frost_core::keys::dkg::round1::Package;
 use super::{Round, TSSBehaviour};
-use crate::{app::{config:: get_database_with_name, shuttler::Shuttler}, helper::store};
+use crate::{app::{config:: get_database_with_name, signer::Signer}, helper::store};
 use crate::helper::{cipher::{decrypt, encrypt}, client_side::send_cosmos_transaction};
 
 
@@ -308,7 +308,7 @@ pub fn received_round1_packages(task_id: String, packets: BTreeMap<Identifier, k
     }
 }
 
-pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>, shuttler: &mut Shuttler) {
+pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>, signer: &Signer) {
     let mut task = match get_task(&task_id) {
         Some(task) => task,
         None => {
@@ -359,12 +359,12 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
         let mut round2_packages = BTreeMap::new();
         local.iter().for_each(|(sender, packages)| {
             packages.iter().for_each(|(receiver, packet)| {
-                if receiver == shuttler.identifier() {
+                if receiver == signer.identifier() {
                     let packet = packet.clone();
                     
                     let bz = sender.serialize();
                     let source = x25519::PublicKey::from_ed25519(&ed25519_compact::PublicKey::from_slice(bz.as_slice()).unwrap()).unwrap();
-                    let share_key = source.dh(&x25519::SecretKey::from_ed25519(&shuttler.identity_key).unwrap()).unwrap();
+                    let share_key = source.dh(&x25519::SecretKey::from_ed25519(&signer.identity_key).unwrap()).unwrap();
 
                     let packet = decrypt(packet.as_slice(), share_key.as_slice().try_into().unwrap());
                     let received_round2_package = frost::keys::dkg::round2::Package::deserialize(&packet).unwrap();
@@ -400,7 +400,7 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
                 BTreeMap::new()
             },
         };
-        round1_packages.remove(shuttler.identifier()); // remove self
+        round1_packages.remove(signer.identifier()); // remove self
 
         let (key, pubkey) = match frost::keys::dkg::part3(
             &round2_secret_package,
@@ -414,40 +414,21 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
             }
         };
 
-        // let privkey_bytes = key.serialize().expect("key not serialized");
-        // let pubkey_bytes = pubkey.serialize().expect("pubkey not serialized");
-        
-        // save to memory
-        // config::add_sign_key(&address.to_string(), key.clone());
-        // config::add_pub_key(&address.to_string(), pubkey.clone());
-
-        // let mut conf = shuttler.config().clone();
-        // conf.keys
-        //     .insert(address.to_string(), encoding::to_base64(&privkey_bytes));
-        // conf.pubkeys
-        //     .insert(address.to_string(), encoding::to_base64(&pubkey_bytes));
-        // conf.keypairs.insert(address.to_string(), Keypair{
-        //     priv_key: key,
-        //     pub_key: pubkey,
-        //     tweak: "".to_string(),
-        // });
-        // conf.save().expect("Failed to save generated keys");
-
-        let address_with_tweak = shuttler.generate_vault_addresses(pubkey, key, task.address_num);
+        let address_with_tweak = signer.generate_vault_addresses(pubkey, key, task.address_num);
 
          // submit the vault address to sidechain
          let mut cosm_msg = MsgCompleteDkg {
             id: task_id.replace("dkg-", "").parse().unwrap(),
-            sender: shuttler.config().signer_cosmos_address().to_string(),
+            sender: signer.config().signer_cosmos_address().to_string(),
             vaults: address_with_tweak,
-            consensus_address: shuttler.validator_address(),
+            consensus_address: signer.validator_address(),
             signature: "".to_string(),
         };
 
-        cosm_msg.signature = shuttler.get_complete_dkg_signature(cosm_msg.id, &cosm_msg.vaults);
+        cosm_msg.signature = signer.get_complete_dkg_signature(cosm_msg.id, &cosm_msg.vaults);
 
         let any = Any::from_msg(&cosm_msg).unwrap();
-        match block_on(send_cosmos_transaction(shuttler, any)) {
+        match block_on(send_cosmos_transaction(signer.config(), any)) {
             Ok(resp) => {
                 let tx_response = resp.into_inner().tx_response.unwrap();
                 if tx_response.code != 0 {
@@ -466,7 +447,7 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
     }
 }
 
-pub fn dkg_event_handler(shuttler: &mut Shuttler, behave: &mut TSSBehaviour, peer: &PeerId, message: Message<DKGRequest, DKGResponse>) {
+pub fn dkg_event_handler(signer: &Signer, behave: &mut TSSBehaviour, peer: &PeerId, message: Message<DKGRequest, DKGResponse>) {
     // handle dkg events
     debug!("Received DKG response from {peer}: {:?}", &message);
     match message {
@@ -504,11 +485,11 @@ pub fn dkg_event_handler(shuttler: &mut Shuttler, behave: &mut TSSBehaviour, pee
             match response {
                 // collect round 1 packets
                 DKGResponse::Round1 { task_id, packets } => {
-                    received_round1_packages(task_id, packets, shuttler.identifier(), &shuttler.identity_key);
+                    received_round1_packages(task_id, packets, signer.identifier(), &signer.identity_key);
                 }
                 // collect round 2 packets
                 DKGResponse::Round2 { task_id, packets } => {
-                    received_round2_packages(task_id, packets, shuttler);
+                    received_round2_packages(task_id, packets, signer);
                 }
             }
 

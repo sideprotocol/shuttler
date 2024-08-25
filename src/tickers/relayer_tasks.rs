@@ -10,7 +10,7 @@ use tonic::{Response, Status};
 use tracing::{debug, error, info};
 
 use crate::{
-    app::{config::{get_database_with_name, Config}, shuttler::Shuttler},
+    app::{config::{get_database_with_name, Config}, relayer::Relayer},
     helper::{
         bitcoin::{self as bitcoin_utils}, client_side::{self, send_cosmos_transaction}, encoding::to_base64, 
     },
@@ -41,29 +41,40 @@ lazy_static! {
     };
 }
 
-pub async fn start_relayer_tasks(shuttler: &Shuttler, rng: &mut ChaCha8Rng) {
+/// Start relayer tasks
+/// 1. Sync BTC blocks
+/// 2. Scan vault txs
+/// Only the coordinator will run the tasks, the coordinator is selected randomly from the active validator set
+pub async fn start_relayer_tasks(relayer: &Relayer, rng: &mut ChaCha8Rng) {
 
     // fetch latest active validator setx
-    let host = shuttler.config().side_chain.grpc.clone();
-    let mut client = TendermintServiceClient::connect(host.to_owned())
-        .await
-        .unwrap();
-    let response = client
-        .get_latest_validator_set(GetLatestValidatorSetRequest { pagination: None })
-        .await
-        .unwrap();
+    let host = relayer.config().side_chain.grpc.clone();
+    let mut client = match TendermintServiceClient::connect(host.to_owned()).await {
+        Ok(client) => client,
+        Err(e) => {
+            error!("Failed to create tendermint query client: {host} {}", e);
+            return;
+        }
+    };
+    let response = match client.get_latest_validator_set(GetLatestValidatorSetRequest { pagination: None }).await {
+        Ok(response) => response,
+        Err(e) => {
+            error!("Failed to get latest validator set: {:?}", e);
+            return;
+        }
+    };
 
     let mut validator_set = response.into_inner().validators;
     validator_set.sort_by(|a, b| a.voting_power.cmp(&b.voting_power));
 
-    if !is_coordinator(&validator_set, shuttler.validator_address(), rng) {
+    if !is_coordinator(&validator_set, relayer.validator_address(), rng) {
         info!("Not coordinator, skip!");
         return;
     }
     
     join!(
-        sync_btc_blocks(&shuttler),
-        scan_vault_txs_loop(&shuttler)
+        sync_btc_blocks(&relayer),
+        scan_vault_txs_loop(&relayer)
     );
 }
 
@@ -94,8 +105,8 @@ fn is_coordinator(
     }
 }
 
-pub async fn sync_btc_blocks(shuttler: &Shuttler) {
-    let tip_on_bitcoin = match shuttler.bitcoin_client.get_block_count() {
+pub async fn sync_btc_blocks(relayer: &Relayer) {
+    let tip_on_bitcoin = match relayer.bitcoin_client.get_block_count() {
         Ok(height) => height,
         Err(e) => {
             error!(error=%e);
@@ -104,7 +115,7 @@ pub async fn sync_btc_blocks(shuttler: &Shuttler) {
     };
 
     let mut tip_on_side =
-        match client_side::get_bitcoin_tip_on_side(&shuttler.config().side_chain.grpc).await {
+        match client_side::get_bitcoin_tip_on_side(&relayer.config().side_chain.grpc).await {
             Ok(res) => res.get_ref().height,
             Err(e) => {
                 error!(error=%e);
@@ -133,7 +144,7 @@ pub async fn sync_btc_blocks(shuttler: &Shuttler) {
 
     while tip_on_side < batch {
         tip_on_side = tip_on_side + 1;
-        let hash = match shuttler.bitcoin_client.get_block_hash(tip_on_side) {
+        let hash = match relayer.bitcoin_client.get_block_hash(tip_on_side) {
             Ok(hash) => hash,
             Err(e) => {
                 error!(error=%e);
@@ -141,7 +152,7 @@ pub async fn sync_btc_blocks(shuttler: &Shuttler) {
             }
         };
 
-        let header = match shuttler.bitcoin_client.get_block_header(&hash) {
+        let header = match relayer.bitcoin_client.get_block_header(&hash) {
             Ok(b) => b,
             Err(e) => {
                 error!(error=%e);
@@ -166,7 +177,7 @@ pub async fn sync_btc_blocks(shuttler: &Shuttler) {
         //     break;
         // }
 
-        match send_block_headers(shuttler, &block_headers).await {
+        match send_block_headers(relayer, &block_headers).await {
             Ok(resp) => {
                 let tx_response = resp.into_inner().tx_response.unwrap();
                 if tx_response.code != 0 {
@@ -187,27 +198,27 @@ pub async fn sync_btc_blocks(shuttler: &Shuttler) {
 }
 
 pub async fn send_block_headers(
-    shuttler: &Shuttler,
+    relayer: &Relayer,
     block_headers: &Vec<BlockHeader>,
 ) -> Result<Response<BroadcastTxResponse>, Status> {
     let submit_block_msg = MsgSubmitBlockHeaders {
-        sender: shuttler.config().signer_cosmos_address().to_string(),
+        sender: relayer.config().signer_cosmos_address().to_string(),
         block_headers: block_headers.clone(),
     };
 
     info!("Submitting block headers: {:?}", submit_block_msg);
     let any_msg = Any::from_msg(&submit_block_msg).unwrap();
-    send_cosmos_transaction(shuttler, any_msg).await
+    send_cosmos_transaction(relayer.config(), any_msg).await
 }
 
-pub async fn scan_vault_txs_loop(shuttler: &Shuttler) {
-    let mut height = get_last_scanned_height(shuttler.config()) + 1;
+pub async fn scan_vault_txs_loop(relayer: &Relayer) {
+    let mut height = get_last_scanned_height(relayer.config()) + 1;
 
     info!("Start to scan vault txs from height: {}", height);
 
     loop {
         let side_tip =
-            match client_side::get_bitcoin_tip_on_side(&shuttler.config().side_chain.grpc).await {
+            match client_side::get_bitcoin_tip_on_side(&relayer.config().side_chain.grpc).await {
                 Ok(res) => res.get_ref().height,
                 Err(e) => {
                     error!("Failed to get tip from side chain: {}", e);
@@ -222,15 +233,15 @@ pub async fn scan_vault_txs_loop(shuttler: &Shuttler) {
 
         info!("Scanning height: {:?}, side tip: {:?}", height, side_tip);
 
-        scan_vault_txs(shuttler, height).await;
+        scan_vault_txs(relayer, height).await;
 
         save_last_scanned_height(height);
         height += 1;
     }
 }
 
-pub async fn scan_vault_txs(shuttler: &Shuttler, height: u64) {
-    let block_hash = match shuttler.bitcoin_client.get_block_hash(height) {
+pub async fn scan_vault_txs(relayer: &Relayer, height: u64) {
+    let block_hash = match relayer.bitcoin_client.get_block_hash(height) {
         Ok(hash) => hash,
         Err(e) => {
             error!("Failed to get block hash: {:?}, err: {:?}", height, e);
@@ -238,7 +249,7 @@ pub async fn scan_vault_txs(shuttler: &Shuttler, height: u64) {
         }
     };
 
-    let block = match shuttler.bitcoin_client.get_block(&block_hash) {
+    let block = match relayer.bitcoin_client.get_block(&block_hash) {
         Ok(block) => block,
         Err(e) => {
             error!("Failed to get block: {}, err: {}", height, e);
@@ -262,7 +273,7 @@ pub async fn scan_vault_txs(shuttler: &Shuttler, height: u64) {
                 i,
             );
 
-            match send_withdraw_tx(shuttler, &block_hash, &tx, proof).await {
+            match send_withdraw_tx(relayer, &block_hash, &tx, proof).await {
                 Ok(resp) => {
                     let tx_response = resp.into_inner().tx_response.unwrap();
                     if tx_response.code != 0 {
@@ -280,7 +291,7 @@ pub async fn scan_vault_txs(shuttler: &Shuttler, height: u64) {
             continue;
         }
 
-        if bitcoin_utils::is_deposit_tx(tx, shuttler.config().bitcoin.network) {
+        if bitcoin_utils::is_deposit_tx(tx, relayer.config().bitcoin.network) {
             info!("Deposit tx found...");
 
             let proof = bitcoin_utils::compute_tx_proof(
@@ -289,7 +300,7 @@ pub async fn scan_vault_txs(shuttler: &Shuttler, height: u64) {
             );
 
             let prev_txid = tx.input[0].previous_output.txid;
-            let prev_tx = match shuttler
+            let prev_tx = match relayer
                 .bitcoin_client
                 .get_raw_transaction(&prev_txid, None)
             {
@@ -304,7 +315,7 @@ pub async fn scan_vault_txs(shuttler: &Shuttler, height: u64) {
                 }
             };
 
-            match send_deposit_tx(shuttler, &block_hash, &prev_tx, &tx, proof).await {
+            match send_deposit_tx(relayer, &block_hash, &prev_tx, &tx, proof).await {
                 Ok(resp) => {
                     let tx_response = resp.into_inner().tx_response.unwrap();
                     if tx_response.code != 0 {
@@ -323,13 +334,13 @@ pub async fn scan_vault_txs(shuttler: &Shuttler, height: u64) {
 }
 
 pub async fn send_withdraw_tx(
-    shuttler: &Shuttler,
+    relayer: &Relayer,
     block_hash: &BlockHash,
     tx: &Transaction,
     proof: Vec<String>,
 ) -> Result<Response<BroadcastTxResponse>, Status> {
     let msg = MsgSubmitWithdrawTransaction {
-        sender: shuttler.config().signer_cosmos_address().to_string(),
+        sender: relayer.config().signer_cosmos_address().to_string(),
         blockhash: block_hash.to_string(),
         tx_bytes: to_base64(encode::serialize(tx).as_slice()),
         proof,
@@ -338,18 +349,18 @@ pub async fn send_withdraw_tx(
     info!("Submitting withdrawal tx: {:?}", msg);
 
     let any_msg = Any::from_msg(&msg).unwrap();
-    send_cosmos_transaction(shuttler, any_msg).await
+    send_cosmos_transaction(relayer.config(), any_msg).await
 }
 
 pub async fn send_deposit_tx(
-    shuttler: &Shuttler,
+    relayer: &Relayer,
     block_hash: &BlockHash,
     prev_tx: &Transaction,
     tx: &Transaction,
     proof: Vec<String>,
 ) -> Result<Response<BroadcastTxResponse>, Status> {
     let msg = MsgSubmitDepositTransaction {
-        sender: shuttler.config().signer_cosmos_address().to_string(),
+        sender: relayer.config().signer_cosmos_address().to_string(),
         blockhash: block_hash.to_string(),
         prev_tx_bytes: to_base64(encode::serialize(prev_tx).as_slice()),
         tx_bytes: to_base64(encode::serialize(tx).as_slice()),
@@ -359,7 +370,7 @@ pub async fn send_deposit_tx(
     info!("Submitting deposit tx: {:?}", msg);
 
     let any_msg = Any::from_msg(&msg).unwrap();
-    send_cosmos_transaction(shuttler, any_msg).await
+    send_cosmos_transaction(&relayer.config(), any_msg).await
 }
 
 pub(crate) fn get_last_scanned_height(config: &Config) -> u64 {

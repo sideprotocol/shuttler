@@ -7,8 +7,8 @@ use cosmos_sdk_proto::cosmos::{
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_client::ServiceClient as TendermintServiceClient;
 use reqwest::Error;
 use tonic::{Response, Status};
-use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, QueryChainTipRequest, QueryChainTipResponse, QueryParamsRequest, QueryParamsResponse, QueryWithdrawRequestsRequest, QueryWithdrawRequestsResponse, QueryWithdrawRequestByTxHashRequest, QueryWithdrawRequestByTxHashResponse};
-use crate::app::shuttler::Shuttler;
+use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, QueryChainTipRequest, QueryChainTipResponse, QueryWithdrawRequestsRequest, QueryWithdrawRequestsResponse, QueryWithdrawRequestByTxHashRequest, QueryWithdrawRequestByTxHashResponse};
+use crate::app::config;
 
 use prost_types::Any;
 
@@ -92,8 +92,8 @@ pub async fn mock_withdraw_requests() -> Result<WithdrawRequestsResponse, Error>
     })
 }
 
-pub async fn send_cosmos_transaction(shuttler: &Shuttler, msg : Any) -> Result<Response<BroadcastTxResponse>, Status> {
-    let conf = shuttler.config();
+pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result<Response<BroadcastTxResponse>, Status> {
+    // let conf = shuttler.config();
 
     if conf.side_chain.grpc.is_empty() {
         return Err(Status::cancelled("GRPC URL is empty"));
@@ -101,16 +101,15 @@ pub async fn send_cosmos_transaction(shuttler: &Shuttler, msg : Any) -> Result<R
 
     // Generate sender private key.
     // In real world usage, this account would need to be funded before use.
-    let sender_private_key = shuttler.config().signer_priv_key();
+    let sender_private_key = conf.signer_priv_key();
     // let sender_account_id = shuttler.relayer_address();
 
     ///////////////////////////
     // Building transactions //
     ///////////////////////////
 
-    let base_account = shuttler.get_relayer_account().await;
+    let base_account = config::get_relayer_account(conf).await;
     
-
     let mut base_client = match TendermintServiceClient::connect(conf.side_chain.grpc.to_string()).await {
         Ok(client) => client,
         Err(e) => {

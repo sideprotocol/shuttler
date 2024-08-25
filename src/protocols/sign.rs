@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use bitcoin::{key::TapTweak, secp256k1::{self, schnorr}, sighash::{self, SighashCache}, Address, Psbt, TapNodeHash, TapSighashType, TxOut, Witness};
+use bitcoin::{key::TapTweak, secp256k1, sighash::{self, SighashCache}, Address, Psbt, TapNodeHash, TapSighashType, Witness};
 use bitcoin_hashes::Hash;
 use bitcoincore_rpc::RpcApi;
 use cosmos_sdk_proto::side::btcbridge::{BitcoinWithdrawRequest, MsgSubmitWithdrawSignatures};
@@ -10,9 +10,9 @@ use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
-use frost::{Identifier, Secp256K1Sha256, round1, round2}; 
+use frost::{Identifier, round1, round2}; 
 use frost_secp256k1_tr::{self as frost, round1::SigningNonces};
-use crate::{app::{config::{self, get_database_with_name}, shuttler::{self, Shuttler}}, helper::{client_side::send_cosmos_transaction, encoding::{self, from_base64}, messages::{SignMessage, SigningSteps}, store}};
+use crate::{app::{config::{self, get_database_with_name}, signer::Signer}, helper::{client_side::send_cosmos_transaction, encoding::{self, from_base64}}};
 
 use super::{Round, TSSBehaviour};
 use lazy_static::lazy_static;
@@ -61,7 +61,7 @@ pub struct SignSession {
     pub signatures: BTreeMap<Identifier, round2::SignatureShare>,
 }
 
-pub fn generate_nonce_and_commitments(request: BitcoinWithdrawRequest, shuttler: &Shuttler) {
+pub fn generate_nonce_and_commitments(request: BitcoinWithdrawRequest, signer: &Signer) {
 
     match DB_TASK.contains_key(request.txid.as_bytes()) {
         Ok(false) => {
@@ -107,7 +107,7 @@ pub fn generate_nonce_and_commitments(request: BitcoinWithdrawRequest, shuttler:
 
         info!("prev_tx: {:?}", prev_utxo.script_pubkey);
         let script = input.witness_utxo.clone().unwrap().script_pubkey;
-        let address: Address = Address::from_script(&script, shuttler.config().bitcoin.network).unwrap();
+        let address: Address = Address::from_script(&script, signer.config().bitcoin.network).unwrap();
 
         // get the message to sign
         let hash_ty = input
@@ -126,10 +126,10 @@ pub fn generate_nonce_and_commitments(request: BitcoinWithdrawRequest, shuttler:
             }
         };
 
-        let sign_key = match shuttler.config().keypairs.get(address.to_string().as_str()) {
+        let sign_key = match config::get_keypair_from_db(&address.to_string()) {
             Some(key) => {
                 debug!("loaded key for address: {:?}", address);
-                &key.priv_key
+                key.priv_key
             }
             None => {
                 error!("Failed to get signing key for address: {}", address);
@@ -141,7 +141,7 @@ pub fn generate_nonce_and_commitments(request: BitcoinWithdrawRequest, shuttler:
         let (nonce, commitments) = frost::round1::commit(sign_key.signing_share(), &mut rng);
 
         let mut commitments_map = BTreeMap::new();
-        commitments_map.insert(shuttler.identifier().clone(), commitments.clone());
+        commitments_map.insert(signer.identifier().clone(), commitments.clone());
         let trasaction = SignSession {
             task_id: group_task_id.clone(),
             index: i,
@@ -210,7 +210,7 @@ pub fn received_response(response: SignResponse) {
 
 }
 
-pub fn generate_signature_shares(task: &mut SignTask, identifier: Identifier, conf: &config::Config) {
+pub fn generate_signature_shares(task: &mut SignTask, identifier: Identifier) {
 
     if task.round == Round::Closed {
         return;
@@ -218,7 +218,7 @@ pub fn generate_signature_shares(task: &mut SignTask, identifier: Identifier, co
 
     task.sessions.iter_mut().enumerate().for_each(|(i, session)| {
         // filter packets from unknown parties
-        match conf.keypairs.get(&session.address) {
+        match config::get_keypair_from_db(&session.address) {
             Some(keypair) => {
 
                 if session.commitments.len() < *keypair.priv_key.min_signers() as usize {
@@ -265,7 +265,7 @@ pub fn generate_signature_shares(task: &mut SignTask, identifier: Identifier, co
 
 }
 
-pub fn aggregate_signature_shares(task: &mut SignTask, conf: &config::Config) -> Option<Psbt> {
+pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
 
     if task.round == Round::Closed {
         return None;
@@ -285,7 +285,7 @@ pub fn aggregate_signature_shares(task: &mut SignTask, conf: &config::Config) ->
         if session.commitments.len() != session.signatures.len() {
             return;
         }
-        let keypair = match conf.keypairs.get(&session.address) {
+        let keypair = match config::get_keypair_from_db(&session.address) {
             Some(keypair) => keypair,
             None => {
                 error!("Failed to get keypair for address: {}", session.address);
@@ -391,11 +391,11 @@ pub fn aggregate_signature_shares(task: &mut SignTask, conf: &config::Config) ->
     None
 }
 
-pub async fn submit_signatures(psbt: Psbt, shuttler: &Shuttler) {
+pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
 
     // broadcast to bitcoin network
     let signed_tx = psbt.clone().extract_tx().expect("failed to extract signed tx");
-    match shuttler.bitcoin_client.send_raw_transaction(&signed_tx) {
+    match signer.bitcoin_client.send_raw_transaction(&signed_tx) {
         Ok(txid) => {
             info!("Tx broadcasted: {}", txid);
         }
@@ -411,13 +411,13 @@ pub async fn submit_signatures(psbt: Psbt, shuttler: &Shuttler) {
 
     // submit signed psbt to side chain
     let msg = MsgSubmitWithdrawSignatures {
-        sender: shuttler.config().signer_cosmos_address().to_string(),
+        sender: signer.config().signer_cosmos_address().to_string(),
         txid: signed_tx.compute_txid().to_string(),
         psbt: psbt_base64,
     };
 
     let any = Any::from_msg(&msg).unwrap();
-    match send_cosmos_transaction(shuttler, any).await {
+    match send_cosmos_transaction(signer.config(), any).await {
         Ok(resp) => {
             let tx_response = resp.into_inner().tx_response.unwrap();
             if tx_response.code != 0 {
@@ -434,7 +434,7 @@ pub async fn submit_signatures(psbt: Psbt, shuttler: &Shuttler) {
     // send message to the network
 }
 
-pub async fn collect_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, shuttler: &Shuttler) {
+pub async fn collect_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signer: &Signer) {
     let peers = swarm.connected_peers().map(|p| p.clone() ).collect::<Vec<_>>();
     if peers.len() == 0 {
         debug!("No connected peers found for collecting tss packages");
@@ -445,9 +445,9 @@ pub async fn collect_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, shutt
     for item in DB_TASK.iter() {
         let mut task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
 
-        generate_signature_shares(&mut task, shuttler.identifier().clone(), shuttler.config());
-        if let Some(psbt) = aggregate_signature_shares(&mut task, shuttler.config()) {
-            submit_signatures(psbt, shuttler).await;
+        generate_signature_shares(&mut task, signer.identifier().clone());
+        if let Some(psbt) = aggregate_signature_shares(&mut task) {
+            submit_signatures(psbt, signer).await;
         }
 
         if task.round == Round::Closed {

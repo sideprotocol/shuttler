@@ -1,15 +1,29 @@
 use bitcoin::{bip32::DerivationPath, key::Secp256k1, Address, CompressedPublicKey, Network, NetworkKind};
 use bip39::{self, Mnemonic};
+use cosmos_sdk_proto::cosmos::auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest};
 use cosmrs::{crypto::secp256k1::SigningKey, AccountId};
 use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
-use lazy_static::lazy_static;
-use serde::{de::Error, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
+use sled::IVec;
 use tracing::error;
-use std::{collections::BTreeMap, fs, path::PathBuf, str::FromStr, sync::Mutex};
+use std::{fs, path::PathBuf, str::FromStr, sync::Mutex};
 
 use crate::helper::{cipher::random_bytes, encoding::to_base64};
 
 const CONFIG_FILE: &str = "config.toml";
+
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref DB_KEYPAIRS: sled::Db = {
+        let path = get_database_with_name("keypairs");
+        sled::open(path).unwrap()
+    };
+    static ref PRIV_VALIDATOR_KEY: Mutex<Option<PrivValidatorKey>> = Mutex::new(None);
+    static ref BASE_ACCOUNT: Mutex<Option<BaseAccount>> = {
+        Mutex::new(None)
+    };
+}
 
 /// Threshold Signature Configuration
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -24,11 +38,6 @@ pub struct Config {
 
     pub bitcoin: BitcoinCfg,
     pub side_chain: CosmosChain,
-    // pub keys: BTreeMap<String, String>,
-    // pub pubkeys: BTreeMap<String, String>,
-
-    // pub tweaks: BTreeMap<String, String>,
-    pub keypairs: BTreeMap<String, Keypair>,
 
     pub last_scanned_height: u64,
 }
@@ -106,35 +115,93 @@ pub fn get_database_with_name(db_name: &str) -> String {
 }
 
 /// @deprecated every module should have its own database
-pub fn get_database_path() -> String {
-    let mut home = APPLICATION_PATH.lock().unwrap().clone();
-    home.push_str("/history.db");
-    home
+// pub fn get_database_path() -> String {
+//     let mut home = APPLICATION_PATH.lock().unwrap().clone();
+//     home.push_str("/history.db");
+//     home
+// }
+
+// /// @deprecated every module should have its own database
+// pub fn get_task_database_path() -> String {
+//     let mut home = APPLICATION_PATH.lock().unwrap().clone();
+//     home.push_str("/tasks.db");
+//     home
+// }
+
+pub fn list_keypairs() -> Vec<String> {
+    let mut keys = vec![];
+    for key in DB_KEYPAIRS.iter() {
+        keys.push(String::from_utf8(key.unwrap().0.to_vec()).unwrap());
+    }
+    keys
+}
+pub fn get_keypair_from_db(address: &str) -> Option<Keypair> {
+    match DB_KEYPAIRS.get(address) {
+        Ok(Some(value)) => {
+            Some(serde_json::from_slice(value.as_ref()).unwrap())
+        },
+        _ => {
+            error!("Not found keypair for address: {}", address);
+            None
+        }
+    }
+}
+pub fn save_keypair_to_db(address: String, keypair: &Keypair) -> sled::Result<Option<IVec>>{
+    let value = serde_json::to_vec(keypair).unwrap();
+    DB_KEYPAIRS.insert(address, value)
 }
 
-/// @deprecated every module should have its own database
-pub fn get_task_database_path() -> String {
-    let mut home = APPLICATION_PATH.lock().unwrap().clone();
-    home.push_str("/tasks.db");
-    home
+pub async fn get_relayer_account(conf: &Config) -> BaseAccount {
+
+    let cache = BASE_ACCOUNT.lock().unwrap().clone().map(|account| account);
+    match cache {
+        Some(account) => {
+            let mut new_account = account.clone();
+            new_account.sequence += 1;
+            BASE_ACCOUNT.lock().unwrap().replace(new_account.clone());
+            return new_account;
+        }
+        None => {
+            let mut client = AuthQueryClient::connect(conf.side_chain.grpc.clone()).await.unwrap();
+            let request = QueryAccountRequest {
+                address: conf.signer_cosmos_address().to_string(),
+            };
+    
+            match client.account(request).await {
+                Ok(response) => {
+    
+                    let base_account: BaseAccount = response.into_inner().account.unwrap().to_msg().unwrap();
+                    BASE_ACCOUNT.lock().unwrap().replace(base_account.clone());
+                    base_account
+                }
+                Err(_) => {
+                    panic!("===============================================\n Relayer account don't exist on side chain \n===============================================");
+                }
+            }
+        }
+    }
 }
 
 impl Config {
-    pub fn load_validator_key(&self) -> Result<PrivValidatorKey, serde_json::Error> {
+    pub fn load_validator_key(&self) {
         let priv_key_path = if self.priv_validator_key_path.starts_with("/") {
             self.priv_validator_key_path.clone()
         } else {
             format!("{}/{}", get_app_home(), self.priv_validator_key_path)
         };
-        let text: String = match fs::read_to_string(priv_key_path.clone()) {
-            Ok(text) => text,
-            Err(e) => {
-                error!("Failed to read priv_validator_key.json: {}", e);
-                return Err(serde_json::Error::custom(format!("Failed to read {}", priv_key_path)));
-            }
+        match fs::read_to_string(priv_key_path.clone()) {
+            Ok(text) => {
+                let prv_key = serde_json::from_str::<PrivValidatorKey>(text.as_str()).expect("Failed to parse priv_validator_key.json");
+                PRIV_VALIDATOR_KEY.lock().unwrap().replace(prv_key.clone());
+            },
+            Err(e) => error!("Failed to read priv_validator_key.json: {}", e)
         };
-        serde_json::from_str::<PrivValidatorKey>(text.as_str())
     }
+
+    pub fn get_validator_key(&self) -> Option<PrivValidatorKey> {
+        PRIV_VALIDATOR_KEY.lock().unwrap().clone()
+    }
+
     pub fn from_file(app_home: &str) -> Result<Self, std::io::Error> {
         update_app_home(app_home);
 
@@ -181,7 +248,6 @@ impl Config {
             },
             // tweaks: BTreeMap::new(),
             last_scanned_height: 0,
-            keypairs: BTreeMap::new(),
         }
     }
 

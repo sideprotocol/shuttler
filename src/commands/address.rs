@@ -1,10 +1,10 @@
-use crate::app::config::Config;
+use crate::app::config::{self, Config};
 
 use super::Cli;
 
 pub fn execute(cli: &Cli) {
     let conf = Config::from_file(&cli.home).unwrap();
-
+    let keypairs = config::list_keypairs();
     println!("Relayer address");
     println!("-------------------------------------------------------------");
     println!("Bitcoin: {}", conf.signer_bitcoin_address());
@@ -12,12 +12,10 @@ pub fn execute(cli: &Cli) {
     println!("\n NOTE: Please fund relayer address before using it.");
     println!("-------------------------------------------------------------");
 
-    println!("\nVault addresses: ({})", conf.keypairs.len());
+    println!("\nVault addresses: ({})", keypairs.len());
     println!("-------------------------------------------------------------");
-    let mut index = 1;
-    for (k, _v) in conf.keypairs.iter() {
+    for (index, k) in keypairs.iter().enumerate() {
         println!("{}: {}", index, k);
-        index += 1;
     }
     println!("\n");
 }
