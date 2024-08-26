@@ -267,29 +267,57 @@ pub async fn scan_vault_txs(relayer: &Relayer, height: u64) {
         );
 
         if bitcoin_utils::may_be_withdraw_tx(&tx) {
-            info!("Withdrawal tx found...");
+            let prev_txid = tx.input[0].previous_output.txid;
+            let prev_vout=tx.input[0].previous_output.vout;
 
-            let proof = bitcoin_utils::compute_tx_proof(
-                block.txdata.iter().map(|tx| tx.compute_txid()).collect(),
-                i,
-            );
-
-            match send_withdraw_tx(relayer, &block_hash, &tx, proof).await {
-                Ok(resp) => {
-                    let tx_response = resp.into_inner().tx_response.unwrap();
-                    if tx_response.code != 0 {
-                        error!("Failed to submit withdrawal tx: {:?}", tx_response);
-                        continue;
+            let address = match relayer
+                .bitcoin_client
+                .get_tx_out (&prev_txid, prev_vout, None)
+            {
+                Ok(tx_out_res) => {
+                    match tx_out_res {
+                        Some(tx_out) => tx_out.script_pub_key.address,
+                        None => None,
                     }
-
-                    info!("Submitted withdrawal tx: {:?}", tx_response);
                 }
                 Err(e) => {
-                    error!("Failed to submit withdrawal tx: {:?}", e);
+                    error!(
+                        "Failed to get the previous tx out: {:?}:{:?}, err: {:?}",
+                        prev_txid, prev_vout,e
+                    );
+
+                    None
+                }
+            };
+
+            if address.is_some() {
+                let address = address.unwrap().assume_checked().to_string();
+                if vaults.contains(&address) {
+                    info!("Withdrawal tx found...");
+
+                    let proof = bitcoin_utils::compute_tx_proof(
+                        block.txdata.iter().map(|tx| tx.compute_txid()).collect(),
+                        i,
+                    );
+
+                    match send_withdraw_tx(relayer, &block_hash, &tx, proof).await {
+                        Ok(resp) => {
+                            let tx_response = resp.into_inner().tx_response.unwrap();
+                            if tx_response.code != 0 {
+                                error!("Failed to submit withdrawal tx: {:?}", tx_response);
+                                continue;
+                            }
+        
+                            info!("Submitted withdrawal tx: {:?}", tx_response);
+                        }
+                        Err(e) => {
+                            error!("Failed to submit withdrawal tx: {:?}", e);
+                        }
+                    }
+
+                    continue;
                 }
             }
-
-            continue;
         }
 
         if bitcoin_utils::is_deposit_tx(tx, relayer.config().bitcoin.network, &vaults) {

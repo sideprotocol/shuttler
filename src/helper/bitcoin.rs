@@ -6,6 +6,9 @@ use frost_secp256k1_tr::VerifyingKey;
 
 use super:: merkle_proof;
 
+// Magic txin sequence for withdrawal txs
+const MAGIC_SEQUENCE: u32 = (1<<31) + 0xde;
+
 pub fn get_group_address(verify_key: &VerifyingKey, network: Network) -> Address {
     // let verifying_key_b = json_data.pubkey_package.verifying_key();
     let pubk = PublicKey::from_slice(&verify_key.serialize()[..]).unwrap();
@@ -51,35 +54,18 @@ pub fn is_deposit_tx(tx: &Transaction, network: Network, vaults: &Vec<String>) -
     })
 }
 
+// Check if the given tx may be a withdrawal tx by sequence
 pub fn may_be_withdraw_tx(tx: &Transaction) -> bool {
-    let script = &tx.output[0].script_pubkey;
-    let instructions = script.instruction_indices();
-
-    for inst in instructions {
-        match inst {
-            Ok((0, Instruction::Op(opcodes::all::OP_RETURN))) => {}
-            Ok((1, Instruction::PushBytes(bytes))) => {
-                if bytes.as_bytes().ne("side".as_bytes()) {
-                    return false;
-                }
-            }
-            Ok((6, Instruction::PushBytes(bytes))) => {
-                if bytes.len() > 8 {
-                    return false;
-                }
-            }
-            _ => {
-                return false;
-            }
-        }
+    if tx.input.len() < 1 {
+        return false;
     }
 
-    return true;
+    tx.input[0].sequence.0 == MAGIC_SEQUENCE 
 }
 
 #[cfg(test)]
 mod tests {
-    use bitcoin::{transaction::Version, Amount, OutPoint, TxIn, TxOut};
+    use bitcoin::{transaction::Version, Amount, OutPoint, Sequence, TxIn, TxOut};
     use bitcoin_hashes::Hash;
 
     use crate::helper::encoding::from_base64;
@@ -88,11 +74,6 @@ mod tests {
 
     #[test]
     fn test_withdraw_tx_check() {
-        let mut protocol = [0u8; 4];
-        protocol.copy_from_slice("side".as_bytes());
-
-        let sequence = u64::MAX;
-
         let tx = Transaction {
             version: Version::TWO,
             lock_time: bitcoin::absolute::LockTime::ZERO,
@@ -101,6 +82,7 @@ mod tests {
                     txid: Txid::all_zeros(),
                     vout: 0,
                 },
+                sequence: Sequence(MAGIC_SEQUENCE),
                 ..Default::default()
             }]
             .to_vec(),
@@ -108,8 +90,6 @@ mod tests {
                 value: Amount::from_sat(1000),
                 script_pubkey: ScriptBuf::builder()
                     .push_opcode(opcodes::all::OP_RETURN)
-                    .push_slice(protocol)
-                    .push_slice(sequence.to_be_bytes())
                     .into_script(),
             }]
             .to_vec(),
