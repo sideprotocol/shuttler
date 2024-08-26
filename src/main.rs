@@ -6,7 +6,7 @@ use tracing_subscriber::{FmtSubscriber, EnvFilter};
 async fn main() {
     // Initialize tracing with customization
     
-    let filter = EnvFilter::new("info").add_directive("tssigner=debug".parse().unwrap());
+    let filter = EnvFilter::new("info").add_directive("shuttler=debug".parse().unwrap());
     let subscriber = FmtSubscriber::builder()
         .with_env_filter(filter) // Enable log filtering through environment variable
         .finish();
