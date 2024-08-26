@@ -197,10 +197,9 @@ pub fn received_response(response: SignResponse) {
 
     task.sessions.iter_mut().enumerate().for_each(|(i, session)| {
         let packet = response.signatures_shares.get(i).unwrap();
-        session.signatures.extend(packet); // merge received commitments
+        session.signatures.extend(packet); // merge received signatures
     });
 
-    // let s = task.sessions.iter().map(|s| s.signatures.clone()).collect::<Vec<_>>();
     debug!("Received response for task: {:?} {:?} {:?}", task_id, 
         task.sessions.iter().map(|s| s.commitments.clone()).collect::<Vec<_>>(),
         task.sessions.iter().map(|s| s.signatures.clone()).collect::<Vec<_>>(),
