@@ -32,6 +32,7 @@ struct Lock {
 
 const DB_KEY_BITCOIN_TIP: &str = "bitcoin_tip";
 const DB_KEY_VAULTS: &str = "bitcoin_vaults";
+const DB_KEY_VAULTS_LAST_UPDATE: &str = "bitcoin_vaults_last_update";
 
 lazy_static! {
     static ref LOADING: Mutex<Lock> = Mutex::new(Lock { loading: false });
@@ -390,22 +391,25 @@ fn save_last_scanned_height(height: u64) {
 }
 
 async fn get_cached_vaults(grpc: String) -> Vec<String> {
-    match DB.get(DB_KEY_VAULTS) {
-        Ok(Some(vaults)) => {
-            serde_json::from_slice(&vaults).unwrap_or(vec![])
-        }
-        _ => {
-            // let grpc = conf.side_chain.grpc.clone();
-            let mut client = cosmos_sdk_proto::side::btcbridge::query_client::QueryClient::connect(grpc).await.unwrap();
-            let x = client.query_params(QueryParamsRequest{}).await.unwrap().into_inner();
-            match x.params {
-                Some(params) => {
-                    let vaults = params.vaults.iter().map(|v| v.address.clone()).collect::<Vec<_>>();
-                    let _ = DB.insert(DB_KEY_VAULTS, serde_json::to_vec(&vaults).unwrap());
-                    vaults
-                }
-                None => vec![]
-            }
+    if let Ok(Some(last_update)) = DB.get(DB_KEY_VAULTS_LAST_UPDATE) {
+        let last_update: u64 = serde_json::from_slice(&last_update).unwrap_or(0);
+        let now = chrono::Utc::now().timestamp() as u64;
+        if now - last_update < 60 * 60 * 24 { // 24 hours
+            if let Ok(Some(vaults)) =  DB.get(DB_KEY_VAULTS) {
+                return serde_json::from_slice(&vaults).unwrap_or(vec![])
+            };
         }
     }
+    let mut client = cosmos_sdk_proto::side::btcbridge::query_client::QueryClient::connect(grpc).await.unwrap();
+    let x = client.query_params(QueryParamsRequest{}).await.unwrap().into_inner();
+    match x.params {
+        Some(params) => {
+            let vaults = params.vaults.iter().map(|v| v.address.clone()).collect::<Vec<_>>();
+            let _ = DB.insert(DB_KEY_VAULTS, serde_json::to_vec(&vaults).unwrap());
+            let _ = DB.insert(DB_KEY_VAULTS_LAST_UPDATE, serde_json::to_vec(&chrono::Utc::now().timestamp()).unwrap());
+            vaults
+        }
+        None => vec![]
+    }
 }
+
