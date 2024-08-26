@@ -79,7 +79,7 @@ pub async fn start_relayer_tasks(relayer: &Relayer, _rng: &mut ChaCha8Rng) {
     );
 }
 
-fn is_coordinator(
+fn _is_coordinator(
     validator_set: &Vec<Validator>,
     address: String,
     rng: &mut ChaCha8Rng,

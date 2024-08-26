@@ -296,7 +296,7 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<TSSBehaviour>, conf: &Config) {
             .build();
         match swarm.dial(opt) {
             Ok(_) => {
-                info!("Dialed {addr_text}");
+                info!("Connected to bootstrap peer: {addr_text}");
             }
             Err(e) => {
                 error!("Failed to dial {addr_text}: {e}");
@@ -311,23 +311,22 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, multiaddr) in list {
                 info!("mDNS discovered a new peer: {peer_id}");
-
                 swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
                 if swarm.is_connected(&peer_id) {
-                    continue;
+                    return;
                 }
                 let opt = DialOpts::peer_id(peer_id)
-                    .addresses(vec![multiaddr])
+                    .addresses(vec![multiaddr.clone()])
                     .condition(PeerCondition::DisconnectedAndNotDialing)
                     .build();
                 match swarm.dial(opt) {
                     Ok(_) => {
-                        info!("Dialed {peer_id}");
+                        info!("Connected to {peer_id}, {multiaddr}");
                     }
                     Err(e) => {
-                        error!("Failed to dial {peer_id}: {e}");
+                        error!("Unable to connect to {peer_id}: {e}");
                     }
-                };                
+                };  
             }
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Expired(list)) => {
@@ -344,6 +343,20 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
         }
         TSSBehaviourEvent::Dkg(request_response::Event::OutboundFailure { peer, request_id, error}) => {
             debug!("Outbound Failure {peer}: {request_id} - {error}");
+            if swarm.is_connected(&peer) {
+                return;
+            }
+            let opt = DialOpts::peer_id(peer)
+                .condition(PeerCondition::DisconnectedAndNotDialing)
+                .build();
+            match swarm.dial(opt) {
+                Ok(_) => {
+                    info!("Connected to {peer}");
+                }
+                Err(e) => {
+                    error!("Unable to connect to {peer}: {e}");
+                }
+            }; 
         }
         TSSBehaviourEvent::Signer(request_response::Event::Message { peer, message }) => {
             debug!("Received Signer response from {peer}: {:?}", &message);
