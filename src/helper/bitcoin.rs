@@ -1,5 +1,5 @@
 use bitcoin::{
-    key::Secp256k1, opcodes, script::Instruction, Address, Network, PublicKey,
+    key::Secp256k1, Address, Network, PublicKey,
     ScriptBuf, TapNodeHash, Transaction, Txid, XOnlyPublicKey,
 };
 use frost_secp256k1_tr::VerifyingKey;
@@ -65,7 +65,7 @@ pub fn may_be_withdraw_tx(tx: &Transaction) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use bitcoin::{transaction::Version, Amount, OutPoint, Sequence, TxIn, TxOut};
+    use bitcoin::{opcodes, transaction::Version, Amount, OutPoint, Sequence, TxIn, TxOut};
     use bitcoin_hashes::Hash;
 
     use crate::helper::encoding::from_base64;
