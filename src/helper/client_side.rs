@@ -1,5 +1,5 @@
 
-use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
+use std::sync::Mutex;
 
 use cosmrs::{ tx::{self, Fee, SignDoc, SignerInfo}, Coin};
 use cosmos_sdk_proto::cosmos::{
@@ -16,7 +16,7 @@ use prost_types::Any;
 use lazy_static::lazy_static;
 
 lazy_static! {
-    static ref lock: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    static ref lock: Mutex<bool> = Mutex::new(false);
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -115,8 +115,7 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
     // Building transactions //
     ///////////////////////////
 
-
-    lock.swap(true, Ordering::Acquire);
+    let _l = lock.lock().unwrap();
     let base_account = config::get_relayer_account(conf).await;
     
     let mut base_client = match TendermintServiceClient::connect(conf.side_chain.grpc.to_string()).await {
@@ -172,12 +171,10 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
         }
     };
 
-    let ret = tx_client.broadcast_tx(BroadcastTxRequest {
+    tx_client.broadcast_tx(BroadcastTxRequest {
         tx_bytes,
         mode: BroadcastMode::Sync.into(),    
-    }).await; 
+    }).await
     
-    lock.store(false, Ordering::Release);
-    ret
    // post::<>(url.as_str(), tx).await
 }
