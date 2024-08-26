@@ -5,7 +5,7 @@ use bitcoincore_rpc::{Auth, Client};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use tokio::{select, time::Instant};
-use crate::{app::config::Config, helper::{messages::now}, tickers::relayer_tasks};
+use crate::{app::config::Config, helper::messages::now, tickers::relayer};
 
 use std::time::Duration;
 use tracing::info;
@@ -54,7 +54,7 @@ pub async fn run_relayer_daemon(conf: Config) {
     loop {
         select! {
             _ = interval_relayer.tick() => {
-                relayer_tasks::start_relayer_tasks(&relayer, &mut rng).await;
+                relayer::start_relayer_tasks(&relayer, &mut rng).await;
             }
         }
     }

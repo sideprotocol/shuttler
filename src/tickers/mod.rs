@@ -1,6 +1,6 @@
 
-pub mod tss_tasks;
-pub mod relayer_tasks;
+pub mod tss;
+pub mod relayer;
 
 // pub async fn run_tick_tests() {
 //     // this is to ensure that each node fetches tasks at the same time    

@@ -20,7 +20,7 @@ use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::from_base64;
 use crate::protocols::sign::{tss_event_handler, SignRequest, SignResponse};
-use crate::tickers::tss_tasks::tss_tasks_fetcher;
+use crate::tickers::tss::tss_tasks_fetcher;
 use crate::protocols::dkg::{dkg_event_handler, DKGRequest, DKGResponse};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
 

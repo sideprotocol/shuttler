@@ -107,95 +107,98 @@ fn is_coordinator(
 }
 
 pub async fn sync_btc_blocks(relayer: &Relayer) {
-    let tip_on_bitcoin = match relayer.bitcoin_client.get_block_count() {
-        Ok(height) => height,
-        Err(e) => {
-            error!(error=%e);
-            return;
-        }
-    };
 
-    let mut tip_on_side =
-        match client_side::get_bitcoin_tip_on_side(&relayer.config().side_chain.grpc).await {
-            Ok(res) => res.get_ref().height,
+    loop {
+        let tip_on_bitcoin = match relayer.bitcoin_client.get_block_count() {
+            Ok(height) => height,
             Err(e) => {
                 error!(error=%e);
                 return;
             }
         };
 
-    let mut lock = LOADING.lock().unwrap();
-    if lock.loading {
-        info!("a previous task is running, skip!");
-        return;
-    }
-    lock.loading = true;
-
-    let mut block_headers: Vec<BlockHeader> = vec![];
-
-    let batch = if tip_on_side + 10 > tip_on_bitcoin {
-        tip_on_bitcoin
-    } else {
-        tip_on_side + 10
-    };
-
-    info!("==========================================================");
-    info!("Syncing blocks from {} to {}", tip_on_side, batch);
-    info!("==========================================================");
-
-    while tip_on_side < batch {
-        tip_on_side = tip_on_side + 1;
-        let hash = match relayer.bitcoin_client.get_block_hash(tip_on_side) {
-            Ok(hash) => hash,
-            Err(e) => {
-                error!(error=%e);
-                return;
-            }
-        };
-
-        let header = match relayer.bitcoin_client.get_block_header(&hash) {
-            Ok(b) => b,
-            Err(e) => {
-                error!(error=%e);
-                return;
-            }
-        };
-
-        block_headers.push(BlockHeader {
-            version: header.version.to_consensus() as u64,
-            hash: header.block_hash().to_string(),
-            height: tip_on_side,
-            previous_block_hash: header.prev_blockhash.to_string(),
-            merkle_root: header.merkle_root.to_string(),
-            nonce: header.nonce as u64,
-            bits: format!("{:x}", header.bits.to_consensus()),
-            time: header.time as u64,
-            ntx: 0u64,
-        });
-
-        // setup a batch of 1 block headers
-        // if block_headers.len() >= 1 {
-        //     break;
-        // }
-
-        match send_block_headers(relayer, &block_headers).await {
-            Ok(resp) => {
-                let tx_response = resp.into_inner().tx_response.unwrap();
-                if tx_response.code != 0 {
-                    error!("Failed to send block headers: {:?}", tx_response);
+        let mut tip_on_side =
+            match client_side::get_bitcoin_tip_on_side(&relayer.config().side_chain.grpc).await {
+                Ok(res) => res.get_ref().height,
+                Err(e) => {
+                    error!(error=%e);
                     return;
                 }
-                info!("Sent block headers: {:?}", tx_response);
-                block_headers = vec![] //reset
-            }
-            Err(e) => {
-                error!("Failed to send block headers: {:?}", e);
-                return;
-            }
-        };
-    }
+            };
 
-    lock.loading = false;
+        let mut lock = LOADING.lock().unwrap();
+        if lock.loading {
+            info!("a previous task is running, skip!");
+            return;
+        }
+        lock.loading = true;
+
+        let mut block_headers: Vec<BlockHeader> = vec![];
+
+        let batch = if tip_on_side + 10 > tip_on_bitcoin {
+            tip_on_bitcoin
+        } else {
+            tip_on_side + 10
+        };
+
+        info!("==========================================================");
+        info!("Syncing blocks from {} to {}", tip_on_side, batch);
+        info!("==========================================================");
+
+        while tip_on_side < batch {
+            tip_on_side = tip_on_side + 1;
+            let hash = match relayer.bitcoin_client.get_block_hash(tip_on_side) {
+                Ok(hash) => hash,
+                Err(e) => {
+                    error!(error=%e);
+                    return;
+                }
+            };
+
+            let header = match relayer.bitcoin_client.get_block_header(&hash) {
+                Ok(b) => b,
+                Err(e) => {
+                    error!(error=%e);
+                    return;
+                }
+            };
+
+            block_headers.push(BlockHeader {
+                version: header.version.to_consensus() as u64,
+                hash: header.block_hash().to_string(),
+                height: tip_on_side,
+                previous_block_hash: header.prev_blockhash.to_string(),
+                merkle_root: header.merkle_root.to_string(),
+                nonce: header.nonce as u64,
+                bits: format!("{:x}", header.bits.to_consensus()),
+                time: header.time as u64,
+                ntx: 0u64,
+            });
+
+            // setup a batch of 1 block headers
+            // if block_headers.len() >= 1 {
+            //     break;
+            // }
+
+            match send_block_headers(relayer, &block_headers).await {
+                Ok(resp) => {
+                    let tx_response = resp.into_inner().tx_response.unwrap();
+                    if tx_response.code != 0 {
+                        error!("Failed to send block headers: {:?}", tx_response);
+                        return;
+                    }
+                    info!("Sent block headers: {:?}", tx_response);
+                    block_headers = vec![] //reset
+                }
+                Err(e) => {
+                    error!("Failed to send block headers: {:?}", e);
+                    return;
+                }
+            };
+        }
+
+        lock.loading = false;
+    }
 }
 
 pub async fn send_block_headers(
@@ -226,7 +229,6 @@ pub async fn scan_vault_txs_loop(relayer: &Relayer) {
                     continue;
                 }
             };
-
         if height > side_tip - 1 {
             sleep(Duration::from_secs(6));
             continue;
