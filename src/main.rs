@@ -1,5 +1,5 @@
 use clap::Parser;
-use tssigner::commands::{address, init, reset, start, Cli, Commands};
+use shuttler::commands::{address, init, reset, start, Cli, Commands};
 use tracing_subscriber::{FmtSubscriber, EnvFilter};
 
 #[tokio::main]
