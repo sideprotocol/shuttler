@@ -8,7 +8,6 @@ use crate::{app::signer::Signer, helper::client_side::get_withdraw_requests, pro
 
 use lazy_static::lazy_static;
 
-#[derive(Debug)]
 struct Lock {
     loading: bool,
 }
@@ -18,7 +17,7 @@ lazy_static! {
 }
 
 async fn fetch_withdraw_signing_requests(
-    behave: &mut TSSBehaviour,
+    _behave: &mut TSSBehaviour,
     shuttler: &Signer,
 ) {
     let host = shuttler.config().side_chain.grpc.as_str();

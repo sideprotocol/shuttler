@@ -1,11 +1,10 @@
 
 use bitcoincore_rpc::{Auth, Client};
-use chrono::{Timelike, Utc};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_client::QueryClient as AuthQueryClient;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountRequest};
 use frost_core::Field;
 use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
-use frost_secp256k1_tr::{self as frost, Secp256K1Sha256};
+use frost_secp256k1_tr::{self as frost};
 use frost::Identifier;
 use futures::StreamExt;
 
@@ -14,16 +13,12 @@ use libp2p::request_response::{self, ProtocolSupport};
 use libp2p::swarm::dial_opts::PeerCondition;
 use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
 use libp2p::{ gossipsub, mdns, noise, tcp, yamux, Multiaddr, StreamProtocol, Swarm};
-use rand::SeedableRng;
-use rand_chacha::ChaCha8Rng;
-use tokio::time::Instant;
 
 use crate::app::config;
 use crate::app::config::Config;
 use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::from_base64;
-use crate::helper::messages::now;
 use crate::protocols::sign::{tss_event_handler, SignRequest, SignResponse};
 use crate::tickers::tss_tasks::tss_tasks_fetcher;
 use crate::protocols::dkg::{dkg_event_handler, DKGRequest, DKGResponse};
@@ -32,9 +27,9 @@ use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::str::FromStr;
 use std::sync::Mutex;
-use std::{io, iter, thread};
+use std::{io, iter};
 use std::time::Duration;
-use tokio::{select, spawn};
+use tokio::select;
 
 use tracing::{debug, info, error};
 
@@ -53,7 +48,6 @@ pub struct Signer {
     config: Config,
     pub identity_key: SecretKey,
     identifier: Identifier,
-    // pub priv_validator_key: PrivValidatorKey,
     pub bitcoin_client: Client,
 }
 
@@ -166,11 +160,14 @@ impl Signer {
             let address_with_tweak = get_group_address_by_tweak(&pubkey.verifying_key(), tweak.clone(), self.config.bitcoin.network);
 
             addrs.push(address_with_tweak.to_string());
-            config::save_keypair_to_db(address_with_tweak.to_string(), &config::Keypair{
+            let re = config::save_keypair_to_db(address_with_tweak.to_string(), &config::Keypair{
                 priv_key: key.clone(),
                 pub_key: pubkey.clone(),
                 tweak: tweak,
             });
+            if re.is_err() {
+                error!("Failed to save generated keys to database: {:?}",   re.err());
+            }
         }
         self.config.save().expect("Failed to save generated keys");
         info!("Generated {:?} and vault addresses: {:?}", pubkey, addrs);
@@ -336,7 +333,7 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 info!("mDNS discover peer has expired: {peer_id}");
             }
         }
-        TSSBehaviourEvent::Dkg(request_response::Event::Message { peer, message }) => {;
+        TSSBehaviourEvent::Dkg(request_response::Event::Message { peer, message }) => {
             // debug!("Received DKG response from {peer}: {:?}", &message);
             dkg_event_handler( shuttler, swarm.behaviour_mut(), &peer, message);
         }

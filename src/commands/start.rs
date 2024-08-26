@@ -1,6 +1,3 @@
-
-use std::thread;
-
 use futures::join;
 
 use crate::app::{config::Config, relayer, signer};

@@ -2,20 +2,18 @@
 
 use chrono::{Timelike, Utc};
 use bitcoincore_rpc::{Auth, Client};
-use frost_core::{keys::{PublicKeyPackage, KeyPackage}, Field};
+use frost_core::Field;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use tokio::{select, time::Instant};
-use crate::{app::config::{self, Config}, helper::{bitcoin::get_group_address_by_tweak, cipher::random_bytes, messages::now}, tickers::relayer_tasks};
+use crate::{app::config::Config, helper::{ cipher::random_bytes, messages::now}, tickers::relayer_tasks};
 use crate::helper::encoding::from_base64;
 use frost::Identifier; 
-use frost_secp256k1_tr::{self as frost, Secp256K1Sha256};
+use frost_secp256k1_tr::{self as frost};
 
 use std::time::Duration;
 use tracing::info;
 use ed25519_compact:: SecretKey;
-
-use super::config::Keypair;
 
 #[derive(Debug)]
 pub struct Relayer {
@@ -73,14 +71,6 @@ impl Relayer {
         &self.identifier
     }
 
-    // pub fn relayer_key(&self) -> &SigningKey {
-    //     &self.relayer_key
-    // }
-
-    // pub fn relayer_address(&self) -> &AccountId {
-    //     &self.relayer_address
-    // }
-
     pub fn validator_address(&self) -> String {
         match &self.config().get_validator_key() {
             Some(key) => key.address.clone(),
@@ -88,44 +78,6 @@ impl Relayer {
         }
     }
 
-    fn generate_tweak(&self, _pubkey: PublicKeyPackage<Secp256K1Sha256>, index: u16) -> Option<[u8;32]> {
-        if index == 0 {
-            None
-        } else {
-            Some([0;32])
-        }
-    }
-
-    pub fn generate_vault_addresses(&self, pubkey: PublicKeyPackage<Secp256K1Sha256>, key: KeyPackage<Secp256K1Sha256>, address_num: u16) -> Vec<String> {
-
-        let mut addrs = vec![];
-        for i in 0..address_num {
-            let tweak = self.generate_tweak(pubkey.clone(), i);
-            let address_with_tweak = get_group_address_by_tweak(&pubkey.verifying_key(), tweak.clone(), self.config.bitcoin.network);
-
-            addrs.push(address_with_tweak.to_string());
-            config::save_keypair_to_db(address_with_tweak.to_string(), &Keypair{
-                priv_key: key.clone(),
-                pub_key: pubkey.clone(),
-                tweak: tweak,
-            });
-        }
-        self.config.save().expect("Failed to save generated keys");
-        info!("Generated {:?} and vault addresses: {:?}", pubkey, addrs);
-        addrs
-    }
-
-    pub fn get_complete_dkg_signature(&self, id: u64, vaults: &[String]) -> String {
-        let mut sig_msg = id.to_be_bytes().to_vec();
-
-        for v in vaults {
-            sig_msg.extend(v.as_bytes())
-        }
-
-        sig_msg = hex::decode(sha256::digest(sig_msg)).unwrap();
-
-        hex::encode(self.identity_key.sign(sig_msg, None))
-    }
 }
 
 pub async fn run_relayer_daemon(conf: Config) {

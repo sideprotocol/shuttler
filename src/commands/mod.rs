@@ -1,10 +1,5 @@
 use bitcoin::Network;
 use clap::{Parser, Subcommand};
-use tokio::{io::AsyncWriteExt, net::TcpStream};
-
-use crate::app::config;
-use tracing::{info, error};
-
 
 #[derive(Parser)]
 #[command(name = "tssigner", version = "0.1.0", author = "Side Labs")]

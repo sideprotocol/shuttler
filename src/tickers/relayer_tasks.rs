@@ -17,12 +17,11 @@ use crate::{
 };
 
 use cosmos_sdk_proto::{
-    cosmos::base::tendermint::v1beta1::{
+    cosmos::{base::tendermint::v1beta1::{
         service_client::ServiceClient as TendermintServiceClient, GetLatestValidatorSetRequest,
         Validator,
-    },
-    cosmos::tx::v1beta1::BroadcastTxResponse,
-    side::btcbridge::{BlockHeader, MsgSubmitBlockHeaders, MsgSubmitDepositTransaction, MsgSubmitWithdrawTransaction},
+    }, tx::v1beta1::BroadcastTxResponse},
+    side::btcbridge::{BlockHeader, MsgSubmitBlockHeaders, MsgSubmitDepositTransaction, MsgSubmitWithdrawTransaction, QueryParamsRequest},
 };
 use lazy_static::lazy_static;
 
@@ -31,7 +30,8 @@ struct Lock {
     loading: bool,
 }
 
-const BITCOIN_TIP: &str = "bitcoin_tip";
+const DB_KEY_BITCOIN_TIP: &str = "bitcoin_tip";
+const DB_KEY_VAULTS: &str = "bitcoin_vaults";
 
 lazy_static! {
     static ref LOADING: Mutex<Lock> = Mutex::new(Lock { loading: false });
@@ -234,7 +234,6 @@ pub async fn scan_vault_txs_loop(relayer: &Relayer) {
         info!("Scanning height: {:?}, side tip: {:?}", height, side_tip);
 
         scan_vault_txs(relayer, height).await;
-
         save_last_scanned_height(height);
         height += 1;
     }
@@ -256,6 +255,8 @@ pub async fn scan_vault_txs(relayer: &Relayer, height: u64) {
             return;
         }
     };
+
+    let vaults = get_cached_vaults(relayer.config().side_chain.grpc.clone()).await;
 
     for (i, tx) in block.txdata.iter().enumerate() {
         info!(
@@ -291,7 +292,7 @@ pub async fn scan_vault_txs(relayer: &Relayer, height: u64) {
             continue;
         }
 
-        if bitcoin_utils::is_deposit_tx(tx, relayer.config().bitcoin.network) {
+        if bitcoin_utils::is_deposit_tx(tx, relayer.config().bitcoin.network, &vaults) {
             info!("Deposit tx found...");
 
             let proof = bitcoin_utils::compute_tx_proof(
@@ -374,7 +375,7 @@ pub async fn send_deposit_tx(
 }
 
 pub(crate) fn get_last_scanned_height(config: &Config) -> u64 {
-    match DB.get(BITCOIN_TIP) {
+    match DB.get(DB_KEY_BITCOIN_TIP) {
         Ok(Some(tip)) => {
             serde_json::from_slice(&tip).unwrap_or(config.last_scanned_height)
         }
@@ -385,5 +386,26 @@ pub(crate) fn get_last_scanned_height(config: &Config) -> u64 {
 }
 
 fn save_last_scanned_height(height: u64) {
-    let _ = DB.insert(BITCOIN_TIP, serde_json::to_vec(&height).unwrap());
+    let _ = DB.insert(DB_KEY_BITCOIN_TIP, serde_json::to_vec(&height).unwrap());
+}
+
+async fn get_cached_vaults(grpc: String) -> Vec<String> {
+    match DB.get(DB_KEY_VAULTS) {
+        Ok(Some(vaults)) => {
+            serde_json::from_slice(&vaults).unwrap_or(vec![])
+        }
+        _ => {
+            // let grpc = conf.side_chain.grpc.clone();
+            let mut client = cosmos_sdk_proto::side::btcbridge::query_client::QueryClient::connect(grpc).await.unwrap();
+            let x = client.query_params(QueryParamsRequest{}).await.unwrap().into_inner();
+            match x.params {
+                Some(params) => {
+                    let vaults = params.vaults.iter().map(|v| v.address.clone()).collect::<Vec<_>>();
+                    let _ = DB.insert(DB_KEY_VAULTS, serde_json::to_vec(&vaults).unwrap());
+                    vaults
+                }
+                None => vec![]
+            }
+        }
+    }
 }

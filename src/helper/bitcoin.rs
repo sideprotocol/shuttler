@@ -1,13 +1,10 @@
 use bitcoin::{
-    key::Secp256k1, opcodes, script::Instruction, Address, BlockHash, Network, PublicKey,
+    key::Secp256k1, opcodes, script::Instruction, Address, Network, PublicKey,
     ScriptBuf, TapNodeHash, Transaction, Txid, XOnlyPublicKey,
 };
-use bitcoincore_rpc::RpcApi;
 use frost_secp256k1_tr::VerifyingKey;
 
-use crate::app::config;
-
-use super::{encoding, merkle_proof};
+use super:: merkle_proof;
 
 pub fn get_group_address(verify_key: &VerifyingKey, network: Network) -> Address {
     // let verifying_key_b = json_data.pubkey_package.verifying_key();
@@ -48,14 +45,10 @@ pub fn compute_tx_proof(txids: Vec<Txid>, index: usize) -> Vec<String> {
 /// Check if the transaction is a deposit transaction
 /// A deposit transaction is a transaction that has a vault address as one of its output
 /// the vault address should be fetched from side chain. so none signer can also run a relayer
-pub fn is_deposit_tx(tx: &Transaction, network: Network) -> bool {
-    // tx.output.iter().any(|out| {
-    //     config::is_vault_address(
-    //         get_address_from_pk_script(out.clone().script_pubkey, network).as_str(),
-    //     )
-    // })
-    // improve it later
-    false
+pub fn is_deposit_tx(tx: &Transaction, network: Network, vaults: &Vec<String>) -> bool {
+    tx.output.iter().any(|out| {
+        vaults.contains( &get_address_from_pk_script(out.clone().script_pubkey, network))
+    })
 }
 
 pub fn may_be_withdraw_tx(tx: &Transaction) -> bool {
@@ -89,7 +82,7 @@ mod tests {
     use bitcoin::{transaction::Version, Amount, OutPoint, TxIn, TxOut};
     use bitcoin_hashes::Hash;
 
-    use encoding::from_base64;
+    use crate::helper::encoding::from_base64;
 
     use super::*;
 

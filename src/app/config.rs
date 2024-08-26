@@ -114,20 +114,6 @@ pub fn get_database_with_name(db_name: &str) -> String {
     home
 }
 
-/// @deprecated every module should have its own database
-// pub fn get_database_path() -> String {
-//     let mut home = APPLICATION_PATH.lock().unwrap().clone();
-//     home.push_str("/history.db");
-//     home
-// }
-
-// /// @deprecated every module should have its own database
-// pub fn get_task_database_path() -> String {
-//     let mut home = APPLICATION_PATH.lock().unwrap().clone();
-//     home.push_str("/tasks.db");
-//     home
-// }
-
 pub fn list_keypairs() -> Vec<String> {
     let mut keys = vec![];
     for key in DB_KEYPAIRS.iter() {
@@ -135,6 +121,7 @@ pub fn list_keypairs() -> Vec<String> {
     }
     keys
 }
+
 pub fn get_keypair_from_db(address: &str) -> Option<Keypair> {
     match DB_KEYPAIRS.get(address) {
         Ok(Some(value)) => {
