@@ -1,4 +1,6 @@
 
+use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
+
 use cosmrs::{ tx::{self, Fee, SignDoc, SignerInfo}, Coin};
 use cosmos_sdk_proto::cosmos::{
     base::tendermint::v1beta1::GetLatestBlockRequest, 
@@ -11,6 +13,11 @@ use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryCli
 use crate::app::config;
 
 use prost_types::Any;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref lock: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Pagination {
@@ -108,6 +115,8 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
     // Building transactions //
     ///////////////////////////
 
+
+    lock.swap(true, Ordering::Acquire);
     let base_account = config::get_relayer_account(conf).await;
     
     let mut base_client = match TendermintServiceClient::connect(conf.side_chain.grpc.to_string()).await {
@@ -163,10 +172,12 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
         }
     };
 
-    tx_client.broadcast_tx(BroadcastTxRequest {
+    let ret = tx_client.broadcast_tx(BroadcastTxRequest {
         tx_bytes,
         mode: BroadcastMode::Sync.into(),    
-    }).await 
+    }).await; 
     
+    lock.store(false, Ordering::Release);
+    ret
    // post::<>(url.as_str(), tx).await
 }
