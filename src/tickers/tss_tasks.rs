@@ -1,20 +1,9 @@
-use std:: sync::Mutex;
 
 use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, BitcoinWithdrawRequest, DkgRequestStatus, QueryDkgRequestsRequest};
 use libp2p:: Swarm;
 use tracing::{debug, error};
 
 use crate::{app::signer::Signer, helper::client_side::get_withdraw_requests, protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, DKGTask}, sign::{collect_tss_packages, generate_nonce_and_commitments}, TSSBehaviour}};
-
-use lazy_static::lazy_static;
-
-struct Lock {
-    loading: bool,
-}
-
-lazy_static! {
-    static ref LOADING: Mutex<Lock> = Mutex::new(Lock { loading: false });
-}
 
 async fn fetch_withdraw_signing_requests(
     _behave: &mut TSSBehaviour,
