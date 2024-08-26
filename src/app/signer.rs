@@ -193,6 +193,7 @@ pub async fn run_signer_daemon(conf: Config) {
     info!("Starting TSS Signer Daemon");
 
     // load config
+    conf.load_validator_key();
     let signer = Signer::new(conf.clone());
 
     let libp2p_keypair = Keypair::from_protobuf_encoding(from_base64(&conf.p2p_keypair).unwrap().as_slice()).unwrap();
@@ -278,6 +279,7 @@ pub async fn run_signer_daemon(conf: Config) {
             },
 
             _ = interval.tick() => {
+                debug!("Fetching TSS tasks");
                 tss_tasks_fetcher(&mut swarm, &signer).await;
             }
 
