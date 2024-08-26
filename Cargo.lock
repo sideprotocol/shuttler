@@ -4666,6 +4666,60 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
+name = "shuttler"
+version = "0.1.0"
+dependencies = [
+ "async-std",
+ "async-trait",
+ "base64 0.22.1",
+ "bech32",
+ "bip39",
+ "bitcoin",
+ "bitcoin_hashes 0.14.0",
+ "bitcoincore-rpc",
+ "bitcoincore-zmq",
+ "chacha20poly1305",
+ "chrono",
+ "clap",
+ "cosmos-sdk-proto",
+ "cosmrs",
+ "criterion",
+ "descriptive_toml_derive",
+ "dirs",
+ "document-features",
+ "ed25519-compact",
+ "frost-core",
+ "frost-secp256k1-tr",
+ "futures",
+ "hex",
+ "insta",
+ "k256",
+ "lazy_static",
+ "libp2p",
+ "merkle_light",
+ "once_cell",
+ "proptest",
+ "prost",
+ "prost-types",
+ "rand 0.8.5",
+ "rand_chacha",
+ "rand_core 0.6.4",
+ "reqwest",
+ "rust-crypto",
+ "serde",
+ "serde_json",
+ "sha2 0.10.8",
+ "sha256",
+ "sled",
+ "tokio",
+ "toml",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
+ "void",
+]
+
+[[package]]
 name = "signal-hook-registry"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5324,60 +5378,6 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
-
-[[package]]
-name = "tssigner"
-version = "0.1.0"
-dependencies = [
- "async-std",
- "async-trait",
- "base64 0.22.1",
- "bech32",
- "bip39",
- "bitcoin",
- "bitcoin_hashes 0.14.0",
- "bitcoincore-rpc",
- "bitcoincore-zmq",
- "chacha20poly1305",
- "chrono",
- "clap",
- "cosmos-sdk-proto",
- "cosmrs",
- "criterion",
- "descriptive_toml_derive",
- "dirs",
- "document-features",
- "ed25519-compact",
- "frost-core",
- "frost-secp256k1-tr",
- "futures",
- "hex",
- "insta",
- "k256",
- "lazy_static",
- "libp2p",
- "merkle_light",
- "once_cell",
- "proptest",
- "prost",
- "prost-types",
- "rand 0.8.5",
- "rand_chacha",
- "rand_core 0.6.4",
- "reqwest",
- "rust-crypto",
- "serde",
- "serde_json",
- "sha2 0.10.8",
- "sha256",
- "sled",
- "tokio",
- "toml",
- "tonic",
- "tracing",
- "tracing-subscriber",
- "void",
-]
 
 [[package]]
 name = "typenum"
