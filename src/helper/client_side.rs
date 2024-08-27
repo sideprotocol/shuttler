@@ -1,6 +1,5 @@
 
 use std::sync::Mutex;
-
 use cosmrs::{ tx::{self, Fee, SignDoc, SignerInfo}, Coin};
 use cosmos_sdk_proto::cosmos::{
     base::tendermint::v1beta1::GetLatestBlockRequest, 
@@ -99,11 +98,12 @@ pub async fn mock_withdraw_requests() -> Result<WithdrawRequestsResponse, Error>
     })
 }
 
-pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result<Response<BroadcastTxResponse>, Status> {
+pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result<tonic::Response<BroadcastTxResponse>, Status> {
     // let conf = shuttler.config();
 
     if conf.side_chain.grpc.is_empty() {
         return Err(Status::cancelled("GRPC URL is empty"));
+        // return None;
     }
 
     // Generate sender private key.
@@ -121,7 +121,7 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
     let mut base_client = match TendermintServiceClient::connect(conf.side_chain.grpc.to_string()).await {
         Ok(client) => client,
         Err(e) => {
-            return Err(Status::cancelled(format!("Failed to create tendermint client: {}", e)));
+            return Err(Status::aborted(format!("Failed to create tendermint client: {}", e)));
         }
     };
 
@@ -129,7 +129,7 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
     }).await {
         Ok(resp) => resp,
         Err(e) => {
-            return Err(Status::cancelled(format!("Failed to get latest block: {}", e)));
+            return Err(Status::aborted(format!("Failed to get latest block: {}", e)));
         }
     };
     
@@ -167,7 +167,7 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
     let mut tx_client = match TxServiceClient::connect(conf.side_chain.grpc.to_string()).await {
         Ok(client) => client,
         Err(e) => {
-            return Err(Status::cancelled(format!("Failed to create tx client: {}", e)));
+            return Err(Status::aborted(format!("Failed to create tx client: {}", e)));
         }
     };
 

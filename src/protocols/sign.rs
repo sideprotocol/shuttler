@@ -12,7 +12,7 @@ use tracing::{debug, error, info};
 
 use frost::{Identifier, round1, round2}; 
 use frost_secp256k1_tr::{self as frost, round1::SigningNonces};
-use crate::{app::{config::{self, get_database_with_name}, signer::Signer}, helper::{client_side::send_cosmos_transaction, encoding::{self, from_base64}}};
+use crate::{app::{config::{self, get_database_with_name}, signer::Signer}, helper::{client_side::send_cosmos_transaction, encoding::{self, from_base64}, gossip::publish_sign_package}};
 
 use super::{Round, TSSBehaviour};
 use lazy_static::lazy_static;
@@ -434,16 +434,17 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
 }
 
 pub async fn collect_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signer: &Signer) {
-    let peers = swarm.connected_peers().map(|p| p.clone() ).collect::<Vec<_>>();
-    if peers.len() == 0 {
-        debug!("No connected peers found for collecting tss packages");
+    if swarm.connected_peers().count() == 0 {
+        debug!("No connected peers");
         return;
     }
+    let peers = swarm.connected_peers().map(|p| p.clone() ).collect::<Vec<_>>();
 
     // collect tss packages
     for item in DB_TASK.iter() {
         let mut task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
 
+        // try to generate signature shares if shares is enough
         generate_signature_shares(&mut task, signer.identifier().clone());
         if let Some(psbt) = aggregate_signature_shares(&mut task) {
             submit_signatures(psbt, signer).await;
@@ -453,13 +454,16 @@ pub async fn collect_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signe
             continue;
         }
 
-        let request = SignRequest {
-            task_id: task.id.clone()
-        };
+        // publish its packages to other peers
+        publish_sign_package(swarm, &task);
 
+        // request packages from other connected peers
         peers.iter().for_each(|p| {
+            let request = SignRequest {
+                task_id: task.id.clone()
+            };
             debug!("Sent Signer Request to {p}: {:?}", &request);
-            swarm.behaviour_mut().signer.send_request(p, request.clone());
+            swarm.behaviour_mut().signer.send_request(p, request);
         })
     };
 }

@@ -8,6 +8,7 @@ use frost_secp256k1_tr::{self as frost};
 use frost::Identifier;
 use futures::StreamExt;
 
+use libp2p::gossipsub::{IdentTopic, Topic};
 use libp2p::identity::Keypair;
 use libp2p::request_response::{self, ProtocolSupport};
 use libp2p::swarm::dial_opts::PeerCondition;
@@ -19,9 +20,10 @@ use crate::app::config::Config;
 use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::from_base64;
-use crate::protocols::sign::{tss_event_handler, SignRequest, SignResponse};
+use crate::helper::gossip::{subscribe_gossip_topics, SubscribeTopic};
+use crate::protocols::sign::{received_response, tss_event_handler, SignRequest, SignResponse};
 use crate::tickers::tss::tss_tasks_fetcher;
-use crate::protocols::dkg::{dkg_event_handler, DKGRequest, DKGResponse};
+use crate::protocols::dkg::{dkg_event_handler, received_round1_packages, received_round2_packages, DKGRequest, DKGResponse};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
 
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -255,6 +257,7 @@ pub async fn run_signer_daemon(conf: Config) {
     swarm.listen_on(format!("/ip4/0.0.0.0/tcp/{}", conf.port).parse().expect("Address parse error")).expect("failed to listen on all interfaces");
 
     dail_bootstrap_nodes(&mut swarm, &conf);
+    subscribe_gossip_topics(&mut swarm);
 
     let mut interval = tokio::time::interval(Duration::from_secs(6));
 
@@ -306,8 +309,31 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<TSSBehaviour>, conf: &Config) {
 }
 
 // handle sub events from the swarm
-async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>, shuttler: &Signer) {
+async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
     match event {
+        TSSBehaviourEvent::Gossip(gossipsub::Event::Message { propagation_source, message_id, message }) => {
+            debug!("Received message: {:?}", message);
+            if message.topic == SubscribeTopic::DKG.topic().hash() {
+                let response: DKGResponse = serde_json::from_slice(&message.data).expect("Failed to deserialize DKG message");
+                // dkg_event_handler(shuttler, swarm.behaviour_mut(), &propagation_source, dkg_message);
+                debug!("Received DKG Response from {propagation_source}: {message_id} {:?}", response);
+                match response {
+                    // collect round 1 packets
+                    DKGResponse::Round1 { task_id, packets } => {
+                        received_round1_packages(task_id, packets, signer.identifier(), &signer.identity_key);
+                    }
+                    // collect round 2 packets
+                    DKGResponse::Round2 { task_id, packets } => {
+                        received_round2_packages(task_id, packets, signer);
+                    }
+                }
+            } else if message.topic == SubscribeTopic::SIGNING.topic().hash() {
+                let response: SignResponse = serde_json::from_slice(&message.data).expect("Failed to deserialize Sign message");
+                // tss_event_handler(swarm.behaviour_mut(), &propagation_source, sign_message);
+                debug!("Received TSS Response from {propagation_source}: {message_id} {:?}", response);
+                received_response(response);
+            }
+        }
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, multiaddr) in list {
                 info!("mDNS discovered a new peer: {peer_id}");
@@ -336,7 +362,7 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
         }
         TSSBehaviourEvent::Dkg(request_response::Event::Message { peer, message }) => {
             // debug!("Received DKG response from {peer}: {:?}", &message);
-            dkg_event_handler( shuttler, swarm.behaviour_mut(), &peer, message);
+            dkg_event_handler( signer, swarm.behaviour_mut(), &peer, message);
         }
         TSSBehaviourEvent::Dkg(request_response::Event::InboundFailure { peer, request_id, error}) => {
             debug!("Inbound Failure {peer}: {request_id} - {error}");
@@ -365,3 +391,4 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
         _ => {}
     }
 }
+

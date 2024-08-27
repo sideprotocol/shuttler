@@ -5,7 +5,7 @@ use bitcoincore_rpc::{Auth, Client};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use tokio::{select, time::Instant};
-use crate::{app::config::Config, helper::messages::now, tickers::relayer};
+use crate::{app::config::Config, helper::now, tickers::relayer};
 
 use std::time::Duration;
 use tracing::info;

@@ -17,7 +17,7 @@ use frost::{keys, Identifier, Secp256K1Sha256};
 
 use frost_core::keys::dkg::round1::Package;
 use super::{Round, TSSBehaviour};
-use crate::{app::{config:: get_database_with_name, signer::Signer}, helper::store};
+use crate::{app::{config:: get_database_with_name, signer::Signer}, helper::{gossip::publish_dkg_packages, store}};
 use crate::helper::{cipher::{decrypt, encrypt}, client_side::send_cosmos_transaction};
 
 
@@ -191,15 +191,17 @@ pub fn generate_round2_packages(identifier: &Identifier, enc_key: &SecretKey, ta
 }
 
 pub fn collect_dkg_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>) {
-    let peers = swarm.connected_peers().map(|p| *p ).collect::<Vec<_>>();
-    if peers.len() == 0 {
-        debug!("No connected peers found for collecting dkg packages");
+    if swarm.connected_peers().count() == 0 {
+        debug!("No connected peers");
         return;
     }
+    let peers = swarm.connected_peers().map(|p| *p ).collect::<Vec<_>>();
     let tasks = list_tasks();
     for t in tasks.iter() {
         if t.round == Round::Round1 || t.round == Round::Round2 {
-            // debug!("Collecting dkg packages: {}, from {:?}", t.id, peers);
+            // publish its packages to other peers
+            publish_dkg_packages(swarm, &t);
+            // request packages from connected peers
             peers.iter().for_each(|p| {
                 let request = DKGRequest {
                     task_id: t.id.clone(),
