@@ -272,8 +272,9 @@ pub async fn run_signer_daemon(conf: Config) {
                 SwarmEvent::NewListenAddr { address, .. } => {
                     info!("Local node is listening on {address}");
                 },
-                SwarmEvent::ConnectionEstablished { peer_id, .. } => {
-                    info!("Connected to {peer_id}, request");                  
+                SwarmEvent::ConnectionEstablished { peer_id, num_established, endpoint, ..} => {
+                    swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
+                    info!("Connected to {peer_id}, Swarm Connection Established, {num_established} {:?} ", endpoint);                  
                 },
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                     info!("Connection {peer_id} closed.{:?}", cause);
@@ -301,7 +302,7 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<TSSBehaviour>, conf: &Config) {
             .build();
         match swarm.dial(opt) {
             Ok(_) => {
-                info!("Connected to bootstrap peer: {addr_text}");
+                info!("Connecting to bootstrap peer: {addr_text}");
             }
             Err(e) => {
                 error!("Failed to dial {addr_text}: {e}");
