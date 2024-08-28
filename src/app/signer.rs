@@ -338,10 +338,40 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
         TSSBehaviourEvent::Identify(identify::Event::Received { peer_id, connection_id, info }) => {
             swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
             info!(" @@ Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
+            if swarm.is_connected(&peer_id) {
+                return;
+            }
+            let opt = DialOpts::peer_id(peer_id)
+                .addresses(vec![info.observed_addr.clone()])
+                .condition(PeerCondition::DisconnectedAndNotDialing)
+                .build();
+            match swarm.dial(opt) {
+                Ok(_) => {
+                    info!("Connected to {peer_id}");
+                }
+                Err(e) => {
+                    error!("Unable to connect to {peer_id}: {e}");
+                }
+            };  
         } 
         TSSBehaviourEvent::Identify(identify::Event::Pushed { peer_id, connection_id, info }) => {
             swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
             info!(" @@ Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
+            if swarm.is_connected(&peer_id) {
+                return;
+            }
+            let opt = DialOpts::peer_id(peer_id)
+                .addresses(vec![info.observed_addr.clone()])
+                .condition(PeerCondition::DisconnectedAndNotDialing)
+                .build();
+            match swarm.dial(opt) {
+                Ok(_) => {
+                    info!("Connected to {peer_id}");
+                }
+                Err(e) => {
+                    error!("Unable to connect to {peer_id}: {e}");
+                }
+            }; 
         }
         TSSBehaviourEvent::Identify(identify::Event::Sent { peer_id, connection_id }) => {
             swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
@@ -351,21 +381,21 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
             for (peer_id, multiaddr) in list {
                 info!("mDNS discovered a new peer: {peer_id}");
                 swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-                // if swarm.is_connected(&peer_id) {
-                //     return;
-                // }
-                // let opt = DialOpts::peer_id(peer_id)
-                //     .addresses(vec![multiaddr.clone()])
-                //     .condition(PeerCondition::DisconnectedAndNotDialing)
-                //     .build();
-                // match swarm.dial(opt) {
-                //     Ok(_) => {
-                //         info!("Connected to {peer_id}, {multiaddr}");
-                //     }
-                //     Err(e) => {
-                //         error!("Unable to connect to {peer_id}: {e}");
-                //     }
-                // };  
+                if swarm.is_connected(&peer_id) {
+                    return;
+                }
+                let opt = DialOpts::peer_id(peer_id)
+                    .addresses(vec![multiaddr.clone()])
+                    .condition(PeerCondition::DisconnectedAndNotDialing)
+                    .build();
+                match swarm.dial(opt) {
+                    Ok(_) => {
+                        info!("Connected to {peer_id}, {multiaddr}");
+                    }
+                    Err(e) => {
+                        error!("Unable to connect to {peer_id}: {e}");
+                    }
+                };  
             }
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Expired(list)) => {
