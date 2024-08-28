@@ -193,11 +193,11 @@ pub fn generate_round2_packages(identifier: &Identifier, enc_key: &SecretKey, ta
 }
 
 pub fn collect_dkg_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>) {
-    if swarm.connected_peers().count() == 0 {
+    if swarm.behaviour().gossip.all_peers().count() == 0 {
         debug!("No connected peers");
         return;
     }
-    let peers = swarm.connected_peers().map(|p| *p ).collect::<Vec<_>>();
+    let peers = swarm.behaviour().gossip.all_peers().map(|(p, _hash)| p.clone() ).collect::<Vec<_>>();
     let tasks = list_tasks();
     for t in tasks.iter() {
         if t.round == Round::Round1 || t.round == Round::Round2 {

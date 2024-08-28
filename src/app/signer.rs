@@ -331,7 +331,6 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 }
             } else if message.topic == SubscribeTopic::SIGNING.topic().hash() {
                 let response: SignResponse = serde_json::from_slice(&message.data).expect("Failed to deserialize Sign message");
-                // tss_event_handler(swarm.behaviour_mut(), &propagation_source, sign_message);
                 debug!("Received TSS Response from {propagation_source}: {message_id} {:?}", response);
                 received_response(response);
             }
@@ -344,21 +343,21 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
             for (peer_id, multiaddr) in list {
                 info!("mDNS discovered a new peer: {peer_id}");
                 swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-                if swarm.is_connected(&peer_id) {
-                    return;
-                }
-                let opt = DialOpts::peer_id(peer_id)
-                    .addresses(vec![multiaddr.clone()])
-                    .condition(PeerCondition::DisconnectedAndNotDialing)
-                    .build();
-                match swarm.dial(opt) {
-                    Ok(_) => {
-                        info!("Connected to {peer_id}, {multiaddr}");
-                    }
-                    Err(e) => {
-                        error!("Unable to connect to {peer_id}: {e}");
-                    }
-                };  
+                // if swarm.is_connected(&peer_id) {
+                //     return;
+                // }
+                // let opt = DialOpts::peer_id(peer_id)
+                //     .addresses(vec![multiaddr.clone()])
+                //     .condition(PeerCondition::DisconnectedAndNotDialing)
+                //     .build();
+                // match swarm.dial(opt) {
+                //     Ok(_) => {
+                //         info!("Connected to {peer_id}, {multiaddr}");
+                //     }
+                //     Err(e) => {
+                //         error!("Unable to connect to {peer_id}: {e}");
+                //     }
+                // };  
             }
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Expired(list)) => {
