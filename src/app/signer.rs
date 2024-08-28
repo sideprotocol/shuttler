@@ -237,10 +237,8 @@ pub async fn run_signer_daemon(conf: Config) {
         .build();
 
     // start libp2p swarm
-    // subscribes to topics
-    // subscribes(swarm.behaviour_mut());
     // Listen on all interfaces and whatever port the OS assigns
-    swarm.listen_on(format!("/ip4/0.0.0.0/udp/{}/quic-v1", 5157).parse().expect("address parser error")).expect("failed to listen on all interfaces");
+    // swarm.listen_on(format!("/ip4/0.0.0.0/udp/{}/quic-v1", 5157).parse().expect("address parser error")).expect("failed to listen on all interfaces");
     swarm.listen_on(format!("/ip4/0.0.0.0/tcp/{}", conf.port).parse().expect("Address parse error")).expect("failed to listen on all interfaces");
 
     dail_bootstrap_nodes(&mut swarm, &conf);
