@@ -270,7 +270,6 @@ pub async fn run_signer_daemon(conf: Config) {
             },
 
             _ = interval.tick() => {
-                debug!("Fetching TSS tasks");
                 tss_tasks_fetcher(&mut swarm, &signer).await;
             }
 
@@ -282,9 +281,16 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<TSSBehaviour>, conf: &Config) {
     for addr_text in conf.bootstrap_nodes.iter() {
         let address = Multiaddr::from_str(addr_text).expect("invalid bootstrap node address");
         let peer = PeerId::from_str(addr_text.split("/").last().unwrap()).expect("invalid peer id");
-
         swarm.behaviour_mut().kad.add_address(&peer, address);
-
+        debug!("Adding bootstrap node: {:?}", addr_text);
+    }
+    match swarm.behaviour_mut().kad.bootstrap() {
+        Ok(id) => {
+            info!("Bootstrap successful {:?}", id);
+        }
+        Err(e) => {
+            error!("Bootstrap failed: {:?}", e);
+        }
     }
 }
 

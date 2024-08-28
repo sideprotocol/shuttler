@@ -85,6 +85,12 @@ pub async fn tss_tasks_fetcher(
     if shuttler.config().get_validator_key().is_none() {
         return;
     }
+
+    if swarm.connected_peers().count() == 0 {
+        return;
+    }
+
+    debug!("Connected peers: {:?}", swarm.connected_peers().collect::<Vec<_>>());
     // ===========================
     // all participants tasks:
     // ===========================
