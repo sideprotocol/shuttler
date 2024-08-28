@@ -126,6 +126,12 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
                 }
             };
 
+        // if tip_on_bitcoin == tip_on_side {
+        //     info!("No new blocks to sync, sleep for 10 seconds...");
+        //     sleep(Duration::from_secs(10));
+        //     continue;
+        // }
+
         let mut lock = LOADING.lock().unwrap();
         if lock.loading {
             info!("a previous task is running, skip!");

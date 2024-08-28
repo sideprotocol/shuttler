@@ -12,7 +12,7 @@ use tracing::{debug, error, info};
 
 use frost::{Identifier, round1, round2}; 
 use frost_secp256k1_tr::{self as frost, round1::SigningNonces};
-use crate::{app::{config::{self, get_database_with_name}, signer::Signer}, helper::{client_side::send_cosmos_transaction, encoding::{self, from_base64}, gossip::publish_sign_package}};
+use crate::{app::{config::{self, get_database_with_name}, signer::Signer}, helper::{client_side::send_cosmos_transaction, encoding::{self, from_base64}, gossip::publish_sign_package, now}};
 
 use super::{Round, TSSBehaviour};
 use lazy_static::lazy_static;
@@ -39,6 +39,7 @@ pub struct SignResponse {
     commitments: Vec<BTreeMap<Identifier, round1::SigningCommitments>>,
     // <sender, <receiver, package>>
     signatures_shares: Vec<BTreeMap<Identifier, round2::SignatureShare>>,
+    nonce: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -176,6 +177,7 @@ pub fn prepare_response_for_request(task_id: String) -> Option<SignResponse> {
         task_id: task.id.clone(),
         commitments: task.sessions.iter().map(|session| session.commitments.clone()).collect::<Vec<_>>(),
         signatures_shares: task.sessions.iter().map(|session| session.signatures.clone()).collect::<Vec<_>>(),
+        nonce: now(),
     })
 }
 

@@ -7,6 +7,7 @@ pub mod sign;
 
 #[derive(NetworkBehaviour)]
 pub struct TSSBehaviour {
+    pub identify: libp2p::identify::Behaviour,
     pub mdns: mdns::tokio::Behaviour,
     pub gossip: gossipsub::Behaviour,
     pub dkg: request_response::cbor::Behaviour<dkg::DKGRequest, dkg::DKGResponse>,

@@ -17,7 +17,7 @@ use frost::{keys, Identifier, Secp256K1Sha256};
 
 use frost_core::keys::dkg::round1::Package;
 use super::{Round, TSSBehaviour};
-use crate::{app::{config:: get_database_with_name, signer::Signer}, helper::{gossip::publish_dkg_packages, store}};
+use crate::{app::{config:: get_database_with_name, signer::Signer}, helper::{gossip::publish_dkg_packages, now, store}};
 use crate::helper::{cipher::{decrypt, encrypt}, client_side::send_cosmos_transaction};
 
 
@@ -78,11 +78,13 @@ pub enum DKGResponse {
     Round1 {
         task_id: String,
         packets: BTreeMap<Identifier, keys::dkg::round1::Package>,
+        nonce: u64,
     },
     Round2 {
         task_id: String,
         // <sender, <receiver, package>>
         packets: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>,
+        nonce: u64,
     },
 }
 
@@ -232,7 +234,7 @@ pub fn prepare_round1_package_for_request(task_id: String) -> DKGResponse {
             BTreeMap::new()
         },
     };
-    DKGResponse::Round1 { task_id, packets }
+    DKGResponse::Round1 { task_id, packets, nonce: now() }
 }
 
 pub fn prepare_round2_package_for_request(task_id: String) -> DKGResponse {
@@ -252,7 +254,7 @@ pub fn prepare_round2_package_for_request(task_id: String) -> DKGResponse {
             BTreeMap::new()
         },
     };
-    DKGResponse::Round2 { task_id, packets }
+    DKGResponse::Round2 { task_id, packets, nonce: now() }
 }
 
 pub fn received_round1_packages(task_id: String, packets: BTreeMap<Identifier, keys::dkg::round1::Package>, identifier: &Identifier, enc_key: &SecretKey) {
@@ -486,11 +488,11 @@ pub fn dkg_event_handler(signer: &Signer, behave: &mut TSSBehaviour, peer: &Peer
             debug!("Received DKG Response from {peer}: {request_id}");
             match response {
                 // collect round 1 packets
-                DKGResponse::Round1 { task_id, packets } => {
+                DKGResponse::Round1 { task_id, packets, nonce: _ } => {
                     received_round1_packages(task_id, packets, signer.identifier(), &signer.identity_key);
                 }
                 // collect round 2 packets
-                DKGResponse::Round2 { task_id, packets } => {
+                DKGResponse::Round2 { task_id, packets, nonce: _ } => {
                     received_round2_packages(task_id, packets, signer);
                 }
             }

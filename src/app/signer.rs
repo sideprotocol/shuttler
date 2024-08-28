@@ -13,7 +13,7 @@ use libp2p::identity::Keypair;
 use libp2p::request_response::{self, ProtocolSupport};
 use libp2p::swarm::dial_opts::PeerCondition;
 use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
-use libp2p::{ gossipsub, mdns, noise, tcp, yamux, Multiaddr, StreamProtocol, Swarm};
+use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, StreamProtocol, Swarm};
 
 use crate::app::config;
 use crate::app::config::Config;
@@ -215,10 +215,10 @@ pub async fn run_signer_daemon(conf: Config) {
             let cfg = request_response::Config::default();
 
             let dkg = request_response::cbor::Behaviour::<DKGRequest, DKGResponse>::new(
-                iter::once((StreamProtocol::new("/dkg/1"), ProtocolSupport::Full)), cfg.clone()
+                iter::once((StreamProtocol::new("/shuttler/dkg/1"), ProtocolSupport::Full)), cfg.clone()
             );
             let signer = request_response::cbor::Behaviour::<SignRequest, SignResponse>::new(
-                iter::once((StreamProtocol::new("/tss/1"), ProtocolSupport::Full)), cfg
+                iter::once((StreamProtocol::new("/shuttler/tss/1"), ProtocolSupport::Full)), cfg
             );
 
             // To content-address message, we can take the hash of message and use it as an ID.
@@ -241,8 +241,10 @@ pub async fn run_signer_daemon(conf: Config) {
                 gossipsub::MessageAuthenticity::Signed(key.clone()),
                 gossipsub_config,
             )?;
+
+            let identify = identify::Behaviour::new(identify::Config::new("/shullter/id/1".to_string(), key.public().clone()));
             
-            Ok(TSSBehaviour { mdns, dkg , gossip, signer})
+            Ok(TSSBehaviour { mdns, dkg , gossip, signer, identify})
         })
         .expect("swarm behaviour config failed")
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60000)))
@@ -319,11 +321,11 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 debug!("Received DKG Response from {propagation_source}: {message_id} {:?}", response);
                 match response {
                     // collect round 1 packets
-                    DKGResponse::Round1 { task_id, packets } => {
+                    DKGResponse::Round1 { task_id, packets , nonce: _} => {
                         received_round1_packages(task_id, packets, signer.identifier(), &signer.identity_key);
                     }
                     // collect round 2 packets
-                    DKGResponse::Round2 { task_id, packets } => {
+                    DKGResponse::Round2 { task_id, packets , nonce: _} => {
                         received_round2_packages(task_id, packets, signer);
                     }
                 }
@@ -333,6 +335,10 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 debug!("Received TSS Response from {propagation_source}: {message_id} {:?}", response);
                 received_response(response);
             }
+        }
+        TSSBehaviourEvent::Identify(identify::Event::Received { peer_id, connection_id, info }) => {
+            swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
+            info!("Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, multiaddr) in list {
