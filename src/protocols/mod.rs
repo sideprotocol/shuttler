@@ -7,6 +7,7 @@ pub mod sign;
 
 #[derive(NetworkBehaviour)]
 pub struct TSSBehaviour {
+    pub rendezvous: libp2p::rendezvous::client::Behaviour,
     pub identify: libp2p::identify::Behaviour,
     pub mdns: mdns::tokio::Behaviour,
     pub gossip: gossipsub::Behaviour,

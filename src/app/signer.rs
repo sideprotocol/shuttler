@@ -13,7 +13,7 @@ use libp2p::identity::Keypair;
 use libp2p::request_response::{self, ProtocolSupport};
 use libp2p::swarm::dial_opts::PeerCondition;
 use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
-use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, StreamProtocol, Swarm};
+use libp2p::{ gossipsub, identify, mdns, noise, rendezvous, tcp, yamux, Multiaddr, PeerId, StreamProtocol, Swarm};
 
 use crate::app::config;
 use crate::app::config::Config;
@@ -242,9 +242,11 @@ pub async fn run_signer_daemon(conf: Config) {
                 gossipsub_config,
             )?;
 
-            let identify = identify::Behaviour::new(identify::Config::new("/shullter/id/1".to_string(), key.public().clone()));
+            let identify = identify::Behaviour::new(identify::Config::new("rendezvous-example/1.0.0".to_string(), key.public().clone()));
+
+            let rendezvous  = libp2p::rendezvous::client::Behaviour::new(key.clone());
             
-            Ok(TSSBehaviour { mdns, dkg , gossip, signer, identify})
+            Ok(TSSBehaviour { mdns, dkg , gossip, signer, identify, rendezvous})
         })
         .expect("swarm behaviour config failed")
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60000)))
@@ -336,9 +338,45 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 received_response(response);
             }
         }
+        TSSBehaviourEvent::Rendezvous(rendezvous::client::Event::Discovered { rendezvous_node, registrations, cookie }) => {
+            info!("Discovered rendezvous node: {rendezvous_node} with registrations:");
+            registrations.iter().for_each(|r| {
+                debug!("Namespace: {} with key: {:?} and value: {}", r.namespace, r.record, r.ttl);
+                swarm.behaviour_mut().gossip.add_explicit_peer(&r.record.peer_id());
+                let peer_id = r.record.peer_id();
+                let multiaddr = r.record.addresses();
+                if swarm.is_connected(&peer_id) {
+                    return;
+                }
+                let opt = DialOpts::peer_id(peer_id)
+                    .addresses(multiaddr.to_vec())
+                    .condition(PeerCondition::DisconnectedAndNotDialing)
+                    .build();
+                match swarm.dial(opt) {
+                    Ok(_) => {
+                        info!("Connected to {peer_id}, {:?}", multiaddr.to_vec());
+                    }
+                    Err(e) => {
+                        error!("Unable to connect to {peer_id}: {e}");
+                    }
+                };  
+            });
+        }
         TSSBehaviourEvent::Identify(identify::Event::Received { peer_id, connection_id, info }) => {
             swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
             info!(" @@ Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
+
+
+            let keypair = libp2p::identity::Keypair::ed25519_from_bytes([0; 32]).unwrap();
+            if let Err(error) = swarm.behaviour_mut().rendezvous.register(
+                rendezvous::Namespace::from_static("shuttler"),
+                keypair.public().to_peer_id(),
+                None,
+            ) {
+                tracing::error!("Failed to register: {error}");
+                return;
+            }
+            
             if swarm.is_connected(&peer_id) {
                 return;
             }
