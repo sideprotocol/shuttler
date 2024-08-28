@@ -337,7 +337,15 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
         }
         TSSBehaviourEvent::Identify(identify::Event::Received { peer_id, connection_id, info }) => {
             swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-            info!("Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
+            info!(" @@ Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
+        } 
+        TSSBehaviourEvent::Identify(identify::Event::Pushed { peer_id, connection_id, info }) => {
+            swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
+            info!(" @@ Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
+        }
+        TSSBehaviourEvent::Identify(identify::Event::Sent { peer_id, connection_id }) => {
+            swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
+            info!(" @@ Discovered new peer: {peer_id} with info: {connection_id}");
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, multiaddr) in list {

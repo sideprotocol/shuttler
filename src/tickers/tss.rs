@@ -67,7 +67,7 @@ async fn fetch_dkg_requests(shuttler: &Signer) {
                     continue;
                 };
                 generate_round1_package(shuttler.identifier().clone(), &task);
-                debug!("generated a new key: {:?}", request);
+                debug!("generated round1 packages: {:?} {:?}", &task.id, request);
                 dkg::save_task(&task);
             }
         }
