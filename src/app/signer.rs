@@ -8,12 +8,12 @@ use frost_secp256k1_tr::{self as frost};
 use frost::Identifier;
 use futures::StreamExt;
 
-use libp2p::gossipsub::{IdentTopic, Topic};
 use libp2p::identity::Keypair;
+use libp2p::kad::store::MemoryStore;
 use libp2p::request_response::{self, ProtocolSupport};
 use libp2p::swarm::dial_opts::PeerCondition;
 use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
-use libp2p::{ gossipsub, identify, mdns, noise, rendezvous, tcp, yamux, Multiaddr, PeerId, StreamProtocol, Swarm};
+use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, StreamProtocol, Swarm};
 
 use crate::app::config;
 use crate::app::config::Config;
@@ -75,14 +75,6 @@ impl Signer {
             Auth::UserPass(conf.bitcoin.user.clone(), conf.bitcoin.password.clone()))
             .expect("Could not initial bitcoin RPC client");
 
-        // let hdpath = cosmrs::bip32::DerivationPath::from_str("m/44'/118'/0'/0/0").unwrap();
-        // let mnemonic = Mnemonic::parse(conf.mnemonic.as_str()).unwrap();
-
-        // let relayer_key = SigningKey::derive_from_path(mnemonic.to_seed(""), &hdpath).unwrap();
-        // let relayer_address =relayer_key.public_key().account_id(&conf.side_chain.address_prefix).expect("failed to derive relayer address");
-
-        // info!("Relayer Address: {:?}", relayer_address.to_string());
-
         Self {
             identity_key: local_key,
             identifier,
@@ -99,14 +91,6 @@ impl Signer {
     pub fn identifier(&self) -> &Identifier {
         &self.identifier
     }
-
-    // pub fn relayer_key(&self) -> &SigningKey {
-    //     &self.relayer_key
-    // }
-
-    // pub fn relayer_address(&self) -> &AccountId {
-    //     &self.relayer_address
-    // }
 
     pub fn validator_address(&self) -> String {
         match &self.config().get_validator_key() {
@@ -242,11 +226,10 @@ pub async fn run_signer_daemon(conf: Config) {
                 gossipsub_config,
             )?;
 
-            let identify = identify::Behaviour::new(identify::Config::new("rendezvous-example/1.0.0".to_string(), key.public().clone()));
-
-            let rendezvous  = libp2p::rendezvous::client::Behaviour::new(key.clone());
+            let identify = identify::Behaviour::new(identify::Config::new("/shuttler/id/1.0.0".to_string(), key.public().clone()));
+            let kad = libp2p::kad::Behaviour::new(key.public().to_peer_id(), MemoryStore::new(key.public().to_peer_id()));
             
-            Ok(TSSBehaviour { mdns, dkg , gossip, signer, identify, rendezvous})
+            Ok(TSSBehaviour { mdns, dkg , gossip, signer, identify, kad})
         })
         .expect("swarm behaviour config failed")
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60000)))
@@ -297,19 +280,11 @@ pub async fn run_signer_daemon(conf: Config) {
 
 fn dail_bootstrap_nodes(swarm: &mut Swarm<TSSBehaviour>, conf: &Config) {
     for addr_text in conf.bootstrap_nodes.iter() {
-        let add = Multiaddr::from_str(addr_text).expect("invalid bootstrap node address");
+        let address = Multiaddr::from_str(addr_text).expect("invalid bootstrap node address");
+        let peer = PeerId::from_str(addr_text.split("/").last().unwrap()).expect("invalid peer id");
 
-        let opt = DialOpts::unknown_peer_id()
-            .address(add)
-            .build();
-        match swarm.dial(opt) {
-            Ok(_) => {
-                info!("Connecting to bootstrap peer: {addr_text}");
-            }
-            Err(e) => {
-                error!("Failed to dial {addr_text}: {e}");
-            }
-        };
+        swarm.behaviour_mut().kad.add_address(&peer, address);
+
     }
 }
 
@@ -317,11 +292,11 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<TSSBehaviour>, conf: &Config) {
 async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
     match event {
         TSSBehaviourEvent::Gossip(gossipsub::Event::Message { propagation_source, message_id, message }) => {
-            debug!("Received message: {:?}", message);
+            // debug!("Received message: {:?}", message);
             if message.topic == SubscribeTopic::DKG.topic().hash() {
                 let response: DKGResponse = serde_json::from_slice(&message.data).expect("Failed to deserialize DKG message");
                 // dkg_event_handler(shuttler, swarm.behaviour_mut(), &propagation_source, dkg_message);
-                debug!("Received DKG Response from {propagation_source}: {message_id} {:?}", response);
+                debug!("Gossip Received DKG Response from {propagation_source}: {message_id} {:?}", response);
                 match response {
                     // collect round 1 packets
                     DKGResponse::Round1 { task_id, packets , nonce: _} => {
@@ -334,87 +309,23 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 }
             } else if message.topic == SubscribeTopic::SIGNING.topic().hash() {
                 let response: SignResponse = serde_json::from_slice(&message.data).expect("Failed to deserialize Sign message");
-                debug!("Received TSS Response from {propagation_source}: {message_id} {:?}", response);
+                debug!("Gossip Received TSS Response from {propagation_source}: {message_id} {:?}", response);
                 received_response(response);
             }
         }
-        TSSBehaviourEvent::Rendezvous(rendezvous::client::Event::Discovered { rendezvous_node, registrations, cookie }) => {
-            info!("Discovered rendezvous node: {rendezvous_node} with registrations:");
-            registrations.iter().for_each(|r| {
-                debug!("Namespace: {} with key: {:?} and value: {}", r.namespace, r.record, r.ttl);
-                swarm.behaviour_mut().gossip.add_explicit_peer(&r.record.peer_id());
-                let peer_id = r.record.peer_id();
-                let multiaddr = r.record.addresses();
-                if swarm.is_connected(&peer_id) {
-                    return;
-                }
-                let opt = DialOpts::peer_id(peer_id)
-                    .addresses(multiaddr.to_vec())
-                    .condition(PeerCondition::DisconnectedAndNotDialing)
-                    .build();
-                match swarm.dial(opt) {
-                    Ok(_) => {
-                        info!("Connected to {peer_id}, {:?}", multiaddr.to_vec());
-                    }
-                    Err(e) => {
-                        error!("Unable to connect to {peer_id}: {e}");
-                    }
-                };  
-            });
-        }
+        
         TSSBehaviourEvent::Identify(identify::Event::Received { peer_id, connection_id, info }) => {
             swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-            info!(" @@ Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
-
-
-            let keypair = libp2p::identity::Keypair::ed25519_from_bytes([0; 32]).unwrap();
-            if let Err(error) = swarm.behaviour_mut().rendezvous.register(
-                rendezvous::Namespace::from_static("shuttler"),
-                keypair.public().to_peer_id(),
-                None,
-            ) {
-                tracing::error!("Failed to register: {error}");
-                return;
-            }
-            
-            if swarm.is_connected(&peer_id) {
-                return;
-            }
-            let opt = DialOpts::peer_id(peer_id)
-                .addresses(vec![info.observed_addr.clone()])
-                .condition(PeerCondition::DisconnectedAndNotDialing)
-                .build();
-            match swarm.dial(opt) {
-                Ok(_) => {
-                    info!("Connected to {peer_id}");
-                }
-                Err(e) => {
-                    error!("Unable to connect to {peer_id}: {e}");
-                }
-            };  
+            info!(" @@(Received) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
+            swarm.behaviour_mut().kad.add_address(&peer_id, info.observed_addr.clone());
         } 
         TSSBehaviourEvent::Identify(identify::Event::Pushed { peer_id, connection_id, info }) => {
             swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-            info!(" @@ Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
-            if swarm.is_connected(&peer_id) {
-                return;
-            }
-            let opt = DialOpts::peer_id(peer_id)
-                .addresses(vec![info.observed_addr.clone()])
-                .condition(PeerCondition::DisconnectedAndNotDialing)
-                .build();
-            match swarm.dial(opt) {
-                Ok(_) => {
-                    info!("Connected to {peer_id}");
-                }
-                Err(e) => {
-                    error!("Unable to connect to {peer_id}: {e}");
-                }
-            }; 
+            info!(" @@(push) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
         }
         TSSBehaviourEvent::Identify(identify::Event::Sent { peer_id, connection_id }) => {
             swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-            info!(" @@ Discovered new peer: {peer_id} with info: {connection_id}");
+            info!(" @@(sent) Discovered new peer: {peer_id} with info: {connection_id}");
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, multiaddr) in list {
@@ -451,23 +362,9 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
         }
         TSSBehaviourEvent::Dkg(request_response::Event::OutboundFailure { peer, request_id, error}) => {
             debug!("Outbound Failure {peer}: {request_id} - {error}");
-            if swarm.is_connected(&peer) {
-                return;
-            }
-            let opt = DialOpts::peer_id(peer)
-                .condition(PeerCondition::DisconnectedAndNotDialing)
-                .build();
-            match swarm.dial(opt) {
-                Ok(_) => {
-                    info!("Connected to {peer}");
-                }
-                Err(e) => {
-                    error!("Unable to connect to {peer}: {e}");
-                }
-            }; 
         }
         TSSBehaviourEvent::Signer(request_response::Event::Message { peer, message }) => {
-            debug!("Received Signer response from {peer}: {:?}", &message);
+            debug!("Request-Response Received Signer response from {peer}: {:?}", &message);
             tss_event_handler( swarm.behaviour_mut(), &peer, message);
         }
         _ => {}

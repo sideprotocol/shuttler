@@ -555,12 +555,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d965446196e3b7decd44aa7ee49e31d630118f90ef12f97900f262eb915c951d"
 
 [[package]]
-name = "bimap"
-version = "0.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "230c5f1ca6a325a32553f8640d31ac9b49f2411e901e427570154868b46da4f7"
-
-[[package]]
 name = "bip32"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2719,11 +2713,11 @@ dependencies = [
  "libp2p-gossipsub",
  "libp2p-identify",
  "libp2p-identity",
+ "libp2p-kad",
  "libp2p-mdns",
  "libp2p-metrics",
  "libp2p-noise",
  "libp2p-quic",
- "libp2p-rendezvous",
  "libp2p-request-response",
  "libp2p-swarm",
  "libp2p-tcp",
@@ -2876,6 +2870,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "libp2p-kad"
+version = "0.46.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cd7b7a2b2d3914d1b52fcd295551526b60b21054788d086cecb440850cb36a5"
+dependencies = [
+ "arrayvec",
+ "asynchronous-codec",
+ "bytes",
+ "either",
+ "fnv",
+ "futures",
+ "futures-bounded",
+ "futures-timer",
+ "libp2p-core",
+ "libp2p-identity",
+ "libp2p-swarm",
+ "quick-protobuf",
+ "quick-protobuf-codec",
+ "rand 0.8.5",
+ "sha2 0.10.8",
+ "smallvec",
+ "thiserror",
+ "tracing",
+ "uint",
+ "void",
+ "web-time",
+]
+
+[[package]]
 name = "libp2p-mdns"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2907,6 +2930,7 @@ dependencies = [
  "libp2p-gossipsub",
  "libp2p-identify",
  "libp2p-identity",
+ "libp2p-kad",
  "libp2p-swarm",
  "pin-project",
  "prometheus-client",
@@ -2961,30 +2985,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "libp2p-rendezvous"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b7e42a1a3315589649590228bbea53fa980e7e8e523dbe6edfbd9c1eb26de3e"
-dependencies = [
- "async-trait",
- "asynchronous-codec",
- "bimap",
- "futures",
- "futures-timer",
- "libp2p-core",
- "libp2p-identity",
- "libp2p-request-response",
- "libp2p-swarm",
- "quick-protobuf",
- "quick-protobuf-codec",
- "rand 0.8.5",
- "thiserror",
- "tracing",
- "void",
- "web-time",
 ]
 
 [[package]]
@@ -5440,6 +5440,18 @@ name = "typenum"
 version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42ff0bf0c66b8238c6f3b578df37d0b7848e55df8577b3f74f92a69acceeb825"
+
+[[package]]
+name = "uint"
+version = "0.9.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76f64bba2c53b04fcab63c01a7d7427eadc821e3bc48c34dc9ba29c501164b52"
+dependencies = [
+ "byteorder",
+ "crunchy",
+ "hex",
+ "static_assertions",
+]
 
 [[package]]
 name = "unarray"

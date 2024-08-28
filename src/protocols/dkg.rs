@@ -453,7 +453,7 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
 
 pub fn dkg_event_handler(signer: &Signer, behave: &mut TSSBehaviour, peer: &PeerId, message: Message<DKGRequest, DKGResponse>) {
     // handle dkg events
-    debug!("Received DKG response from {peer}: {:?}", &message);
+    debug!("Reqeust-Response Received DKG response from {peer}: {:?}", &message);
     match message {
         request_response::Message::Request { request_id, request, channel } => {
             debug!("Received DKG Request from {peer}: {request_id}");
