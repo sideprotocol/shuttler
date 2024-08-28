@@ -437,10 +437,10 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
 
 pub async fn collect_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signer: &Signer) {
 
-    if swarm.behaviour().gossip.all_peers().count() == 0 {
-        debug!("No connected peers");
-        return;
-    }
+    // if swarm.behaviour().gossip.all_peers().count() == 0 {
+    //     debug!("No connected peers");
+    //     return;
+    // }
     let peers = swarm.behaviour().gossip.all_peers().map(|(p, _hash)| p.clone() ).collect::<Vec<_>>();
     // collect tss packages
     for item in DB_TASK.iter() {
