@@ -17,14 +17,8 @@ async fn main() {
         Commands::Init { port, network } => {
             init::execute(&cli, port.to_owned(), network.to_owned());
         }
-        // Commands::DKG { max_signers, min_signers } => {
-        //     dkg::execute(&cli, *min_signers, *max_signers).await;
-        // }
-        // Commands::Sign { pbst } => {
-        //     sign::execute(&cli, pbst.to_owned()).await;
-        // }
-        Commands::Start => {
-            start::execute(&cli).await;
+        Commands::Start {relayer, signer} => {
+            start::execute(&cli.home, *relayer, *signer).await;
         }
         Commands::Address => {
             address::execute(&cli);

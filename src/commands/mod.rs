@@ -32,7 +32,12 @@ pub enum Commands {
     //     pbst: String,
     // },
     /// Start a libp2p node
-    Start,
+    Start {
+        #[clap(long, default_value = "true")]
+        relayer: bool,
+        #[clap(long, default_value = "true")]
+        signer: bool,
+    },
     Address,
     Reset,
 }
