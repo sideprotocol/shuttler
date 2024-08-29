@@ -127,7 +127,7 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
             };
 
         if tip_on_bitcoin == tip_on_side {
-            info!("No new blocks to sync, sleep for 60 seconds...");
+            debug!("No new blocks to sync, sleep for 60 seconds...");
             sleep(Duration::from_secs(60));
             continue;
         }
@@ -147,9 +147,7 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
             tip_on_side + 10
         };
 
-        info!("==========================================================");
-        info!("Syncing blocks from {} to {}", tip_on_side, batch);
-        info!("==========================================================");
+        debug!("Syncing blocks from {} to {}", tip_on_side, batch);
 
         while tip_on_side < batch {
             tip_on_side = tip_on_side + 1;
@@ -180,11 +178,6 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
                 time: header.time as u64,
                 ntx: 0u64,
             });
-
-            // setup a batch of 1 block headers
-            // if block_headers.len() >= 1 {
-            //     break;
-            // }
 
             match send_block_headers(relayer, &block_headers).await {
                 Ok(resp) => {
