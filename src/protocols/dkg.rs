@@ -272,7 +272,7 @@ pub fn received_round1_packages(task_id: String, packets: BTreeMap<Identifier, k
 
     match DB.insert(format!("dkg-{}-round1", task_id), serde_json::to_vec(&local).unwrap()) {
         Ok(_) => {
-            debug!("Stored DKG Round 1 packets: {task_id}");
+            debug!("Stored DKG Round 1 packets: {task_id} {}", local.len());
         }
         Err(e) => {
             error!("Failed to store DKG Round 1 packets: {task_id} - {:?}", e);
