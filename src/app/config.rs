@@ -95,7 +95,7 @@ pub struct PrivValidatorKey {
 }
 
 lazy_static! {
-    static ref APPLICATION_PATH: Mutex<String> = Mutex::new(String::from(".tssigner"));
+    static ref APPLICATION_PATH: Mutex<String> = Mutex::new(String::from(".shuttler"));
 }
 
 pub fn update_app_home(app_home: &str) {
