@@ -4,7 +4,7 @@ use libp2p:: Swarm;
 use tracing::{debug, error};
 
 
-use crate::{app::signer::Signer, helper::client_side::get_withdraw_requests, protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, DKGTask}, sign::{collect_tss_packages, generate_nonce_and_commitments}, TSSBehaviour}};
+use crate::{app::signer::Signer, helper::client_side::get_withdraw_requests, protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, list_tasks, DKGTask}, sign::{collect_tss_packages, generate_nonce_and_commitments}, TSSBehaviour}};
 
 async fn fetch_withdraw_signing_requests(
     _behave: &mut TSSBehaviour,
@@ -53,7 +53,14 @@ async fn fetch_dkg_requests(shuttler: &Signer) {
     {
 
         let requests = requests_response.into_inner().requests;
-        debug!("Fetched DKG requests: {:?}", &requests.iter().map(|r| r.id.clone()).collect::<Vec<_>>());
+        let tasks_in_process = requests.iter().map(|r| format!("dkg-{}", r.id)).collect::<Vec<_>>();
+        debug!("Fetched DKG requests: {:?}", tasks_in_process);
+        list_tasks().iter().for_each(|task| {
+            if !tasks_in_process.contains(&task.id) {
+                debug!("Removing expired task: {:?}", task.id);
+                dkg::remove_task(&task.id);
+            }
+        });
         for request in requests {
             if request
                 .participants

@@ -588,26 +588,3 @@ pub fn save_task(task: &DKGTask) {
      DB.clear().unwrap();
      DB.flush().unwrap();
  }
-
- #[test]
- fn test_map_extend() {
-    let mut local = BTreeMap::new();
-    local.insert("a", 1);
-    local.insert("b", 2);
-    local.insert("c", 3);
-
-    let mut remote = BTreeMap::new();
-    remote.insert("d", 4);
-    remote.insert("b", 5);
-    remote.insert("a", 6);
-
-    local.extend(remote.clone());
-
-    println!("{:?}", local);
-
-    let mut cloned = remote.clone();
-    cloned.remove("d");
-    println!("removed {:?}", cloned);
-    println!("origiin {:?}", remote);
-
- }

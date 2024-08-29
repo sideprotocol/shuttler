@@ -23,7 +23,7 @@ use crate::helper::encoding::from_base64;
 use crate::helper::gossip::{subscribe_gossip_topics, SubscribeTopic};
 use crate::protocols::sign::{received_sign_response, SignResponse};
 use crate::tickers::tss::tss_tasks_fetcher;
-use crate::protocols::dkg::{received_dkg_response, received_round1_packages, received_round2_packages, DKGResponse};
+use crate::protocols::dkg::{received_dkg_response, DKGResponse};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
 
 use std::hash::{DefaultHasher, Hash, Hasher};
