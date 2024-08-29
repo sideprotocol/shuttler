@@ -5,7 +5,7 @@ use bitcoin_hashes::Hash;
 use bitcoincore_rpc::RpcApi;
 use cosmos_sdk_proto::side::btcbridge::{BitcoinWithdrawRequest, MsgSubmitWithdrawSignatures};
 use cosmrs::Any;
-use libp2p::{request_response, PeerId};
+
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
@@ -441,7 +441,7 @@ pub async fn collect_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signe
     //     debug!("No connected peers");
     //     return;
     // }
-    let peers = swarm.behaviour().gossip.all_peers().map(|(p, _hash)| p.clone() ).collect::<Vec<_>>();
+    // let peers = swarm.behaviour().gossip.all_peers().map(|(p, _hash)| p.clone() ).collect::<Vec<_>>();
     // collect tss packages
     for item in DB_TASK.iter() {
         let mut task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
@@ -460,40 +460,40 @@ pub async fn collect_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signe
         publish_sign_package(swarm, &task);
 
         // request packages from other connected peers
-        peers.iter().for_each(|p| {
-            let request = SignRequest {
-                task_id: task.id.clone()
-            };
-            debug!("Sent Signer Request to {p}: {:?}", &request);
-            swarm.behaviour_mut().signer.send_request(p, request);
-        })
+        // peers.iter().for_each(|p| {
+        //     let request = SignRequest {
+        //         task_id: task.id.clone()
+        //     };
+        //     debug!("Sent Signer Request to {p}: {:?}", &request);
+        //     swarm.behaviour_mut().signer.send_request(p, request);
+        // })
     };
 }
 
-pub fn tss_event_handler(behave: &mut TSSBehaviour, peer: &PeerId, message: request_response::Message<SignRequest, SignResponse>) {
-    // handle dkg events
-    debug!("Received TSS response from {peer}: {:?}", &message);
-    match message {
-        request_response::Message::Request { request_id, request, channel } => {
-            debug!("Received TSS Request from {peer}: {request_id}");
-            if let Some(response) = prepare_response_for_request(request.task_id) {
-                match behave.signer.send_response(channel, response) {
-                    Ok(_) => {
-                        debug!("Sent TSS Response to {peer}: {request_id}");
-                    }
-                    Err(e) => {
-                        error!("Failed to send TSS Response to {peer}: {request_id} - {:?}", e);
-                    }
-                };
-            }
-        }
+// pub fn tss_event_handler(behave: &mut TSSBehaviour, peer: &PeerId, message: request_response::Message<SignRequest, SignResponse>) {
+//     // handle dkg events
+//     debug!("Received TSS response from {peer}: {:?}", &message);
+//     match message {
+//         request_response::Message::Request { request_id, request, channel } => {
+//             debug!("Received TSS Request from {peer}: {request_id}");
+//             if let Some(response) = prepare_response_for_request(request.task_id) {
+//                 match behave.signer.send_response(channel, response) {
+//                     Ok(_) => {
+//                         debug!("Sent TSS Response to {peer}: {request_id}");
+//                     }
+//                     Err(e) => {
+//                         error!("Failed to send TSS Response to {peer}: {request_id} - {:?}", e);
+//                     }
+//                 };
+//             }
+//         }
 
-        request_response::Message::Response { request_id, response } => {
-            debug!("Received TSS Response from {peer}: {request_id}");
-            received_response(response);
-        }
-    }
-}
+//         request_response::Message::Response { request_id, response } => {
+//             debug!("Received TSS Response from {peer}: {request_id}");
+//             received_response(response);
+//         }
+//     }
+// }
 
 
 fn get_sign_task(id: &str) -> Option<SignTask> {

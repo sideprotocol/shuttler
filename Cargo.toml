@@ -21,7 +21,7 @@ bitcoincore-zmq = {version="1.5.1", features=["async"]}
 tokio = { version = "1.39.3", features = ["full"] }
 async-trait = "0.1"
 sled = "0.34.7"
-libp2p = {version = "0.54.1", features = [ "tokio", "gossipsub", "identify", "mdns", "noise", "kad", "macros", "tcp", "yamux", "quic", "request-response", "cbor"] }
+libp2p = {version = "0.54.1", features = [ "tokio", "gossipsub", "identify", "mdns", "noise", "kad", "macros", "tcp", "yamux", "quic", "cbor"] }
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 toml = "0.8.14"

@@ -8,7 +8,6 @@ use ed25519_compact::{x25519, SecretKey};
 use futures::executor::block_on;
 use rand::thread_rng;
 use tracing::{debug, error, info};
-use libp2p::{request_response::{self, Message}, PeerId};
 use serde::{Deserialize, Serialize};
 
 
@@ -204,14 +203,14 @@ pub fn collect_dkg_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>) {
             // publish its packages to other peers
             publish_dkg_packages(swarm, &t);
             // request packages from connected peers
-            peers.iter().for_each(|p| {
-                let request = DKGRequest {
-                    task_id: t.id.clone(),
-                    round: t.round.clone(),
-                };
-                debug!("Sent DKG Request to {p}: {:?}", &request);
-                swarm.behaviour_mut().dkg.send_request(p, request);
-            })
+            // peers.iter().for_each(|p| {
+            //     let request = DKGRequest {
+            //         task_id: t.id.clone(),
+            //         round: t.round.clone(),
+            //     };
+            //     debug!("Sent DKG Request to {p}: {:?}", &request);
+            //     swarm.behaviour_mut().dkg.send_request(p, request);
+            // })
         }
     }
 }
@@ -451,55 +450,55 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
     }
 }
 
-pub fn dkg_event_handler(signer: &Signer, behave: &mut TSSBehaviour, peer: &PeerId, message: Message<DKGRequest, DKGResponse>) {
-    // handle dkg events
-    debug!("Reqeust-Response Received DKG response from {peer}: {:?}", &message);
-    match message {
-        request_response::Message::Request { request_id, request, channel } => {
-            debug!("Received DKG Request from {peer}: {request_id}");
-            let response = match request { DKGRequest { task_id, round } => {
-                    match round {
-                        Round::Round1 => {
-                            // send round 1 packets to requester
-                            debug!("Received DKG Round 1 Request from {peer}, {request_id}");
-                            prepare_round1_package_for_request(task_id)
-                        }
-                        Round::Round2 => {
-                            // send round 2 packets to requester
-                            debug!("Received DKG Round 2 Request from {peer}: {request_id}");
-                            prepare_round2_package_for_request(task_id)
-                        }
-                        // skip other rounds
-                        _ => {return;},
-                    }
-                }
-            };
-            match behave.dkg.send_response(channel, response) {
-                Ok(_) => {
-                    debug!("Sent DKG Response to {peer}: {request_id}");
-                }
-                Err(e) => {
-                    error!("Failed to send DKG Response to {peer}: {request_id} - {:?}", e);
-                }
-            };
-        }
+// pub fn dkg_event_handler(signer: &Signer, behave: &mut TSSBehaviour, peer: &PeerId, message: Message<DKGRequest, DKGResponse>) {
+//     // handle dkg events
+//     debug!("Reqeust-Response Received DKG response from {peer}: {:?}", &message);
+//     match message {
+//         request_response::Message::Request { request_id, request, channel } => {
+//             debug!("Received DKG Request from {peer}: {request_id}");
+//             let response = match request { DKGRequest { task_id, round } => {
+//                     match round {
+//                         Round::Round1 => {
+//                             // send round 1 packets to requester
+//                             debug!("Received DKG Round 1 Request from {peer}, {request_id}");
+//                             prepare_round1_package_for_request(task_id)
+//                         }
+//                         Round::Round2 => {
+//                             // send round 2 packets to requester
+//                             debug!("Received DKG Round 2 Request from {peer}: {request_id}");
+//                             prepare_round2_package_for_request(task_id)
+//                         }
+//                         // skip other rounds
+//                         _ => {return;},
+//                     }
+//                 }
+//             };
+//             match behave.dkg.send_response(channel, response) {
+//                 Ok(_) => {
+//                     debug!("Sent DKG Response to {peer}: {request_id}");
+//                 }
+//                 Err(e) => {
+//                     error!("Failed to send DKG Response to {peer}: {request_id} - {:?}", e);
+//                 }
+//             };
+//         }
 
-        request_response::Message::Response { request_id, response } => {
-            debug!("Received DKG Response from {peer}: {request_id}");
-            match response {
-                // collect round 1 packets
-                DKGResponse::Round1 { task_id, packets, nonce: _ } => {
-                    received_round1_packages(task_id, packets, signer.identifier(), &signer.identity_key);
-                }
-                // collect round 2 packets
-                DKGResponse::Round2 { task_id, packets, nonce: _ } => {
-                    received_round2_packages(task_id, packets, signer);
-                }
-            }
+//         request_response::Message::Response { request_id, response } => {
+//             debug!("Received DKG Response from {peer}: {request_id}");
+//             match response {
+//                 // collect round 1 packets
+//                 DKGResponse::Round1 { task_id, packets, nonce: _ } => {
+//                     received_round1_packages(task_id, packets, signer.identifier(), &signer.identity_key);
+//                 }
+//                 // collect round 2 packets
+//                 DKGResponse::Round2 { task_id, packets, nonce: _ } => {
+//                     received_round2_packages(task_id, packets, signer);
+//                 }
+//             }
 
-        }
-    }
-}
+//         }
+//     }
+// }
 
 #[derive(Debug, Clone)]
 pub struct DKGError(String);

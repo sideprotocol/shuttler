@@ -10,10 +10,10 @@ use futures::StreamExt;
 
 use libp2p::identity::Keypair;
 use libp2p::kad::store::MemoryStore;
-use libp2p::request_response::{self, ProtocolSupport};
+
 use libp2p::swarm::dial_opts::PeerCondition;
 use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
-use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, StreamProtocol, Swarm};
+use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
 
 use crate::app::config;
 use crate::app::config::Config;
@@ -21,15 +21,15 @@ use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::from_base64;
 use crate::helper::gossip::{subscribe_gossip_topics, SubscribeTopic};
-use crate::protocols::sign::{received_response, tss_event_handler, SignRequest, SignResponse};
+use crate::protocols::sign::{received_response, SignResponse};
 use crate::tickers::tss::tss_tasks_fetcher;
-use crate::protocols::dkg::{dkg_event_handler, received_round1_packages, received_round2_packages, DKGRequest, DKGResponse};
+use crate::protocols::dkg::{received_round1_packages, received_round2_packages, DKGResponse};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::str::FromStr;
 use std::sync::Mutex;
-use std::{io, iter};
+use std::io;
 use std::time::Duration;
 use tokio::select;
 
@@ -78,7 +78,6 @@ impl Signer {
         Self {
             identity_key: local_key,
             identifier,
-            // priv_validator_key: validator_key,
             bitcoin_client,
             config: conf,
         }
@@ -196,14 +195,14 @@ pub async fn run_signer_daemon(conf: Config) {
 
             let mdns =
                 mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?;
-            let cfg = request_response::Config::default();
+            // let cfg = request_response::Config::default();
 
-            let dkg = request_response::cbor::Behaviour::<DKGRequest, DKGResponse>::new(
-                iter::once((StreamProtocol::new("/shuttler/dkg/1"), ProtocolSupport::Full)), cfg.clone()
-            );
-            let signer = request_response::cbor::Behaviour::<SignRequest, SignResponse>::new(
-                iter::once((StreamProtocol::new("/shuttler/tss/1"), ProtocolSupport::Full)), cfg
-            );
+            // let dkg = request_response::cbor::Behaviour::<DKGRequest, DKGResponse>::new(
+            //     iter::once((StreamProtocol::new("/shuttler/dkg/1"), ProtocolSupport::Full)), cfg.clone()
+            // );
+            // let signer = request_response::cbor::Behaviour::<SignRequest, SignResponse>::new(
+            //     iter::once((StreamProtocol::new("/shuttler/tss/1"), ProtocolSupport::Full)), cfg
+            // );
 
             // To content-address message, we can take the hash of message and use it as an ID.
             let message_id_fn = |message: &gossipsub::Message| {
@@ -229,7 +228,7 @@ pub async fn run_signer_daemon(conf: Config) {
             let identify = identify::Behaviour::new(identify::Config::new("/shuttler/id/1.0.0".to_string(), key.public().clone()));
             let kad = libp2p::kad::Behaviour::new(key.public().to_peer_id(), MemoryStore::new(key.public().to_peer_id()));
             
-            Ok(TSSBehaviour { mdns, dkg , gossip, signer, identify, kad})
+            Ok(TSSBehaviour { mdns, gossip, identify, kad})
         })
         .expect("swarm behaviour config failed")
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60000)))
@@ -317,7 +316,6 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 received_response(response);
             }
         }
-        
         TSSBehaviourEvent::Identify(identify::Event::Received { peer_id, connection_id, info }) => {
             swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
             info!(" @@(Received) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
@@ -362,20 +360,6 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
             for (peer_id, _multiaddr) in list {
                 info!("mDNS discover peer has expired: {peer_id}");
             }
-        }
-        TSSBehaviourEvent::Dkg(request_response::Event::Message { peer, message }) => {
-            // debug!("Received DKG response from {peer}: {:?}", &message);
-            dkg_event_handler( signer, swarm.behaviour_mut(), &peer, message);
-        }
-        TSSBehaviourEvent::Dkg(request_response::Event::InboundFailure { peer, request_id, error}) => {
-            debug!("Inbound Failure {peer}: {request_id} - {error}");
-        }
-        TSSBehaviourEvent::Dkg(request_response::Event::OutboundFailure { peer, request_id, error}) => {
-            debug!("Outbound Failure {peer}: {request_id} - {error}");
-        }
-        TSSBehaviourEvent::Signer(request_response::Event::Message { peer, message }) => {
-            debug!("Request-Response Received Signer response from {peer}: {:?}", &message);
-            tss_event_handler( swarm.behaviour_mut(), &peer, message);
         }
         _ => {}
     }
