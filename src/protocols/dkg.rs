@@ -342,8 +342,6 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
 
     if task.participants.len() == local.len() {
         info!("Received round2 packets from all participants: {task_id}");
-        task.round = Round::Closed;
-        save_task(&task);
 
         let mut round2_packages = BTreeMap::new();
         local.iter().for_each(|(sender, packages)| {
@@ -434,7 +432,8 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
             },
         };
         
-        return;
+        task.round = Round::Closed;
+        save_task(&task);
     }
 }
 
