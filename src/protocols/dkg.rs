@@ -374,7 +374,7 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
             }
         };
 
-        let mut round1_packages = match DB.get(format!("dkg-{}-round1", task_id)) {
+        let round1_packages = match DB.get(format!("dkg-{}-round1", task_id)) {
             Ok(Some(packets)) => {
                 match serde_json::from_slice(&packets) {
                     Ok(packets) => packets,
@@ -389,11 +389,13 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
                 BTreeMap::new()
             },
         };
-        round1_packages.remove(signer.identifier()); // remove self
+        
+        let mut round1_packages_cloned = round1_packages.clone();
+        round1_packages_cloned.remove(signer.identifier()); // remove self
 
         let (key, pubkey) = match frost::keys::dkg::part3(
             &round2_secret_package,
-            &round1_packages,
+            &round1_packages_cloned,
             &round2_packages,
         ) {
             Ok((key, pubkey)) => (key, pubkey),
@@ -540,4 +542,27 @@ pub fn save_task(task: &DKGTask) {
      DB_TASK.flush().unwrap();
      DB.clear().unwrap();
      DB.flush().unwrap();
+ }
+
+ #[test]
+ fn test_map_extend() {
+    let mut local = BTreeMap::new();
+    local.insert("a", 1);
+    local.insert("b", 2);
+    local.insert("c", 3);
+
+    let mut remote = BTreeMap::new();
+    remote.insert("d", 4);
+    remote.insert("b", 5);
+    remote.insert("a", 6);
+
+    local.extend(remote.clone());
+
+    println!("{:?}", local);
+
+    let mut cloned = remote.clone();
+    cloned.remove("d");
+    println!("removed {:?}", cloned);
+    println!("origiin {:?}", remote);
+
  }
