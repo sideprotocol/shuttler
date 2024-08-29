@@ -1,7 +1,7 @@
 pub mod cipher;
 pub mod encoding;
 pub mod gossip;
-pub mod store;
+pub mod mem_store;
 pub mod bitcoin;
 pub mod merkle_proof;
 pub mod http;

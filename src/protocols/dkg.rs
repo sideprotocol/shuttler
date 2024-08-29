@@ -16,7 +16,7 @@ use frost::{keys, Identifier, Secp256K1Sha256};
 
 use frost_core::keys::dkg::round1::Package;
 use super::{Round, TSSBehaviour};
-use crate::{app::{config:: get_database_with_name, signer::Signer}, helper::{gossip::publish_dkg_packages, now, store}};
+use crate::{app::{config:: get_database_with_name, signer::Signer}, helper::{gossip::publish_dkg_packages, now, mem_store}};
 use crate::helper::{cipher::{decrypt, encrypt}, client_side::send_cosmos_transaction};
 
 
@@ -112,7 +112,7 @@ pub fn generate_round1_package(identifier: Identifier, task: &DKGTask) {
             "round1_secret_package: {:?}, {:?}",
             task.id, &round1_package
         );
-        store::set_dkg_round1_secret_packet(task.id.to_string().as_str(), secret_packet);
+        mem_store::set_dkg_round1_secret_packet(task.id.to_string().as_str(), secret_packet);
 
         let mut round1_packages = BTreeMap::new();
         round1_packages.insert(identifier, round1_package);
@@ -135,7 +135,7 @@ pub fn generate_round2_packages(identifier: &Identifier, enc_key: &SecretKey, ta
 
     let task_id = task.id.clone();
 
-    let secret_package = match store::get_dkg_round1_secret_packet(&task_id) {
+    let secret_package = match mem_store::get_dkg_round1_secret_packet(&task_id) {
         Some(secret_packet) => secret_packet,
         None => {
             return Err(DKGError(format!("No secret packet found for DKG: {}", task_id)));
@@ -153,7 +153,7 @@ pub fn generate_round2_packages(identifier: &Identifier, enc_key: &SecretKey, ta
 
     match frost::keys::dkg::part2(secret_package, &cloned) {
         Ok((round2_secret_package, round2_packages)) => {
-            store::set_dkg_round2_secret_packet(&task_id, round2_secret_package);
+            mem_store::set_dkg_round2_secret_packet(&task_id, round2_secret_package);
 
             // convert it to <receiver, Vec<u8>>, then only the receiver can decrypt it.
             let mut output_packages = BTreeMap::new();
@@ -196,7 +196,7 @@ pub fn collect_dkg_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>) {
     //     debug!("No connected peers");
     //     return;
     // }
-    let peers = swarm.behaviour().gossip.all_peers().map(|(p, _hash)| p.clone() ).collect::<Vec<_>>();
+    // let peers = swarm.behaviour().gossip.all_peers().map(|(p, _hash)| p.clone() ).collect::<Vec<_>>();
     let tasks = list_tasks();
     for t in tasks.iter() {
         if t.round == Round::Round1 || t.round == Round::Round2 {
@@ -380,7 +380,7 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
         info!("Received round2 packages from all participants: {task_id}, {:?}", round2_packages);
 
         // compute the threshold key
-        let round2_secret_package = match store::get_dkg_round2_secret_packet(&task_id) {
+        let round2_secret_package = match mem_store::get_dkg_round2_secret_packet(&task_id) {
             Some(secret_package) => secret_package,
             None => {
                 error!("No secret packet found for DKG: {}", task_id);
