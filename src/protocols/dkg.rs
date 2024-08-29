@@ -333,7 +333,7 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
     // store round 2 packets
     match DB.insert(format!("dkg-{}-round2", task_id), serde_json::to_vec(&local).unwrap()) {
         Ok(_) => {
-            debug!("Stored DKG Round 2 packets: {task_id}");
+            debug!("Stored DKG Round 2 packets: {task_id} {}", local.len());
         }
         Err(e) => {
             error!("Failed to store DKG Round 2 packets: {task_id} - {:?}", e);
@@ -389,7 +389,7 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
                 BTreeMap::new()
             },
         };
-        
+
         let mut round1_packages_cloned = round1_packages.clone();
         round1_packages_cloned.remove(signer.identifier()); // remove self
 
