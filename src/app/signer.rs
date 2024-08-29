@@ -21,9 +21,9 @@ use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::from_base64;
 use crate::helper::gossip::{subscribe_gossip_topics, SubscribeTopic};
-use crate::protocols::sign::{received_response, SignResponse};
+use crate::protocols::sign::{received_sign_response, SignResponse};
 use crate::tickers::tss::tss_tasks_fetcher;
-use crate::protocols::dkg::{received_round1_packages, received_round2_packages, DKGResponse};
+use crate::protocols::dkg::{received_dkg_response, received_round1_packages, received_round2_packages, DKGResponse};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
 
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -48,7 +48,12 @@ lazy_static! {
 #[derive(Debug)]
 pub struct Signer {
     config: Config,
+    /// Identity key of the signer
+    /// This is the private key of sidechain validator that is used to sign messages
     pub identity_key: SecretKey,
+    /// Identifier of the signer
+    /// Identifier is derived from the public key of the identity key
+    /// used to identify the signer in the threshold signature scheme
     identifier: Identifier,
     pub bitcoin_client: Client,
 }
@@ -300,20 +305,11 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 let response: DKGResponse = serde_json::from_slice(&message.data).expect("Failed to deserialize DKG message");
                 // dkg_event_handler(shuttler, swarm.behaviour_mut(), &propagation_source, dkg_message);
                 debug!("Gossip Received DKG Response from {propagation_source}: {message_id} {:?}", response);
-                match response {
-                    // collect round 1 packets
-                    DKGResponse::Round1 { task_id, packets , nonce: _} => {
-                        received_round1_packages(task_id, packets, signer.identifier(), &signer.identity_key);
-                    }
-                    // collect round 2 packets
-                    DKGResponse::Round2 { task_id, packets , nonce: _} => {
-                        received_round2_packages(task_id, packets, signer);
-                    }
-                }
+                received_dkg_response(response, signer);
             } else if message.topic == SubscribeTopic::SIGNING.topic().hash() {
                 let response: SignResponse = serde_json::from_slice(&message.data).expect("Failed to deserialize Sign message");
                 debug!("Gossip Received TSS Response from {propagation_source}: {message_id} {:?}", response);
-                received_response(response);
+                received_sign_response(response);
             }
         }
         TSSBehaviourEvent::Identify(identify::Event::Received { peer_id, connection_id, info }) => {

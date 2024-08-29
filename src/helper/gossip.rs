@@ -2,7 +2,7 @@
 use frost_core::serde::{Serialize, Deserialize};
 use libp2p::{gossipsub::IdentTopic, Swarm};
 
-use crate::protocols::{dkg::{self, prepare_round1_package_for_request, prepare_round2_package_for_request}, sign, Round, TSSBehaviour};
+use crate::protocols::{dkg::{self, prepare_response_for_task}, sign, TSSBehaviour};
 
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -28,11 +28,7 @@ pub fn subscribe_gossip_topics(swarm: &mut Swarm<TSSBehaviour>) {
 }
 
 pub fn publish_dkg_packages(swarm: &mut Swarm<TSSBehaviour>, task: &dkg::DKGTask) {
-    let response = match task.round {
-        Round::Round1 => prepare_round1_package_for_request(task.id.clone()),
-        Round::Round2 => prepare_round2_package_for_request(task.id.clone()),
-        Round::Closed => return,
-    };
+    let response = prepare_response_for_task(task.id.clone());
     let message = serde_json::to_vec(&response).expect("Failed to serialize DKG package");
     publish_message(swarm, SubscribeTopic::DKG, message);
 }

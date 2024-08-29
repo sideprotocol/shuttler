@@ -181,7 +181,7 @@ pub fn prepare_response_for_request(task_id: String) -> Option<SignResponse> {
     })
 }
 
-pub fn received_response(response: SignResponse) {
+pub fn received_sign_response(response: SignResponse) {
 
     let task_id = response.task_id.clone();
 
