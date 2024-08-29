@@ -191,12 +191,11 @@ pub fn generate_round2_packages(identifier: &Identifier, enc_key: &SecretKey, ta
 pub fn collect_dkg_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>) {
     let tasks = list_tasks();
     for t in tasks.iter() {
-        if t.timestamp as u64 <= now() {
+        debug!("Checking DKG task timeout: {:?}, {}", t.timestamp, now());
+        // if t.timestamp as u64 <= now() {
             // publish its packages to other peers
             publish_dkg_packages(swarm, &t);
-        } else {
-            remove_task(&t.id);
-        }
+        // }
     }
 }
 
