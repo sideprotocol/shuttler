@@ -154,7 +154,7 @@ impl Signer {
                 error!("Failed to save generated keys to database: {:?}",   re.err());
             }
         }
-        self.config.save().expect("Failed to save generated keys");
+        // self.config.save().expect("Failed to save generated keys");
         info!("Generated {:?} and vault addresses: {:?}", pubkey, addrs);
         addrs
     }
