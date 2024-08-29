@@ -126,11 +126,11 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
                 }
             };
 
-        // if tip_on_bitcoin == tip_on_side {
-        //     info!("No new blocks to sync, sleep for 10 seconds...");
-        //     sleep(Duration::from_secs(10));
-        //     continue;
-        // }
+        if tip_on_bitcoin == tip_on_side {
+            info!("No new blocks to sync, sleep for 60 seconds...");
+            sleep(Duration::from_secs(60));
+            continue;
+        }
 
         let mut lock = LOADING.lock().unwrap();
         if lock.loading {
@@ -224,7 +224,7 @@ pub async fn send_block_headers(
 pub async fn scan_vault_txs_loop(relayer: &Relayer) {
     let mut height = get_last_scanned_height(relayer.config()) + 1;
 
-    info!("Start to scan vault txs from height: {}", height);
+    debug!("Start to scan vault txs from height: {}", height);
 
     loop {
         let side_tip =
@@ -236,11 +236,11 @@ pub async fn scan_vault_txs_loop(relayer: &Relayer) {
                 }
             };
         if height > side_tip - 1 {
-            sleep(Duration::from_secs(6));
+            sleep(Duration::from_secs(60));
             continue;
         }
 
-        info!("Scanning height: {:?}, side tip: {:?}", height, side_tip);
+        debug!("Scanning height: {:?}, side tip: {:?}", height, side_tip);
 
         scan_vault_txs(relayer, height).await;
         save_last_scanned_height(height);
@@ -268,7 +268,7 @@ pub async fn scan_vault_txs(relayer: &Relayer, height: u64) {
     let vaults = get_cached_vaults(relayer.config().side_chain.grpc.clone()).await;
 
     for (i, tx) in block.txdata.iter().enumerate() {
-        info!(
+        debug!(
             "Checking tx {:?}, height: {:?}, index: {:?}",
             tx.compute_txid(),
             height,
@@ -302,7 +302,7 @@ pub async fn scan_vault_txs(relayer: &Relayer, height: u64) {
             if address.is_some() {
                 let address = address.unwrap().assume_checked().to_string();
                 if vaults.contains(&address) {
-                    info!("Withdrawal tx found...");
+                    debug!("Withdrawal tx found... {:?}", &tx);
 
                     let proof = bitcoin_utils::compute_tx_proof(
                         block.txdata.iter().map(|tx| tx.compute_txid()).collect(),
@@ -330,7 +330,7 @@ pub async fn scan_vault_txs(relayer: &Relayer, height: u64) {
         }
 
         if bitcoin_utils::is_deposit_tx(tx, relayer.config().bitcoin.network, &vaults) {
-            info!("Deposit tx found...");
+            debug!("Deposit tx found... {:?}", &tx);
 
             let proof = bitcoin_utils::compute_tx_proof(
                 block.txdata.iter().map(|tx| tx.compute_txid()).collect(),
