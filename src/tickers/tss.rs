@@ -53,7 +53,7 @@ async fn fetch_dkg_requests(shuttler: &Signer) {
     {
 
         let requests = requests_response.into_inner().requests;
-        debug!("Fetched DKG requests: {:?}", &requests);
+        debug!("Fetched DKG requests: {:?}", &requests.iter().map(|r| r.id.clone()).collect::<Vec<_>>());
         for request in requests {
             if request
                 .participants
