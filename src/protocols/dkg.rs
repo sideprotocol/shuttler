@@ -49,9 +49,6 @@ impl DKGTask {
         Self {
             id: format!("dkg-{}", request.id),
             participants: request.participants.iter().map(|p| {
-                // let buf = hex::decode(p.consensus_address.clone()).expect("Invalid concensus address");
-                // let id = frost_secp256k1_tr::Secp256K1ScalarField::deserialize(&buf[0..20].try_into().unwrap()).unwrap();
-                // frost_core::Identifier::new(id).unwrap()
                 p.consensus_address.clone()
             }).collect(), 
             threshold: request.threshold as u16,
@@ -192,25 +189,13 @@ pub fn generate_round2_packages(identifier: &Identifier, enc_key: &SecretKey, ta
 }
 
 pub fn collect_dkg_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>) {
-    // if swarm.behaviour().gossip.all_peers().count() == 0 {
-    //     debug!("No connected peers");
-    //     return;
-    // }
-    // let peers = swarm.behaviour().gossip.all_peers().map(|(p, _hash)| p.clone() ).collect::<Vec<_>>();
     let tasks = list_tasks();
     for t in tasks.iter() {
-        if t.round == Round::Round1 || t.round == Round::Round2 {
+        if t.timestamp as u64 <= now() {
             // publish its packages to other peers
             publish_dkg_packages(swarm, &t);
-            // request packages from connected peers
-            // peers.iter().for_each(|p| {
-            //     let request = DKGRequest {
-            //         task_id: t.id.clone(),
-            //         round: t.round.clone(),
-            //     };
-            //     debug!("Sent DKG Request to {p}: {:?}", &request);
-            //     swarm.behaviour_mut().dkg.send_request(p, request);
-            // })
+        } else {
+            remove_task(&t.id);
         }
     }
 }
@@ -526,6 +511,18 @@ pub fn save_task(task: &DKGTask) {
          }
      }
  }
+
+ pub fn remove_task(task_id: &str) {
+    match DB_TASK.remove(task_id) {
+        Ok(_) => {
+            info!("Removed task from database: {}", task_id);
+        },
+        _ => {
+            error!("Failed to remove task from database: {}", task_id);
+        }
+    };
+
+}
  
  pub fn list_tasks() -> Vec<DKGTask> {
      let mut tasks = vec![];
