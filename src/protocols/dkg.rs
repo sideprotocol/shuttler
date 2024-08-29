@@ -340,7 +340,7 @@ pub fn received_round2_packages(task_id: String, packets: BTreeMap<Identifier, B
         }
     }
 
-    if task.participants.len() == local.len() {
+    if task.participants.len() == local.iter().filter(|(_,v)| v.len() == task.participants.len()).count() {
         info!("Received round2 packets from all participants: {task_id}");
 
         let mut round2_packages = BTreeMap::new();
