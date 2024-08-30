@@ -1,7 +1,7 @@
 use clap::Parser;
 use shuttler::commands::{address, init, reset, start, Cli, Commands};
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads=4)]
 async fn main() {
     // Initialize tracing with customization
     let cli = Cli::parse();

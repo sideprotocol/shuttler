@@ -1,4 +1,5 @@
-use futures::join;
+
+use tokio::join;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 use crate::app::{config::Config, relayer, signer};
@@ -18,7 +19,20 @@ pub async fn execute(home: &str, relayer: bool, signer: bool) {
     } else if signer && !relayer {
         signer::run_signer_daemon(conf).await;
     } else {
+        let conf2 = conf.clone();
+        let sign_handler = tokio::spawn(async move { signer::run_signer_daemon(conf).await });
+        let relay_handler = tokio::spawn(async move { relayer::run_relayer_daemon(conf2).await });
         // Start both signer and relayer as default
-        join!(signer::run_signer_daemon(conf.clone()), relayer::run_relayer_daemon(conf));
+        match join!(sign_handler, relay_handler) {
+            (Ok(_), Ok(_)) => {
+                println!("Signer and Relayer started successfully");
+            }
+            (Err(e), _) => {
+                println!("Error starting signer: {:?}", e);
+            }
+            (_, Err(e)) => {
+                println!("Error starting relayer: {:?}", e);
+            }
+        }
     }
 }

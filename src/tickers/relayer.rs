@@ -1,4 +1,4 @@
-use std::{sync::Mutex, thread::sleep, time::Duration};
+use std::time::Duration;
 
 use bitcoin::{consensus::encode, BlockHash, Transaction};
 use bitcoincore_rpc::RpcApi;
@@ -6,6 +6,7 @@ use futures::join;
 use prost_types::Any;
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
+use tokio::{sync::Mutex, time::sleep};
 use tonic::{Response, Status};
 use tracing::{debug, error, info};
 
@@ -128,11 +129,11 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
 
         if tip_on_bitcoin == tip_on_side {
             debug!("No new blocks to sync, sleep for 60 seconds...");
-            sleep(Duration::from_secs(60));
+            sleep(Duration::from_secs(60)).await;
             continue;
         }
 
-        let mut lock = LOADING.lock().unwrap();
+        let mut lock = LOADING.lock().await;
         if lock.loading {
             info!("a previous task is running, skip!");
             return;
@@ -229,7 +230,7 @@ pub async fn scan_vault_txs_loop(relayer: &Relayer) {
                 }
             };
         if height > side_tip - 1 {
-            sleep(Duration::from_secs(60));
+            sleep(Duration::from_secs(60)).await;
             continue;
         }
 
