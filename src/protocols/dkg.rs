@@ -418,7 +418,7 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
             }
         };
 
-        let round1_packages = match DB.get(format!("dkg-{}-round1", task.id)) {
+        let mut round1_packages = match DB.get(format!("dkg-{}-round1", task.id)) {
             Ok(Some(packets)) => {
                 match serde_json::from_slice(&packets) {
                     Ok(packets) => packets,
@@ -434,12 +434,14 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
             },
         };
 
-        let mut round1_packages_cloned = round1_packages.clone();
-        round1_packages_cloned.remove(signer.identifier()); // remove self
+        // let mut round1_packages_cloned = round1_packages.clone();
+        // remove self
+        // frost does not need its own package to compute the threshold key
+        round1_packages.remove(signer.identifier()); 
 
         let (key, pubkey) = match frost::keys::dkg::part3(
             &round2_secret_package,
-            &round1_packages_cloned,
+            &round1_packages,
             &round2_packages,
         ) {
             Ok((key, pubkey)) => (key, pubkey),
@@ -449,7 +451,11 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
             }
         };
 
+        // generate vault addresses and save its key share
         let address_with_tweak = signer.generate_vault_addresses(pubkey, key, task.address_num);
+
+        task.round = Round::Closed;
+        save_task(&task);
 
          // submit the vault address to sidechain
          let mut cosm_msg = MsgCompleteDkg {
@@ -478,8 +484,6 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
             },
         };
         
-        task.round = Round::Closed;
-        save_task(&task);
     }
 }
 
