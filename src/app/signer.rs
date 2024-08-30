@@ -315,7 +315,12 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
         TSSBehaviourEvent::Identify(identify::Event::Received { peer_id, connection_id, info }) => {
             swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
             info!(" @@(Received) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
-            swarm.behaviour_mut().kad.add_address(&peer_id, info.observed_addr.clone());
+            info.listen_addrs.iter().for_each(|addr| {
+                if !addr.to_string().starts_with("/ip4/127.0.0.1") {
+                    info!("Discoverd new address: {peer_id} {addr}");
+                    swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
+                }
+            });
         } 
         TSSBehaviourEvent::Identify(identify::Event::Pushed { peer_id, connection_id, info }) => {
             swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
