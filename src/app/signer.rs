@@ -33,7 +33,7 @@ use std::io;
 use std::time::Duration;
 use tokio::select;
 
-use tracing::{debug, info, error};
+use tracing::{debug, error, info, warn};
 
 use ed25519_compact:: SecretKey;
 
@@ -286,12 +286,14 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<TSSBehaviour>, conf: &Config) {
         swarm.behaviour_mut().kad.add_address(&peer, address);
         debug!("Adding bootstrap node: {:?}", addr_text);
     }
-    match swarm.behaviour_mut().kad.bootstrap() {
-        Ok(id) => {
-            info!("Bootstrap successful {:?}", id);
-        }
-        Err(e) => {
-            error!("Bootstrap failed: {:?}", e);
+    if conf.bootstrap_nodes.len() > 0 {
+        match swarm.behaviour_mut().kad.bootstrap() {
+            Ok(_) => {
+                info!("KAD bootstrap successful");
+            }
+            Err(e) => {
+                warn!("Failed to start KAD bootstrap: {:?}", e);
+            }
         }
     }
 }
