@@ -1,4 +1,4 @@
-use bitcoin::{bip32::{DerivationPath, ExtendendPrivKey, Xpriv}, key::Secp256k1, Address, CompressedPublicKey, Network, PrivateKey};
+use bitcoin::{bip32::{DerivationPath, Xpriv}, key::Secp256k1, Address, CompressedPublicKey, Network, PrivateKey};
 use bip39::{self, Mnemonic};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest};
 

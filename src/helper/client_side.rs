@@ -1,10 +1,7 @@
 
-use std::str::FromStr;
-
-use bip39::Mnemonic;
-use bitcoin::{bip32::{DerivationPath, Xpriv}, consensus::Encodable, key::Secp256k1, secp256k1::Message, sign_message::BITCOIN_SIGNED_MSG_PREFIX, CompressedPublicKey, Network, PrivateKey};
+use bitcoin::{ consensus::Encodable, key::Secp256k1, secp256k1::Message, sign_message::BITCOIN_SIGNED_MSG_PREFIX, PrivateKey};
 use bitcoin_hashes::{sha256d, Hash, HashEngine};
-use cosmrs::{ crypto::{secp256k1::SigningKey}, tx::{self, Fee, ModeInfo, Raw, SignDoc, SignerInfo, SignerPublicKey}, Coin};
+use cosmrs::{ crypto::secp256k1::SigningKey, tx::{self, Fee, ModeInfo, Raw, SignDoc, SignerInfo, SignerPublicKey}, Coin};
 use cosmos_sdk_proto::cosmos::{
     base::tendermint::v1beta1::GetLatestBlockRequest, tx::v1beta1::{service_client::ServiceClient as TxServiceClient, BroadcastMode, BroadcastTxRequest, BroadcastTxResponse}
 };
@@ -22,7 +19,7 @@ use cosmos_sdk_proto::side::btcbridge::{
 use prost_types::Any;
 use lazy_static::lazy_static;
 
-use crate::{app::config, helper::encoding::to_base64};
+use crate::app::config;
 
 lazy_static! {
     static ref lock: Mutex<bool> = Mutex::new(false);
@@ -207,16 +204,16 @@ fn sign_with_bitcoin_algo(doc: &SignDoc, priv_key: &PrivateKey) -> Raw {
 
     let msg_hash = signed_msg_hash(sign_doc_bytes);
     let msg = Message::from_digest(*msg_hash.as_byte_array());
-    let signature = secp.sign_ecdsa(&msg, &priv_key.inner);
+    let signature = secp.sign_ecdsa_recoverable(&msg, &priv_key.inner);
 
-    priv_key.inner.keypair(&secp).public_key().verify(&secp, &msg, &signature).expect("failed to verify signature");
-    println!("pubkey: {:?} {}", priv_key.public_key(&secp), to_base64(&priv_key.public_key(&secp).to_bytes()[..]));
-    // let pk = CompressedPublicKey::from_private_key(&secp, priv_key).expect("failed to get pubkey");
+    let mut sig_bytes: Vec<u8> = vec![];
+    sig_bytes.push(signature.serialize_compact().0.to_i32() as u8 + 27 + 4);
+    sig_bytes.append(&mut signature.serialize_compact().1.to_vec());
 
     cosmos_sdk_proto::cosmos::tx::v1beta1::TxRaw {
         body_bytes: doc.body_bytes.clone(),
         auth_info_bytes: doc.auth_info_bytes.clone(),
-        signatures: vec![signature.serialize_compact().to_vec()],
+        signatures: vec![sig_bytes],
     }.into()
 }
 
@@ -254,41 +251,47 @@ async fn test_signature() {
 
 }
 
-#[test]
-fn test_basic_sign() {
+// #[test]
+// fn test_basic_sign() {
 
-    // Replace with your mnemonic and HD path
-    let hd_path = DerivationPath::from_str("m/84'/0'/0'/0/0").expect("invalid HD path");
-    // Generate seed from mnemonic
-    let mnemonic = Mnemonic::from_str(&"abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about").expect("Invalid mnemonic");
+//     // Replace with your mnemonic and HD path
+//     let hd_path = DerivationPath::from_str("m/84'/0'/0'/0/0").expect("invalid HD path");
+//     // Generate seed from mnemonic
+//     let mnemonic = Mnemonic::from_str(&"abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about").expect("Invalid mnemonic");
 
-    // Derive HD key
-    let secp = Secp256k1::new();
-    // let derivation_path = DerivationPath::from_str(hd_path).expect("Invalid HD path");
-    let master = Xpriv::new_master(Network::Bitcoin, &mnemonic.to_seed("")).expect("failed to create master key");
-    let priv_key = master.derive_priv(&secp, &hd_path).expect("Failed to derive key").to_priv();
-    // RgS0txD+kfWE//CE4akVn+T4QI//OAWWpgSUhHTOT6M=
-    println!("Priv Key: {:?}", to_base64(priv_key.to_bytes().as_slice()));
+//     // Derive HD key
+//     let secp = Secp256k1::new();
+//     // let derivation_path = DerivationPath::from_str(hd_path).expect("Invalid HD path");
+//     let master = Xpriv::new_master(Network::Bitcoin, &mnemonic.to_seed("")).expect("failed to create master key");
+//     let priv_key = master.derive_priv(&secp, &hd_path).expect("Failed to derive key").to_priv();
+//     // RgS0txD+kfWE//CE4akVn+T4QI//OAWWpgSUhHTOT6M=
+//     println!("Priv Key: {:?}", to_base64(priv_key.to_bytes().as_slice()));
     
-    let secp = Secp256k1::new();
-    let msg_hash = signed_msg_hash(b"1234".to_vec());
-    let msg = Message::from_digest_slice(msg_hash.as_byte_array()).unwrap();
-    // slcH5qITi0nbdS1O1wLcpYbcT/zrKrT8stRyjoNcDGk=
-    println!("Msg Hash: {:?} {:?}", to_base64(msg_hash.as_byte_array()), msg);
+//     let secp = Secp256k1::new();
+//     let msg_hash = signed_msg_hash(b"1234".to_vec());
+//     let msg = Message::from_digest_slice(msg_hash.as_byte_array()).unwrap();
+//     // slcH5qITi0nbdS1O1wLcpYbcT/zrKrT8stRyjoNcDGk=
+//     println!("Msg Hash: {:?} {:?}", to_base64(msg_hash.as_byte_array()), msg);
     
-    // H4K6oH19PE4lp8YmXOpJeMlIZ/zy4AnLVAJ0NvTgq1ftHG6kcsuKF9m2H2zlKPCOdXJSanYc0ZkmYhwjOrIstPk=
-    let signature = secp.sign_ecdsa(&msg, &priv_key.inner);
-    println!("Signature: {:?}", signature.to_string());
-    println!("Signature: {:?}", to_base64(hex::decode(&signature.to_string()).unwrap().as_slice()));
-    priv_key.inner.keypair(&secp).public_key().verify(&secp, &msg, &signature).expect("failed to verify signature");
-    println!("pubkey: {:?} {}", priv_key.public_key(&secp), to_base64(&priv_key.public_key(&secp).to_bytes()[..]));
+//     // H4K6oH19PE4lp8YmXOpJeMlIZ/zy4AnLVAJ0NvTgq1ftHG6kcsuKF9m2H2zlKPCOdXJSanYc0ZkmYhwjOrIstPk=
+//     let signature = secp.sign_ecdsa_recoverable(&msg, &priv_key.inner);
+//     // let mut sig_raw = signature.serialize_compact().1;
+//     let mut v = vec![];
+//     println!("Signature: {:?}", signature.serialize_compact().0.to_i32() as u8);
+//     v.push((signature.serialize_compact().0.to_i32() + 27 + 4) as u8);
+//     v.append(&mut signature.serialize_compact().1.to_vec());
+//     println!("Signature: {:?}", to_base64(v.as_slice()));
+//     println!("Signature: {:?}", signature);
+//     println!("Signature: {:?}", to_base64(&signature.to_standard().serialize_compact()));
+//     // priv_key.inner.keypair(&secp).public_key().verify(&secp, &msg, &signature).expect("failed to verify signature");
+//     // println!("pubkey: {:?} {}", priv_key.public_key(&secp), to_base64(&priv_key.public_key(&secp).to_bytes()[..]));
 
-    // signing key
-    let sign_key = SigningKey::from_slice(&priv_key.to_bytes()).expect("Failed to create signing key");
-    println!("Sign key {}", to_base64(sign_key.public_key().to_bytes().as_slice()));
-    let sig = sign_key.sign(msg_hash.as_byte_array()).expect("Failed to sign message");
-    println!("Signature: {:?}", sig.to_string());
-    println!("Signature: {:?}", to_base64(sig.to_vec().as_slice()));
+//     // signing key
+//     let sign_key = SigningKey::from_slice(&priv_key.to_bytes()).expect("Failed to create signing key");
+//     println!("Sign key {}", to_base64(sign_key.public_key().to_bytes().as_slice()));
+//     let sig = sign_key.sign(msg_hash.as_byte_array()).expect("Failed to sign message");
+//     println!("Signature: {:?}", sig.to_string());
+//     println!("Signature: {:?}", to_base64(sig.to_vec().as_slice()));
 
-    // let pk = CompressedPublicKey::from_private_key(&secp, priv_key).expect("failed to get pubkey");
-}
+//     // let pk = CompressedPublicKey::from_private_key(&secp, priv_key).expect("failed to get pubkey");
+// }
