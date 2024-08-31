@@ -1,19 +1,28 @@
 
+use std::str::FromStr;
 
-use cosmrs::{ tx::{self, Fee, SignDoc, SignerInfo}, Coin};
+use bip39::Mnemonic;
+use bitcoin::{bip32::{DerivationPath, Xpriv}, consensus::Encodable, key::Secp256k1, secp256k1::Message, sign_message::BITCOIN_SIGNED_MSG_PREFIX, CompressedPublicKey, Network, PrivateKey};
+use bitcoin_hashes::{sha256d, Hash, HashEngine};
+use cosmrs::{ crypto::{secp256k1::SigningKey}, tx::{self, Fee, ModeInfo, Raw, SignDoc, SignerInfo, SignerPublicKey}, Coin};
 use cosmos_sdk_proto::cosmos::{
-    base::tendermint::v1beta1::GetLatestBlockRequest, 
-    tx::v1beta1::{service_client::ServiceClient as TxServiceClient, BroadcastMode, BroadcastTxRequest, BroadcastTxResponse}
+    base::tendermint::v1beta1::GetLatestBlockRequest, tx::v1beta1::{service_client::ServiceClient as TxServiceClient, BroadcastMode, BroadcastTxRequest, BroadcastTxResponse}
 };
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_client::ServiceClient as TendermintServiceClient;
 use reqwest::Error;
 use tokio::sync::Mutex;
 use tonic::{Response, Status};
-use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, QueryChainTipRequest, QueryChainTipResponse, QueryWithdrawRequestsRequest, QueryWithdrawRequestsResponse, QueryWithdrawRequestByTxHashRequest, QueryWithdrawRequestByTxHashResponse};
-use crate::app::config;
+use cosmos_sdk_proto::side::btcbridge::{
+    query_client::QueryClient as BtcQueryClient, 
+    QueryChainTipRequest, QueryChainTipResponse, 
+    QueryWithdrawRequestsRequest, QueryWithdrawRequestsResponse, 
+    QueryWithdrawRequestByTxHashRequest, QueryWithdrawRequestByTxHashResponse
+};
 
 use prost_types::Any;
 use lazy_static::lazy_static;
+
+use crate::{app::config, helper::encoding::to_base64};
 
 lazy_static! {
     static ref lock: Mutex<bool> = Mutex::new(false);
@@ -109,7 +118,7 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
 
     // Generate sender private key.
     // In real world usage, this account would need to be funded before use.
-    let sender_private_key = conf.signer_priv_key();
+    let sender_private_key = conf.relayer_bitcoin_privkey();
     // let sender_account_id = shuttler.relayer_address();
 
     ///////////////////////////
@@ -145,12 +154,21 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
     // Create transaction body from the MsgSend, memo, and timeout height.
     let tx_body = tx::Body::new(vec![msg], memo, timeout_height);
 
-    // Create signer info from public key and sequence number.
-    // This uses a standard "direct" signature from a single signer.
-    let signer_info = SignerInfo::single_direct(Some(sender_private_key.public_key()), sequence_number);
+    let signing_key = SigningKey::from_slice(&sender_private_key.to_bytes()).unwrap();
+    let mut any = signing_key.public_key().to_any().unwrap();
+    any.type_url = "/cosmos.crypto.segwit.PubKey".to_string();
+    let pubkey = SignerPublicKey::Any(any);
+    let signer_info = SignerInfo {
+        public_key: Some(pubkey),
+        mode_info: ModeInfo::single(tx::SignMode::Direct),
+        sequence: sequence_number,
+    };
 
+    // let signer_info = SignerInfo::single_direct(Some(signing_key.public_key()), sequence_number);
     // Compute auth info from signer info by associating a fee.
     let auth_info = signer_info.auth_info(Fee::from_amount_and_gas(fee, gas as u64));
+
+    println!("Auth Info: {:?}",  auth_info);
 
     //////////////////////////
     // Signing transactions //
@@ -160,7 +178,10 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
     let sign_doc = SignDoc::new(&tx_body, &auth_info, &chain_id, account_number).unwrap();
 
     // Sign the "sign doc" with the sender's private key, producing a signed raw transaction.
-    let tx_signed = sign_doc.sign(&sender_private_key).unwrap();
+    // let tx_signed = sign_doc.sign(&signing_key).unwrap();
+    let tx_signed = sign_with_bitcoin_algo(&sign_doc, &sender_private_key);
+
+    println!("Signed Tx: {:?}", tx_signed);
 
     // Serialize the raw transaction as bytes (i.e. `Vec<u8>`).
     let tx_bytes = tx_signed.to_bytes().unwrap();
@@ -178,4 +199,96 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
     }).await
     
    // post::<>(url.as_str(), tx).await
+}
+
+fn sign_with_bitcoin_algo(doc: &SignDoc, priv_key: &PrivateKey) -> Raw {
+    let sign_doc_bytes = doc.clone().into_bytes().expect("Failed to serialize sign doc");
+    let secp = Secp256k1::new();
+
+    let msg_hash = signed_msg_hash(sign_doc_bytes);
+    let msg = Message::from_digest(*msg_hash.as_byte_array());
+    let signature = secp.sign_ecdsa(&msg, &priv_key.inner);
+
+    priv_key.inner.keypair(&secp).public_key().verify(&secp, &msg, &signature).expect("failed to verify signature");
+    println!("pubkey: {:?} {}", priv_key.public_key(&secp), to_base64(&priv_key.public_key(&secp).to_bytes()[..]));
+    // let pk = CompressedPublicKey::from_private_key(&secp, priv_key).expect("failed to get pubkey");
+
+    cosmos_sdk_proto::cosmos::tx::v1beta1::TxRaw {
+        body_bytes: doc.body_bytes.clone(),
+        auth_info_bytes: doc.auth_info_bytes.clone(),
+        signatures: vec![signature.serialize_compact().to_vec()],
+    }.into()
+}
+
+pub fn signed_msg_hash(msg: Vec<u8>) -> sha256d::Hash {
+    let mut engine = sha256d::Hash::engine();
+    engine.input(BITCOIN_SIGNED_MSG_PREFIX);
+    let msg_len = bitcoin::consensus::encode::VarInt::from(msg.len());
+    msg_len.consensus_encode(&mut engine).expect("engines don't error");
+    engine.input(msg.as_slice());
+    sha256d::Hash::from_engine(engine)
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn test_signature() {
+
+    use cosmos_sdk_proto::side::btcbridge::MsgSubmitWithdrawSignatures;
+    use crate::app::config::Config;
+
+    let conf = Config::from_file(".side3").expect("not found config file");
+    let msg = MsgSubmitWithdrawSignatures {
+        sender: conf.relayer_bitcoin_address(),
+        txid: "abcd".to_string(),
+        psbt: "123".to_string(),
+    };
+
+    let msg = Any::from_msg(&msg).unwrap();
+    let ret = send_cosmos_transaction(&conf, msg).await.unwrap();
+    let res = ret.into_inner().tx_response;
+
+    assert_eq!(res.is_some(), true);
+    println!("Response: {:?}", res.clone().unwrap().txhash);
+    println!("Response: {:?}", res.clone().unwrap().raw_log);
+    assert_eq!(res.unwrap().code, 0);  
+
+}
+
+#[test]
+fn test_basic_sign() {
+
+    // Replace with your mnemonic and HD path
+    let hd_path = DerivationPath::from_str("m/84'/0'/0'/0/0").expect("invalid HD path");
+    // Generate seed from mnemonic
+    let mnemonic = Mnemonic::from_str(&"abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about").expect("Invalid mnemonic");
+
+    // Derive HD key
+    let secp = Secp256k1::new();
+    // let derivation_path = DerivationPath::from_str(hd_path).expect("Invalid HD path");
+    let master = Xpriv::new_master(Network::Bitcoin, &mnemonic.to_seed("")).expect("failed to create master key");
+    let priv_key = master.derive_priv(&secp, &hd_path).expect("Failed to derive key").to_priv();
+    // RgS0txD+kfWE//CE4akVn+T4QI//OAWWpgSUhHTOT6M=
+    println!("Priv Key: {:?}", to_base64(priv_key.to_bytes().as_slice()));
+    
+    let secp = Secp256k1::new();
+    let msg_hash = signed_msg_hash(b"1234".to_vec());
+    let msg = Message::from_digest_slice(msg_hash.as_byte_array()).unwrap();
+    // slcH5qITi0nbdS1O1wLcpYbcT/zrKrT8stRyjoNcDGk=
+    println!("Msg Hash: {:?} {:?}", to_base64(msg_hash.as_byte_array()), msg);
+    
+    // H4K6oH19PE4lp8YmXOpJeMlIZ/zy4AnLVAJ0NvTgq1ftHG6kcsuKF9m2H2zlKPCOdXJSanYc0ZkmYhwjOrIstPk=
+    let signature = secp.sign_ecdsa(&msg, &priv_key.inner);
+    println!("Signature: {:?}", signature.to_string());
+    println!("Signature: {:?}", to_base64(hex::decode(&signature.to_string()).unwrap().as_slice()));
+    priv_key.inner.keypair(&secp).public_key().verify(&secp, &msg, &signature).expect("failed to verify signature");
+    println!("pubkey: {:?} {}", priv_key.public_key(&secp), to_base64(&priv_key.public_key(&secp).to_bytes()[..]));
+
+    // signing key
+    let sign_key = SigningKey::from_slice(&priv_key.to_bytes()).expect("Failed to create signing key");
+    println!("Sign key {}", to_base64(sign_key.public_key().to_bytes().as_slice()));
+    let sig = sign_key.sign(msg_hash.as_byte_array()).expect("Failed to sign message");
+    println!("Signature: {:?}", sig.to_string());
+    println!("Signature: {:?}", to_base64(sig.to_vec().as_slice()));
+
+    // let pk = CompressedPublicKey::from_private_key(&secp, priv_key).expect("failed to get pubkey");
 }

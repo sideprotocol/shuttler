@@ -206,7 +206,7 @@ pub async fn send_block_headers(
     block_headers: &Vec<BlockHeader>,
 ) -> Result<Response<BroadcastTxResponse>, Status> {
     let submit_block_msg = MsgSubmitBlockHeaders {
-        sender: relayer.config().signer_cosmos_address().to_string(),
+        sender: relayer.config().relayer_bitcoin_address().to_string(),
         block_headers: block_headers.clone(),
     };
 
@@ -372,7 +372,7 @@ pub async fn send_withdraw_tx(
     proof: Vec<String>,
 ) -> Result<Response<BroadcastTxResponse>, Status> {
     let msg = MsgSubmitWithdrawTransaction {
-        sender: relayer.config().signer_cosmos_address().to_string(),
+        sender: relayer.config().relayer_bitcoin_address().to_string(),
         blockhash: block_hash.to_string(),
         tx_bytes: to_base64(encode::serialize(tx).as_slice()),
         proof,
@@ -392,7 +392,7 @@ pub async fn send_deposit_tx(
     proof: Vec<String>,
 ) -> Result<Response<BroadcastTxResponse>, Status> {
     let msg = MsgSubmitDepositTransaction {
-        sender: relayer.config().signer_cosmos_address().to_string(),
+        sender: relayer.config().relayer_bitcoin_address(),
         blockhash: block_hash.to_string(),
         prev_tx_bytes: to_base64(encode::serialize(prev_tx).as_slice()),
         tx_bytes: to_base64(encode::serialize(tx).as_slice()),

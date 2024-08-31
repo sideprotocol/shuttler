@@ -412,7 +412,7 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
 
     // submit signed psbt to side chain
     let msg = MsgSubmitWithdrawSignatures {
-        sender: signer.config().signer_cosmos_address().to_string(),
+        sender: signer.config().relayer_bitcoin_address(),
         txid: signed_tx.compute_txid().to_string(),
         psbt: psbt_base64,
     };

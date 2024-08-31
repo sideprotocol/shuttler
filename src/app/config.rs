@@ -1,7 +1,7 @@
-use bitcoin::{bip32::DerivationPath, key::Secp256k1, Address, CompressedPublicKey, Network, NetworkKind};
+use bitcoin::{bip32::{DerivationPath, ExtendendPrivKey, Xpriv}, key::Secp256k1, Address, CompressedPublicKey, Network, PrivateKey};
 use bip39::{self, Mnemonic};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest};
-use cosmrs::{crypto::secp256k1::SigningKey, AccountId};
+
 use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
 use serde::{Deserialize, Serialize};
 use sled::IVec;
@@ -138,6 +138,8 @@ pub fn save_keypair_to_db(address: String, keypair: &Keypair) -> sled::Result<Op
     DB_KEYPAIRS.insert(address, value)
 }
 
+/// relayer account will be used to sign transactions on the side chain,
+/// such as sending block headers, depositing and withdrawing transactions
 pub async fn get_relayer_account(conf: &Config) -> BaseAccount {
 
     let cache = BASE_ACCOUNT.lock().unwrap().clone().map(|account| account);
@@ -151,7 +153,8 @@ pub async fn get_relayer_account(conf: &Config) -> BaseAccount {
         None => {
             let mut client = AuthQueryClient::connect(conf.side_chain.grpc.clone()).await.unwrap();
             let request = QueryAccountRequest {
-                address: conf.signer_cosmos_address().to_string(),
+                // address: conf.signer_cosmos_address().to_string(),
+                address: conf.relayer_bitcoin_address()
             };
     
             match client.account(request).await {
@@ -252,46 +255,52 @@ impl Config {
         fs::write(path.join(CONFIG_FILE), contents)
     }
 
-    pub fn signer_priv_key(&self) -> SigningKey {
-        let hdpath = cosmrs::bip32::DerivationPath::from_str("m/44'/118'/0'/0/0").unwrap();
-        let mnemonic = Mnemonic::parse(self.mnemonic.as_str()).expect("Invalid mnemonic");
-        SigningKey::derive_from_path(mnemonic.to_seed(""), &hdpath).expect("failded to create signer key")
-    }
+    pub fn relayer_bitcoin_privkey(&self) -> PrivateKey {
+        // Replace with your mnemonic and HD path
+        let hd_path = DerivationPath::from_str("m/84'/0'/0'/0/0").expect("invalid HD path");
+        // Generate seed from mnemonic
+        let mnemonic = Mnemonic::from_str(&self.mnemonic).expect("Invalid mnemonic");
 
-    pub fn signer_cosmos_address(&self) -> AccountId {
-        self.signer_priv_key().public_key().account_id(&self.side_chain.address_prefix).expect("failed to derive relayer address")
-    }
-
-    pub fn signer_bitcoin_address(&self) -> String {
-        let mnemonic = Mnemonic::parse(self.mnemonic.as_str()).expect("Mnemonic is invalid!");
-
-        let master = bitcoin::bip32::Xpriv::new_master(NetworkKind::Main, &mnemonic.to_seed("")).expect("invalid seed");
-
+        // Derive HD key
         let secp = Secp256k1::new();
-        let path = DerivationPath::master();
-        let sk = master.derive_priv(&secp, &path).expect("failed to derive pk");
+        // let derivation_path = DerivationPath::from_str(hd_path).expect("Invalid HD path");
+        let master = Xpriv::new_master(self.bitcoin.network, &mnemonic.to_seed("")).expect("failed to create master key");
+        master.derive_priv(&secp, &hd_path).expect("Failed to derive key").to_priv()
 
-        let pubkey = CompressedPublicKey::from_private_key(&secp, &sk.to_priv()).unwrap();
+    }
+
+    pub fn relayer_bitcoin_pubkey(&self) -> CompressedPublicKey {
+        let secp = Secp256k1::new();
+        CompressedPublicKey::from_private_key(&secp, &self.relayer_bitcoin_privkey()).expect("failed to derive pubkey")
+    }
+
+    pub fn relayer_bitcoin_address(&self) -> String {
+        let pubkey = self.relayer_bitcoin_pubkey();
         Address::p2wpkh(&pubkey, self.bitcoin.network).to_string()
     }
 
+    // pub fn signer_priv_key(&self) -> SigningKey {
+    //     // let hdpath = cosmrs::bip32::DerivationPath::from_str("m/44'/118'/0'/0/0").unwrap();
+    //     let hdpath = cosmrs::bip32::DerivationPath::from_str("m/84'/0'/0'/0/0").unwrap();
+    //     let mnemonic = Mnemonic::parse(self.mnemonic.as_str()).expect("Invalid mnemonic");
+    //     SigningKey::derive_from_path(mnemonic.to_seed(""), &hdpath).expect("failded to create signer key")
+    // }
+
+    // pub fn signer_cosmos_address(&self) -> AccountId {
+    //     self.signer_priv_key().public_key().account_id(&self.side_chain.address_prefix).expect("failed to derive relayer address")
+    // }
+
+    // pub fn signer_bitcoin_address(&self) -> String {
+    //     let pubkey = self.signer_bitcoin_pubkey();
+    //     Address::p2wpkh(&pubkey, self.bitcoin.network).to_string()
+    // }
+
+    // pub fn signer_bitcoin_pubkey(&self) -> CompressedPublicKey {
+    //     let pk_bytes = self.signer_priv_key().public_key().to_bytes();
+    //     CompressedPublicKey::from_slice(pk_bytes.as_slice()).expect("failed to derive relayer address")
+    // }
+
 }
-
-// fn compute_relayer_address(mnemonic: &str, network: Network) -> Address {
-//     // let entropy = from_base64(&validator_priv_key).unwrap();
-//     // let mnemonic = bip39::Mnemonic::from_entropy(entropy.as_slice()).unwrap();
-//     let mnemonic = Mnemonic::parse(mnemonic).expect("Mnemonic is invalid!");
-
-//     // derive the master key
-//     let master = bitcoin::bip32::Xpriv::new_master(NetworkKind::Main, &mnemonic.to_seed("")).expect("invalid seed");
-
-//     let secp = Secp256k1::new();
-//     let path = DerivationPath::master();
-//     let sk = master.derive_priv(&secp, &path).expect("failed to derive pk");
-
-//     let pubkey = CompressedPublicKey::from_private_key(&secp, &sk.to_priv()).unwrap();
-//     Address::p2wpkh(&pubkey, network)
-// }
 
 pub fn home_dir(app_home: &str) -> PathBuf {
     dirs::home_dir().map(|path| path.join(app_home)).unwrap()

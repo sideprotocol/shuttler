@@ -116,7 +116,7 @@ impl Signer {
             None => {
                 let mut client = AuthQueryClient::connect(self.config.side_chain.grpc.clone()).await.unwrap();
                 let request = QueryAccountRequest {
-                    address: self.config().signer_cosmos_address().to_string(),
+                    address: self.config().relayer_bitcoin_address(),
                 };
         
                 match client.account(request).await {

@@ -460,7 +460,7 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
          // submit the vault address to sidechain
          let mut cosm_msg = MsgCompleteDkg {
             id: task.id.replace("dkg-", "").parse().unwrap(),
-            sender: signer.config().signer_cosmos_address().to_string(),
+            sender: signer.config().relayer_bitcoin_address(),
             vaults: address_with_tweak,
             consensus_address: signer.validator_address(),
             signature: "".to_string(),
