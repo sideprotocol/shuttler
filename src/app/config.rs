@@ -65,14 +65,11 @@ pub struct BitcoinCfg {
 /// Side Chain Configuration
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CosmosChain {
-    /// the cosmos rest endpoint, http://localhost:1317
-    pub rest_url: String,
     /// the cosmos grpc endpoint, http://localhost:9001
     pub grpc: String,
     /// Transaction gas
     pub gas: usize,
     pub fee: Fee,
-    pub address_prefix: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -227,14 +224,12 @@ impl Config {
                 password: "12345678".to_string(),
             },
             side_chain: CosmosChain {
-                rest_url: "http://localhost:1317".to_string(), 
                 grpc: "http://localhost:9090".to_string(),
                 gas: 200000,
                 fee: Fee {
                     amount: 1000,
                     denom: "uside".to_string(),
                 },
-                address_prefix: "side".to_string(),
             },
             // tweaks: BTreeMap::new(),
             last_scanned_height: 0,
@@ -263,7 +258,6 @@ impl Config {
 
         // Derive HD key
         let secp = Secp256k1::new();
-        // let derivation_path = DerivationPath::from_str(hd_path).expect("Invalid HD path");
         let master = Xpriv::new_master(self.bitcoin.network, &mnemonic.to_seed("")).expect("failed to create master key");
         master.derive_priv(&secp, &hd_path).expect("Failed to derive key").to_priv()
 
