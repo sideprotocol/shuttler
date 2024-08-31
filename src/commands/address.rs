@@ -7,8 +7,8 @@ pub fn execute(cli: &Cli) {
     let keypairs = config::list_keypairs();
     println!("Relayer address");
     println!("-------------------------------------------------------------");
-    println!("Bitcoin: {}", conf.relayer_bitcoin_address());
-    println!("\n NOTE: Please fund relayer address before using it.");
+    println!(" {}", conf.relayer_bitcoin_address());
+    println!("\n NOTE: Please fund relayer address on sidechain before using it.");
     println!("-------------------------------------------------------------");
 
     println!("\nVault addresses: ({})", keypairs.len());
