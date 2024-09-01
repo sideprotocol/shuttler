@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use bitcoin::{consensus::encode, BlockHash, Transaction};
+use bitcoin::{consensus::encode, BlockHash, OutPoint, Transaction};
 use bitcoincore_rpc::RpcApi;
 use futures::join;
 use prost_types::Any;
@@ -326,6 +326,45 @@ pub async fn scan_vault_txs(relayer: &Relayer, height: u64) {
         if bitcoin_utils::is_deposit_tx(tx, relayer.config().bitcoin.network, &vaults) {
             debug!("Deposit tx found... {:?}", &tx);
 
+            if bitcoin_utils::is_runes_deposit(tx) {
+                if !relayer.config().relay_runes {
+                    debug!("Skip the tx due to runes relaying not enabled");
+                    continue;
+                }
+
+                let edict = match bitcoin_utils::parse_runes(tx) {
+                    Some(edict) => edict,
+                    None => {
+                        debug!("Failed to parse runes deposit tx {}", tx.compute_txid());
+                        continue;
+                    }
+                };
+
+                // get the rune by id
+                let rune =match relayer.ordinals_client.get_rune(edict.id).await {
+                    Ok(rune) => rune.entry.spaced_rune,
+                    Err(e) => {
+                        error!("Failed to get rune {}: {}", edict.id, e);
+                        continue;
+                    }
+                };
+
+                // get the runes output
+                let output = match relayer.ordinals_client.get_output(OutPoint::new(tx.compute_txid(), edict.output)).await {
+                    Ok(output) => output,
+                    Err(e) => {
+                        error!("Failed to get output {}:{} from ord: {}", tx.compute_txid(), edict.output, e);
+                        continue;
+                    }
+                };
+
+                // validate if the runes deposit is valid
+                if !bitcoin_utils::validate_runes(&edict, &rune, &output) {
+                    debug!("Failed to validate runes deposit tx {}", tx.compute_txid());
+                    continue;
+                }
+            }
+
             let proof = bitcoin_utils::compute_tx_proof(
                 block.txdata.iter().map(|tx| tx.compute_txid()).collect(),
                 i,
@@ -442,4 +481,3 @@ async fn get_cached_vaults(grpc: String) -> Vec<String> {
         None => vec![]
     }
 }
-
