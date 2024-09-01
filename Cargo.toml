@@ -15,6 +15,7 @@ futures = "0.3"
 bip39 = "2.0.0"
 bech32 = "0.11.0"
 bitcoin = { version="0.32.2", features=["rand-std", "base64"]}
+bitcoin_v30 = { package = "bitcoin", version = "0.30.1" }
 bitcoin_hashes = "0.14.0"
 bitcoincore-rpc = "0.19.0"
 tokio = { version = "1.39.3", features = ["full"] }
@@ -50,6 +51,8 @@ cosmos-sdk-proto  = { git = "https://github.com/sideprotocol/cosmos-rust", branc
 # Optional dependencies
 tonic = { version = "0.12.1", features = ["codegen", "prost"] }
 void = "1.0"
+ord = "0.19.1"
+ordinals = "0.0.9"
 
 [dev-dependencies]
 criterion = "0.5"

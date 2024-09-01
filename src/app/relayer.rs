@@ -5,7 +5,7 @@ use bitcoincore_rpc::{Auth, Client};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use tokio::{select, time::Instant};
-use crate::{app::config::Config, helper::now, tickers::relayer};
+use crate::{app::config::Config, helper::{client_ordinals::OrdinalsClient, now}, tickers::relayer};
 
 use std::time::Duration;
 use tracing::info;
@@ -14,6 +14,7 @@ use tracing::info;
 pub struct Relayer {
     config: Config,
     pub bitcoin_client: Client,
+    pub ordinals_client: OrdinalsClient,
 }
 
 impl Relayer {
@@ -24,9 +25,12 @@ impl Relayer {
             Auth::UserPass(conf.bitcoin.user.clone(), conf.bitcoin.password.clone()))
             .expect("Could not initial bitcoin RPC client");
 
+        let ordinals_client = OrdinalsClient::new(&conf.ordinals.endpoint);
+
         Self {
             // priv_validator_key: validator_key,
             bitcoin_client,
+            ordinals_client,
             config: conf,
         }
     }

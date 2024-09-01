@@ -1,13 +1,15 @@
 use bitcoin::{
-    key::Secp256k1, Address, Network, PublicKey,
-    ScriptBuf, TapNodeHash, Transaction, Txid, XOnlyPublicKey,
+    consensus::encode::serialize, key::Secp256k1, opcodes, Address, Network, PublicKey, ScriptBuf,
+    TapNodeHash, Transaction, Txid, XOnlyPublicKey,
 };
+use bitcoin_v30::{consensus::encode::deserialize, Transaction as TransactionV30};
 use frost_secp256k1_tr::VerifyingKey;
+use ordinals::SpacedRune;
 
-use super:: merkle_proof;
+use super::merkle_proof;
 
 // Magic txin sequence for withdrawal txs
-const MAGIC_SEQUENCE: u32 = (1<<31) + 0xde;
+const MAGIC_SEQUENCE: u32 = (1 << 31) + 0xde;
 
 pub fn get_group_address(verify_key: &VerifyingKey, network: Network) -> Address {
     // let verifying_key_b = json_data.pubkey_package.verifying_key();
@@ -50,7 +52,10 @@ pub fn compute_tx_proof(txids: Vec<Txid>, index: usize) -> Vec<String> {
 /// the vault address should be fetched from side chain. so none signer can also run a relayer
 pub fn is_deposit_tx(tx: &Transaction, network: Network, vaults: &Vec<String>) -> bool {
     tx.output.iter().any(|out| {
-        vaults.contains( &get_address_from_pk_script(out.clone().script_pubkey, network))
+        vaults.contains(&get_address_from_pk_script(
+            out.clone().script_pubkey,
+            network,
+        ))
     })
 }
 
@@ -60,7 +65,60 @@ pub fn may_be_withdraw_tx(tx: &Transaction) -> bool {
         return false;
     }
 
-    tx.input[0].sequence.0 == MAGIC_SEQUENCE 
+    tx.input[0].sequence.0 == MAGIC_SEQUENCE
+}
+
+// Check if the given deposit tx is for runes
+pub fn is_runes_deposit(tx: &Transaction) -> bool {
+    let runes_identifier = vec![
+        opcodes::all::OP_RETURN.to_u8(),
+        opcodes::all::OP_PUSHNUM_13.to_u8(),
+    ];
+
+    tx.output
+        .iter()
+        .any(|out| out.script_pubkey.as_bytes().starts_with(&runes_identifier))
+}
+
+// Parse runes from the given tx
+// Only an edict operation is allowed
+pub fn parse_runes(tx: &Transaction) -> Option<ordinals::Edict> {
+    match ordinals::Runestone::decipher(&to_transaction_v30(tx)) {
+        Some(artifact) => match artifact {
+            ordinals::Artifact::Runestone(runestone) => {
+                if runestone.etching.is_some()
+                    || runestone.mint.is_some()
+                    || runestone.edicts.len() != 1
+                    || runestone.edicts[0].output >= tx.output.len() as u32
+                {
+                    return None;
+                }
+
+                return Some(runestone.edicts[0]);
+            }
+            _ => None,
+        },
+        None => None,
+    }
+}
+
+// Validate runes against the output of the ord indexer
+pub fn validate_runes(
+    edict: &ordinals::Edict,
+    rune: &SpacedRune,
+    runes_output: &ord::api::Output,
+) -> bool {
+    match runes_output.runes.get(rune) {
+        Some(rune) => rune.amount >= edict.amount,
+        None => false,
+    }
+}
+
+// Convert the given transaction to the v30 version
+// Make sure that the tx is valid
+fn to_transaction_v30(tx: &Transaction) -> TransactionV30 {
+    let serialized_tx = serialize(tx);
+    deserialize(&serialized_tx).unwrap()
 }
 
 #[cfg(test)]
