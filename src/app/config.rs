@@ -38,6 +38,9 @@ pub struct Config {
 
     pub bitcoin: BitcoinCfg,
     pub side_chain: CosmosChain,
+    
+    pub ordinals: OrdinalsCfg,
+    pub relay_runes: bool,
 
     pub last_scanned_height: u64,
 }
@@ -70,6 +73,13 @@ pub struct CosmosChain {
     /// Transaction gas
     pub gas: usize,
     pub fee: Fee,
+}
+
+/// Ordinals Configuration
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct OrdinalsCfg {
+    /// Ord API endpoint
+    pub endpoint: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -231,6 +241,10 @@ impl Config {
                     denom: "uside".to_string(),
                 },
             },
+            ordinals: OrdinalsCfg {
+                endpoint: "".to_string(),
+            },
+            relay_runes: false,
             // tweaks: BTreeMap::new(),
             last_scanned_height: 0,
         }

@@ -22,7 +22,7 @@ use lazy_static::lazy_static;
 use crate::app::config;
 
 lazy_static! {
-    static ref lock: Mutex<bool> = Mutex::new(false);
+    static ref lock: Mutex<()> = Mutex::new(());
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
