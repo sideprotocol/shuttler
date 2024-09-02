@@ -68,11 +68,6 @@ pub async fn start_relayer_tasks(relayer: &Relayer, _rng: &mut ChaCha8Rng) {
 
     let mut validator_set = response.into_inner().validators;
     validator_set.sort_by(|a, b| a.voting_power.cmp(&b.voting_power));
-
-    // if !is_coordinator(&validator_set, relayer.validator_address(), rng) {
-    //     info!("Not coordinator, skip!");
-    //     return;
-    // }
     
     join!(
         sync_btc_blocks(&relayer),

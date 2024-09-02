@@ -1,10 +1,11 @@
 
-use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, DkgRequestStatus, QueryDkgRequestsRequest};
+use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsRequest};
+use cosmrs::Any;
 use libp2p:: Swarm;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 
-use crate::{app::signer::Signer, helper::client_side::get_withdraw_requests, protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, list_tasks, DKGTask}, sign::{collect_tss_packages, generate_nonce_and_commitments}, TSSBehaviour}};
+use crate::{app::signer::Signer, helper::client_side::{get_withdraw_requests, send_cosmos_transaction}, protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, list_tasks, save_task, DKGTask}, sign::{collect_tss_packages, generate_nonce_and_commitments}, Round, TSSBehaviour}};
 
 async fn fetch_withdraw_signing_requests(
     _behave: &mut TSSBehaviour,
@@ -110,5 +111,44 @@ pub async fn tss_tasks_fetcher(
     fetch_withdraw_signing_requests( swarm.behaviour_mut(), shuttler).await;
     // 4. collect withdraw tss packages
     collect_tss_packages(swarm, shuttler).await;
+    // 5. submit dkg address
+    submit_dkg_address(shuttler).await;
 
+
+}
+
+async fn submit_dkg_address(signer: &Signer) {
+    for task in list_tasks().iter_mut() {
+        if task.round != Round::Closed {
+            return;
+        }
+        let task_id = task.id.replace("dkg-", "").parse().unwrap();
+        // submit the vault address to sidechain
+        let cosm_msg = MsgCompleteDkg {
+            id: task_id,
+            sender: signer.config().relayer_bitcoin_address(),
+            vaults: task.dkg_vaults.clone(),
+            consensus_address: signer.validator_address(),
+            signature: signer.get_complete_dkg_signature(task_id, &task.dkg_vaults),
+        };
+
+        let any = Any::from_msg(&cosm_msg).unwrap();
+        match send_cosmos_transaction(signer.config(), any).await {
+            Ok(resp) => {
+                let tx_response = resp.into_inner().tx_response.unwrap();
+                if tx_response.code != 0 {
+                    error!("Failed to send dkg vault: {:?}", tx_response);
+                    task.submitted = true;
+                    save_task(task);
+                    return
+                }
+                info!("Sent dkg vault: {:?}", tx_response);
+            },
+            Err(e) => {
+                error!("Failed to send dkg vault: {:?}", e);
+                return
+            },
+        };
+    };
+    
 }

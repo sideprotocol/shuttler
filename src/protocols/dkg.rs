@@ -41,11 +41,12 @@ pub struct DKGTask {
     pub round: Round,
     pub timestamp: i64,
     pub address_num: u16,
+    pub dkg_vaults: Vec<String>,
+    pub submitted: bool,
 }
 
 impl DKGTask {
     pub fn from_request(request: &DkgRequest) -> Self {
-
         Self {
             id: format!("dkg-{}", request.id),
             participants: request.participants.iter().map(|p| {
@@ -58,6 +59,8 @@ impl DKGTask {
                 None => 0,
             },
             address_num: request.vault_types.len() as u16,
+            dkg_vaults: vec![],
+            submitted: false,
         }
     }
     
@@ -455,34 +458,8 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
         let address_with_tweak = signer.generate_vault_addresses(pubkey, key, task.address_num);
 
         task.round = Round::Closed;
+        task.dkg_vaults = address_with_tweak;
         save_task(&task);
-
-         // submit the vault address to sidechain
-         let mut cosm_msg = MsgCompleteDkg {
-            id: task.id.replace("dkg-", "").parse().unwrap(),
-            sender: signer.config().relayer_bitcoin_address(),
-            vaults: address_with_tweak,
-            consensus_address: signer.validator_address(),
-            signature: "".to_string(),
-        };
-
-        cosm_msg.signature = signer.get_complete_dkg_signature(cosm_msg.id, &cosm_msg.vaults);
-
-        let any = Any::from_msg(&cosm_msg).unwrap();
-        match block_on(send_cosmos_transaction(signer.config(), any)) {
-            Ok(resp) => {
-                let tx_response = resp.into_inner().tx_response.unwrap();
-                if tx_response.code != 0 {
-                    error!("Failed to send dkg vault: {:?}", tx_response);
-                    return
-                }
-                info!("Sent dkg vault: {:?}", tx_response);
-            },
-            Err(e) => {
-                error!("Failed to send dkg vault: {:?}", e);
-                return
-            },
-        };
         
     }
 }
