@@ -282,20 +282,21 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
         }
     };
 
-    task.sessions.iter().enumerate().for_each(|(index, session)| {
+    // task.sessions.iter().enumerate().for_each(|(index, session)| {
+    for (index, session) in task.sessions.iter().enumerate() {
 
         if session.commitments.len() != session.signatures.len() {
-            return;
+            return None;
         }
         let keypair = match config::get_keypair_from_db(&session.address) {
             Some(keypair) => keypair,
             None => {
                 error!("Failed to get keypair for address: {}", session.address);
-                return;
+                return None;
             }
         };
         if session.signatures.len() < *keypair.priv_key.min_signers() as usize {
-            return;
+            return None;
         }
         let sig_target = frost::SigningTarget::new(
             &session.sig_hash,
@@ -326,41 +327,10 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
 
                 if !is_signature_valid {
                     error!("Signature is invalid");
-                    return;
+                    return None;
                 }
 
-                // Convert frost public key to bitcoin public key
-                let pubkey = match bitcoin::PublicKey::from_slice(&keypair.pub_key.verifying_key().serialize()) {
-                    Ok(pk) => pk,
-                    Err(e) => {
-                        error!("Failed to convert frost public key to bitcoin public key: {:?}", e);
-                        return;
-                    }
-                };
-                // let sig_bytes = signature.serialize();
-                let secp = secp256k1::Secp256k1::new();
-                let utpk = bitcoin::key::UntweakedPublicKey::from(pubkey.inner);
-
-                let merkle_root = match signing_package.sig_target().sig_params().tapscript_merkle_root.clone() {
-                    Some(root) => {
-                        if root.len() == 0 {
-                            None
-                        } else {
-                            Some(TapNodeHash::from_slice(&root).unwrap())
-                        }
-                    }
-                    None => None
-                };
-
-                let (tpk, _) = utpk.tap_tweak(&secp, merkle_root);
-
-                // convert signature to schnorr signature
                 let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&signature.serialize()).unwrap();
-                let msg = bitcoin::secp256k1::Message::from_digest_slice(&session.sig_hash).unwrap();
-                match secp.verify_schnorr(&sig, &msg, &tpk.to_inner()) {
-                    Ok(_) => info!("Signature is valid"),
-                    Err(e) => error!("Signature is invalid: {}", e),
-                }
 
                 psbt.inputs[index].tap_key_sig = Option::Some(bitcoin::taproot::Signature {
                     signature: sig,
@@ -376,7 +346,7 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
                 error!("Signature aggregation error: {:?}", e);
             }
         };
-    });
+    };
 
     let is_complete = psbt.inputs.iter().all(|input| {
         input.final_script_witness.is_some()
