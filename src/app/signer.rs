@@ -196,14 +196,6 @@ pub async fn run_signer_daemon(conf: Config) {
 
             let mdns =
                 mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?;
-            // let cfg = request_response::Config::default();
-
-            // let dkg = request_response::cbor::Behaviour::<DKGRequest, DKGResponse>::new(
-            //     iter::once((StreamProtocol::new("/shuttler/dkg/1"), ProtocolSupport::Full)), cfg.clone()
-            // );
-            // let signer = request_response::cbor::Behaviour::<SignRequest, SignResponse>::new(
-            //     iter::once((StreamProtocol::new("/shuttler/tss/1"), ProtocolSupport::Full)), cfg
-            // );
 
             // To content-address message, we can take the hash of message and use it as an ID.
             let message_id_fn = |message: &gossipsub::Message| {
@@ -226,7 +218,10 @@ pub async fn run_signer_daemon(conf: Config) {
                 gossipsub_config,
             )?;
 
-            let identify = identify::Behaviour::new(identify::Config::new("/shuttler/id/1.0.0".to_string(), key.public().clone()));
+            let identify = identify::Behaviour::new(
+                identify::Config::new("/shuttler/id/1.0.0".to_string(), key.public().clone())
+                        .with_push_listen_addr_updates(true)
+            );
             let kad = libp2p::kad::Behaviour::new(key.public().to_peer_id(), MemoryStore::new(key.public().to_peer_id()));
             
             Ok(TSSBehaviour { mdns, gossip, identify, kad})
@@ -260,7 +255,7 @@ pub async fn run_signer_daemon(conf: Config) {
                     let connected = swarm.connected_peers().map(|p| p.clone()).collect::<Vec<_>>();
                     if connected.len() > 0 {
                         swarm.behaviour_mut().identify.push(connected);
-                    }  
+                    }
                     info!("Connected to {peer_id}, Swarm Connection Established, {num_established} {:?} ", endpoint);                  
                 },
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
@@ -317,21 +312,17 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
         TSSBehaviourEvent::Identify(identify::Event::Received { peer_id, connection_id, info }) => {
             swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
             info!(" @@(Received) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
-            info.listen_addrs.iter().for_each(|addr| {
-                if !addr.to_string().starts_with("/ip4/127.0.0.1") {
-                    info!("Discoverd new address: {peer_id} {addr}");
-                    swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
-                }
-            });
+            // info.listen_addrs.iter().for_each(|addr| {
+            //     if !addr.to_string().starts_with("/ip4/127.0.0.1") {
+            //         info!("Discoverd new address: {peer_id} {addr}");
+            //         swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
+            //     }
+            // });
+        }
+        TSSBehaviourEvent::Kad(libp2p::kad::Event::RoutablePeer { peer, address }) => {
+            info!("@@@ Kad @@@ discoverd a new routable peer {peer} - {:?}", address);
+            swarm.behaviour_mut().kad.add_address(&peer, address);
         } 
-        // TSSBehaviourEvent::Identify(identify::Event::Pushed { peer_id, connection_id, info }) => {
-        //     swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-        //     info!(" @@(push) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
-        // }
-        // TSSBehaviourEvent::Identify(identify::Event::Sent { peer_id, connection_id }) => {
-        //     swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-        //     info!(" @@(sent) Discovered new peer: {peer_id} with info: {connection_id}");
-        // }
         TSSBehaviourEvent::Kad(libp2p::kad::Event::RoutingUpdated { peer, is_new_peer, addresses, .. }) => {
             info!("KAD Routing updated for {peer} {is_new_peer}: {:?}", addresses);
             if is_new_peer {
