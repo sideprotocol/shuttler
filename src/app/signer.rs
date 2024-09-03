@@ -14,6 +14,7 @@ use libp2p::kad::store::MemoryStore;
 use libp2p::swarm::dial_opts::PeerCondition;
 use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
 use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
+use tonic::IntoRequest;
 
 use crate::app::config;
 use crate::app::config::Config;
@@ -256,6 +257,10 @@ pub async fn run_signer_daemon(conf: Config) {
                 },
                 SwarmEvent::ConnectionEstablished { peer_id, num_established, endpoint, ..} => {
                     swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
+                    let connected = swarm.connected_peers().map(|p| p.clone()).collect::<Vec<_>>();
+                    if connected.len() > 0 {
+                        swarm.behaviour_mut().identify.push(connected);
+                    }  
                     info!("Connected to {peer_id}, Swarm Connection Established, {num_established} {:?} ", endpoint);                  
                 },
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
@@ -319,14 +324,14 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 }
             });
         } 
-        TSSBehaviourEvent::Identify(identify::Event::Pushed { peer_id, connection_id, info }) => {
-            swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-            info!(" @@(push) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
-        }
-        TSSBehaviourEvent::Identify(identify::Event::Sent { peer_id, connection_id }) => {
-            swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-            info!(" @@(sent) Discovered new peer: {peer_id} with info: {connection_id}");
-        }
+        // TSSBehaviourEvent::Identify(identify::Event::Pushed { peer_id, connection_id, info }) => {
+        //     swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
+        //     info!(" @@(push) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
+        // }
+        // TSSBehaviourEvent::Identify(identify::Event::Sent { peer_id, connection_id }) => {
+        //     swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
+        //     info!(" @@(sent) Discovered new peer: {peer_id} with info: {connection_id}");
+        // }
         TSSBehaviourEvent::Kad(libp2p::kad::Event::RoutingUpdated { peer, is_new_peer, addresses, .. }) => {
             info!("KAD Routing updated for {peer} {is_new_peer}: {:?}", addresses);
             if is_new_peer {
