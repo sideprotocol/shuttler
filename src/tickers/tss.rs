@@ -1,5 +1,5 @@
 
-use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsRequest};
+use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, BitcoinWithdrawRequest, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsRequest};
 use cosmrs::Any;
 use libp2p:: Swarm;
 use tracing::{debug, error, info};
@@ -15,16 +15,16 @@ async fn fetch_withdraw_signing_requests(
 
     match get_withdraw_requests(&host).await {
         Ok(response) => {
-            let requests = response.into_inner().requests;
+            let mut requests = response.into_inner().requests;
             // mock for testing
             // if requests.len() == 0 {
-            //     requests.push(BitcoinWithdrawRequest {
-            //         address: "tb1pr8auk03a54w547e3q7w4xqu0wj57skgp3l8sfeus0skhdhltrq5qxtur6k".to_string(),
-            //         psbt: "cHNidP8BAI8CAAAAA+67aDQ4JUktcSgEunL5O7FG5T2plGO95wYDt2aIajrAAQAAAAD/////7rtoNDglSS1xKAS6cvk7sUblPamUY73nBgO3ZohqOsABAAAAAP/////uu2g0OCVJLXEoBLpy+TuxRuU9qZRjvecGA7dmiGo6wAEAAAAA/////wEAAAAAAAAAAAFqAAAAAAABASsQJwAAAAAAACJRIBn7yz49pV1K+zEHnVMDj3Sp6FkBj88E55B8LXbf6xgoAAEBKxAnAAAAAAAAIlEgGfvLPj2lXUr7MQedUwOPdKnoWQGPzwTnkHwtdt/rGCgAAQErECcAAAAAAAAiUSAZ+8s+PaVdSvsxB51TA490qehZAY/PBOeQfC123+sYKAAA".to_string(),
-            //         status: 1,
-            //         sequence: 0,
-            //         txid: "123455".to_string(),
-            //     });
+                requests.push(BitcoinWithdrawRequest {
+                    address: "tb1pr8auk03a54w547e3q7w4xqu0wj57skgp3l8sfeus0skhdhltrq5qxtur6k".to_string(),
+                    psbt: "cHNidP8BAI8CAAAAA+67aDQ4JUktcSgEunL5O7FG5T2plGO95wYDt2aIajrAAQAAAAD/////7rtoNDglSS1xKAS6cvk7sUblPamUY73nBgO3ZohqOsABAAAAAP/////uu2g0OCVJLXEoBLpy+TuxRuU9qZRjvecGA7dmiGo6wAEAAAAA/////wEAAAAAAAAAAAFqAAAAAAABASsQJwAAAAAAACJRIBn7yz49pV1K+zEHnVMDj3Sp6FkBj88E55B8LXbf6xgoAAEBKxAnAAAAAAAAIlEgGfvLPj2lXUr7MQedUwOPdKnoWQGPzwTnkHwtdt/rGCgAAQErECcAAAAAAAAiUSAZ+8s+PaVdSvsxB51TA490qehZAY/PBOeQfC123+sYKAAA".to_string(),
+                    status: 1,
+                    sequence: 0,
+                    txid: "123455".to_string(),
+                });
             // }
             for request in requests {
                 generate_nonce_and_commitments(request, shuttler);

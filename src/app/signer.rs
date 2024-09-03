@@ -134,11 +134,7 @@ impl Signer {
     }
 
     fn generate_tweak(&self, _pubkey: PublicKeyPackage, index: u16) -> Option<[u8;32]> {
-        if index == 0 {
-            None
-        } else {
-            Some([0;32])
-        }
+        Some([index as u8;32])
     }
 
     pub fn generate_vault_addresses(&self, pubkey: PublicKeyPackage, key: KeyPackage, address_num: u16) -> Vec<String> {
