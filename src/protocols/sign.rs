@@ -7,7 +7,7 @@ use cosmos_sdk_proto::side::btcbridge::{BitcoinWithdrawRequest, MsgSubmitWithdra
 use cosmrs::Any;
 
 use rand::thread_rng;
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Serialize};
 use tracing::{debug, error, info};
 
 use frost::{Identifier, round1, round2}; 
@@ -66,9 +66,10 @@ pub fn generate_nonce_and_commitments(request: BitcoinWithdrawRequest, signer: &
 
     match DB_TASK.contains_key(request.txid.as_bytes()) {
         Ok(false) => {
-            debug!("Fetched a new signing task: {:?}", request);
+            info!("Fetched a new signing task: {:?}", request);
         }
         _ => {
+            debug!("Task already exists: {:?}", request.txid);
             return;
         }
     }
@@ -437,12 +438,6 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
 
 pub async fn collect_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signer: &Signer) {
 
-    // if swarm.behaviour().gossip.all_peers().count() == 0 {
-    //     debug!("No connected peers");
-    //     return;
-    // }
-    // let peers = swarm.behaviour().gossip.all_peers().map(|(p, _hash)| p.clone() ).collect::<Vec<_>>();
-    // collect tss packages
     for item in DB_TASK.iter() {
         let mut task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
 
