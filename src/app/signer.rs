@@ -79,7 +79,6 @@ impl Signer {
             &conf.bitcoin.rpc, 
             Auth::UserPass(conf.bitcoin.user.clone(), conf.bitcoin.password.clone()))
             .expect("Could not initial bitcoin RPC client");
-
         Self {
             identity_key: local_key,
             identifier,

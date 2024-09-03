@@ -441,6 +441,7 @@ pub async fn collect_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signe
     for item in DB_TASK.iter() {
         let mut task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
 
+        debug!("Collected task: {:?}", task);
         // try to generate signature shares if shares is enough
         generate_signature_shares(&mut task, signer.identifier().clone());
         if let Some(psbt) = aggregate_signature_shares(&mut task) {
