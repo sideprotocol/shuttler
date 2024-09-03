@@ -18,10 +18,10 @@ use super::{Round, TSSBehaviour};
 use lazy_static::lazy_static;
 
 lazy_static! {
-    static ref DB: sled::Db = {
-        let path = get_database_with_name("sign-variables");
-        sled::open(path).unwrap()
-    };
+    // static ref DB: sled::Db = {
+    //     let path = get_database_with_name("sign-variables");
+    //     sled::open(path).unwrap()
+    // };
     static ref DB_TASK: sled::Db = {
         let path = get_database_with_name("sign-task");
         sled::open(path).unwrap()
@@ -505,4 +505,10 @@ fn get_sign_task(id: &str) -> Option<SignTask> {
 fn save_sign_task(task: &SignTask) {
     let value = serde_json::to_vec(&task).unwrap();
     DB_TASK.insert(task.id.as_bytes(), value).unwrap();
+}
+
+pub fn delete_tasks() {
+    DB_TASK.clear().unwrap();
+    DB_TASK.flush().unwrap();
+
 }
