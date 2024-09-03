@@ -8,8 +8,8 @@
             "type": "lldb",
             "request": "launch",
             "name": "Start Network",
-            "program": "${workspaceFolder}/target/debug/tssigner",
-            "args": ["start"],
+            "program": "${workspaceFolder}/target/debug/shuttler",
+            "args": ["--home", "/Users/developer/.side6", "init"],
             "cwd": "${workspaceFolder}"
         }
     ]
