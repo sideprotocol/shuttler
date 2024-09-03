@@ -460,7 +460,15 @@ pub async fn collect_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signe
 //         }
 //     }
 // }
-
+pub fn list_sign_tasks() -> Vec<SignTask> {
+    let mut tasks = vec![];
+    debug!("loading in-process sign tasks from database, total: {:?}", DB_TASK.len());
+    for task in DB_TASK.iter() {
+        let (_, task) = task.unwrap();
+        tasks.push(serde_json::from_slice(&task).unwrap());
+    }
+    tasks
+}
 
 fn get_sign_task(id: &str) -> Option<SignTask> {
     match DB_TASK.get(id) {
@@ -480,5 +488,15 @@ fn save_sign_task(task: &SignTask) {
 pub fn delete_tasks() {
     DB_TASK.clear().unwrap();
     DB_TASK.flush().unwrap();
+}
 
+pub fn remove_task(task_id: &str) {
+    match DB_TASK.remove(task_id) {
+        Ok(_) => {
+            info!("Removed task from database: {}", task_id);
+        },
+        _ => {
+            error!("Failed to remove task from database: {}", task_id);
+        }
+    };
 }
