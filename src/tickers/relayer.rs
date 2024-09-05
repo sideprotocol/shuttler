@@ -106,7 +106,7 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
 
     loop {
         let tip_on_bitcoin = match relayer.bitcoin_client.get_block_count() {
-            Ok(height) => height,
+            Ok(height) => height - 1,
             Err(e) => {
                 error!(error=%e);
                 return;
