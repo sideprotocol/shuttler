@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use bitcoin::{consensus::encode, BlockHash, OutPoint, Transaction};
+use bitcoin::{consensus::encode, Address, BlockHash, OutPoint, Transaction};
 use bitcoincore_rpc::RpcApi;
 use futures::join;
 use prost_types::Any;
@@ -270,18 +270,26 @@ pub async fn scan_vault_txs(relayer: &Relayer, height: u64) {
 
             let address = match relayer
                 .bitcoin_client
-                .get_tx_out (&prev_txid, prev_vout, None)
+                .get_raw_transaction (&prev_txid, None)
             {
-                Ok(tx_out_res) => {
-                    match tx_out_res {
-                        Some(tx_out) => tx_out.script_pub_key.address,
-                        None => None,
+                Ok(prev_tx) => {
+                    if prev_tx.output.len() <= prev_vout as usize {
+                        error!("Invalid previous tx");
+                        continue;
+                    }
+
+                    match Address::from_script(prev_tx.output[prev_vout as usize].script_pubkey.as_script(), relayer.config().bitcoin.network) {
+                        Ok(addr) => Some(addr),
+                        Err(e) => {
+                            error!("Failed to parse public key script: {}", e);
+                            None
+                        }
                     }
                 }
                 Err(e) => {
                     error!(
-                        "Failed to get the previous tx out: {:?}:{:?}, err: {:?}",
-                        prev_txid, prev_vout,e
+                        "Failed to get the previous tx: {:?}, err: {:?}",
+                        prev_txid, e
                     );
 
                     None
@@ -289,7 +297,7 @@ pub async fn scan_vault_txs(relayer: &Relayer, height: u64) {
             };
 
             if address.is_some() {
-                let address = address.unwrap().assume_checked().to_string();
+                let address = address.unwrap().to_string();
                 if vaults.contains(&address) {
                     debug!("Withdrawal tx found... {:?}", &tx);
 
