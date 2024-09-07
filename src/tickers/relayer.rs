@@ -175,23 +175,28 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
                 time: header.time as u64,
                 ntx: 0u64,
             });
+        }
 
-            match send_block_headers(relayer, &block_headers).await {
-                Ok(resp) => {
-                    let tx_response = resp.into_inner().tx_response.unwrap();
-                    if tx_response.code != 0 {
-                        error!("Failed to send block headers: {:?}", tx_response);
-                        return;
-                    }
-                    info!("Sent block headers: {:?}", tx_response);
-                    block_headers = vec![] //reset
-                }
-                Err(e) => {
-                    error!("Failed to send block headers: {:?}", e);
+        if block_headers.is_empty() {
+            lock.loading = false;
+            continue;
+        }
+
+        // submit block headers in a batch
+        match send_block_headers(relayer, &block_headers).await {
+            Ok(resp) => {
+                let tx_response = resp.into_inner().tx_response.unwrap();
+                if tx_response.code != 0 {
+                    error!("Failed to send block headers: {:?}", tx_response);
                     return;
                 }
-            };
-        }
+                info!("Sent block headers: {:?}", tx_response);
+            }
+            Err(e) => {
+                error!("Failed to send block headers: {:?}", e);
+                return;
+            }
+        };
 
         lock.loading = false;
     }
