@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use bitcoin::{consensus::encode, Address, BlockHash, OutPoint, Transaction};
-use bitcoincore_rpc::RpcApi;
+use bitcoincore_rpc::{Error, RpcApi};
 use futures::join;
 use prost_types::Any;
 use rand::Rng;
@@ -148,33 +148,16 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
 
         while tip_on_side < batch {
             tip_on_side = tip_on_side + 1;
-            let hash = match relayer.bitcoin_client.get_block_hash(tip_on_side) {
-                Ok(hash) => hash,
+            let header = match fetch_block_header_by_height(relayer, tip_on_side).await {
+                Ok(header) => header,
                 Err(e) => {
-                    error!(error=%e);
+                    error!("Failed to fetch block header: {:?}", e);
+                    lock.loading = false;
                     return;
                 }
             };
 
-            let header = match relayer.bitcoin_client.get_block_header(&hash) {
-                Ok(b) => b,
-                Err(e) => {
-                    error!(error=%e);
-                    return;
-                }
-            };
-
-            block_headers.push(BlockHeader {
-                version: header.version.to_consensus() as u64,
-                hash: header.block_hash().to_string(),
-                height: tip_on_side,
-                previous_block_hash: header.prev_blockhash.to_string(),
-                merkle_root: header.merkle_root.to_string(),
-                nonce: header.nonce as u64,
-                bits: format!("{:x}", header.bits.to_consensus()),
-                time: header.time as u64,
-                ntx: 0u64,
-            });
+            block_headers.push(header);
         }
 
         if block_headers.is_empty() {
@@ -200,6 +183,36 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
 
         lock.loading = false;
     }
+}
+
+pub async fn fetch_block_header_by_height(relayer: &Relayer, height: u64) -> Result<BlockHeader, Error> {
+    let hash = match relayer.bitcoin_client.get_block_hash(height) {
+        Ok(hash) => hash,
+        Err(e) => {
+            error!(error=%e);
+            return Err(e);
+        }
+    };
+
+    let header = match relayer.bitcoin_client.get_block_header(&hash) {
+        Ok(b) => b,
+        Err(e) => {
+            error!(error=%e);
+            return Err(e);
+        }
+    };
+
+    Ok(BlockHeader {
+        version: header.version.to_consensus() as u64,
+        hash: header.block_hash().to_string(),
+        height,
+        previous_block_hash: header.prev_blockhash.to_string(),
+        merkle_root: header.merkle_root.to_string(),
+        nonce: header.nonce as u64,
+        bits: format!("{:x}", header.bits.to_consensus()),
+        time: header.time as u64,
+        ntx: 0u64,
+    })
 }
 
 pub async fn check_block_hash_is_corrent(relayer: &Relayer, height: u64) {

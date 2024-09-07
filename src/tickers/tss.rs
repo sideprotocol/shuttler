@@ -1,5 +1,5 @@
 
-use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, BitcoinWithdrawRequest, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsRequest};
+use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsRequest};
 use cosmrs::Any;
 use libp2p:: Swarm;
 use tracing::{debug, error, info};

@@ -14,7 +14,6 @@ use libp2p::kad::store::MemoryStore;
 use libp2p::swarm::dial_opts::PeerCondition;
 use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
 use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
-use tonic::IntoRequest;
 
 use crate::app::config;
 use crate::app::config::Config;
