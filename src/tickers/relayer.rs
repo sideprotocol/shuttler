@@ -123,6 +123,7 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
             };
 
         if tip_on_bitcoin == tip_on_side {
+            check_block_hash_is_corrent(&relayer, tip_on_side).await;
             debug!("No new blocks to sync, sleep for 60 seconds...");
             sleep(Duration::from_secs(60)).await;
             continue;
@@ -193,6 +194,59 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
         }
 
         lock.loading = false;
+    }
+}
+
+pub async fn check_block_hash_is_corrent(relayer: &Relayer, height: u64) {
+    let hash = match relayer.bitcoin_client.get_block_hash(height) {
+        Ok(hash) => hash,
+        Err(e) => {
+            error!(error=%e);
+            return;
+        }
+    };
+    let bitcoin_hash = hash.to_string();
+    let side_hash =
+        match client_side::get_bitcoin_tip_on_side(&relayer.config().side_chain.grpc).await {
+            Ok(res) => res.get_ref().hash.clone(),
+            Err(e) => {
+                error!(error=%e);
+                return;
+            }
+        };
+
+    if bitcoin_hash != side_hash {
+        let header = match relayer.bitcoin_client.get_block_header(&hash) {
+            Ok(b) => b,
+            Err(e) => {
+                error!(error=%e);
+                return;
+            }
+        };
+
+        let mut block_headers: Vec<BlockHeader> = vec![];
+        block_headers.push(BlockHeader {
+            version: header.version.to_consensus() as u64,
+            hash: header.block_hash().to_string(),
+            height,
+            previous_block_hash: header.prev_blockhash.to_string(),
+            merkle_root: header.merkle_root.to_string(),
+            nonce: header.nonce as u64,
+            bits: format!("{:x}", header.bits.to_consensus()),
+            time: header.time as u64,
+            ntx: 0u64,
+        });
+
+        match send_block_headers(relayer, &block_headers).await {
+            Ok(_) => {
+                debug!("Resend block headers to fix block hash, {:?}", block_headers.iter().map(|b| b.height).collect::<Vec<_>>());
+                return;
+            }
+            Err(e) => {
+                error!("Failed to resend block headers: {:?}", e);
+                return;
+            }
+        }
     }
 }
 
