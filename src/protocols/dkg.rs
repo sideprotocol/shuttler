@@ -2,10 +2,8 @@
 
 use core::fmt;
 use std::{collections::BTreeMap, fmt::Debug};
-use cosmos_sdk_proto::side::btcbridge::{DkgRequest, MsgCompleteDkg};
-use cosmrs::Any;
+use cosmos_sdk_proto::side::btcbridge::DkgRequest;
 use ed25519_compact::{x25519, SecretKey};
-use futures::executor::block_on;
 use rand::thread_rng;
 use tracing::{debug, error, info};
 use serde::{Deserialize, Serialize};
@@ -17,7 +15,7 @@ use frost::{keys, Identifier, Secp256K1Sha256};
 use frost_core::keys::dkg::round1::Package;
 use super::{Round, TSSBehaviour};
 use crate::{app::{config:: get_database_with_name, signer::Signer}, helper::{gossip::publish_dkg_packages, now, mem_store}};
-use crate::helper::{cipher::{decrypt, encrypt}, client_side::send_cosmos_transaction};
+use crate::helper::cipher::{decrypt, encrypt};
 
 
 use lazy_static::lazy_static;
@@ -555,7 +553,7 @@ pub fn save_task(task: &DKGTask) {
  
  pub fn list_tasks() -> Vec<DKGTask> {
      let mut tasks = vec![];
-     info!("Listing tasks from database, total: {:?}", DB_TASK.iter().count());
+     debug!("loading in-process dkg tasks from database, total: {:?}", DB_TASK.len());
      for task in DB_TASK.iter() {
          let (_, task) = task.unwrap();
          tasks.push(serde_json::from_slice(&task).unwrap());

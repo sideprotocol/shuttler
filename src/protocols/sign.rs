@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use bitcoin::{key::TapTweak, secp256k1, sighash::{self, SighashCache}, Address, Psbt, TapNodeHash, TapSighashType, Witness};
+use bitcoin::{sighash::{self, SighashCache}, Address, Psbt, TapSighashType, Witness};
 use bitcoin_hashes::Hash;
 use bitcoincore_rpc::RpcApi;
 use cosmos_sdk_proto::side::btcbridge::{BitcoinWithdrawRequest, MsgSubmitWithdrawSignatures};
@@ -18,10 +18,10 @@ use super::{Round, TSSBehaviour};
 use lazy_static::lazy_static;
 
 lazy_static! {
-    static ref DB: sled::Db = {
-        let path = get_database_with_name("sign-variables");
-        sled::open(path).unwrap()
-    };
+    // static ref DB: sled::Db = {
+    //     let path = get_database_with_name("sign-variables");
+    //     sled::open(path).unwrap()
+    // };
     static ref DB_TASK: sled::Db = {
         let path = get_database_with_name("sign-task");
         sled::open(path).unwrap()
@@ -66,9 +66,10 @@ pub fn generate_nonce_and_commitments(request: BitcoinWithdrawRequest, signer: &
 
     match DB_TASK.contains_key(request.txid.as_bytes()) {
         Ok(false) => {
-            debug!("Fetched a new signing task: {:?}", request);
+            info!("Fetched a new signing task: {:?}", request);
         }
         _ => {
+            debug!("Task already exists: {:?}", request.txid);
             return;
         }
     }
@@ -281,20 +282,21 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
         }
     };
 
-    task.sessions.iter().enumerate().for_each(|(index, session)| {
+    // task.sessions.iter().enumerate().for_each(|(index, session)| {
+    for (index, session) in task.sessions.iter().enumerate() {
 
         if session.commitments.len() != session.signatures.len() {
-            return;
+            return None;
         }
         let keypair = match config::get_keypair_from_db(&session.address) {
             Some(keypair) => keypair,
             None => {
                 error!("Failed to get keypair for address: {}", session.address);
-                return;
+                return None;
             }
         };
         if session.signatures.len() < *keypair.priv_key.min_signers() as usize {
-            return;
+            return None;
         }
         let sig_target = frost::SigningTarget::new(
             &session.sig_hash,
@@ -325,41 +327,10 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
 
                 if !is_signature_valid {
                     error!("Signature is invalid");
-                    return;
+                    return None;
                 }
 
-                // Convert frost public key to bitcoin public key
-                let pubkey = match bitcoin::PublicKey::from_slice(&keypair.pub_key.verifying_key().serialize()) {
-                    Ok(pk) => pk,
-                    Err(e) => {
-                        error!("Failed to convert frost public key to bitcoin public key: {:?}", e);
-                        return;
-                    }
-                };
-                // let sig_bytes = signature.serialize();
-                let secp = secp256k1::Secp256k1::new();
-                let utpk = bitcoin::key::UntweakedPublicKey::from(pubkey.inner);
-
-                let merkle_root = match signing_package.sig_target().sig_params().tapscript_merkle_root.clone() {
-                    Some(root) => {
-                        if root.len() == 0 {
-                            None
-                        } else {
-                            Some(TapNodeHash::from_slice(&root).unwrap())
-                        }
-                    }
-                    None => None
-                };
-
-                let (tpk, _) = utpk.tap_tweak(&secp, merkle_root);
-
-                // convert signature to schnorr signature
                 let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&signature.serialize()).unwrap();
-                let msg = bitcoin::secp256k1::Message::from_digest_slice(&session.sig_hash).unwrap();
-                match secp.verify_schnorr(&sig, &msg, &tpk.to_inner()) {
-                    Ok(_) => info!("Signature is valid"),
-                    Err(e) => error!("Signature is invalid: {}", e),
-                }
 
                 psbt.inputs[index].tap_key_sig = Option::Some(bitcoin::taproot::Signature {
                     signature: sig,
@@ -375,7 +346,7 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
                 error!("Signature aggregation error: {:?}", e);
             }
         };
-    });
+    };
 
     let is_complete = psbt.inputs.iter().all(|input| {
         input.final_script_witness.is_some()
@@ -437,15 +408,10 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
 
 pub async fn collect_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signer: &Signer) {
 
-    // if swarm.behaviour().gossip.all_peers().count() == 0 {
-    //     debug!("No connected peers");
-    //     return;
-    // }
-    // let peers = swarm.behaviour().gossip.all_peers().map(|(p, _hash)| p.clone() ).collect::<Vec<_>>();
-    // collect tss packages
     for item in DB_TASK.iter() {
         let mut task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
 
+        debug!("Collected task: {:?}", task);
         // try to generate signature shares if shares is enough
         generate_signature_shares(&mut task, signer.identifier().clone());
         if let Some(psbt) = aggregate_signature_shares(&mut task) {
@@ -494,7 +460,15 @@ pub async fn collect_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signe
 //         }
 //     }
 // }
-
+pub fn list_sign_tasks() -> Vec<SignTask> {
+    let mut tasks = vec![];
+    debug!("loading in-process sign tasks from database, total: {:?}", DB_TASK.len());
+    for task in DB_TASK.iter() {
+        let (_, task) = task.unwrap();
+        tasks.push(serde_json::from_slice(&task).unwrap());
+    }
+    tasks
+}
 
 fn get_sign_task(id: &str) -> Option<SignTask> {
     match DB_TASK.get(id) {
@@ -509,4 +483,20 @@ fn get_sign_task(id: &str) -> Option<SignTask> {
 fn save_sign_task(task: &SignTask) {
     let value = serde_json::to_vec(&task).unwrap();
     DB_TASK.insert(task.id.as_bytes(), value).unwrap();
+}
+
+pub fn delete_tasks() {
+    DB_TASK.clear().unwrap();
+    DB_TASK.flush().unwrap();
+}
+
+pub fn remove_task(task_id: &str) {
+    match DB_TASK.remove(task_id) {
+        Ok(_) => {
+            info!("Removed task from database: {}", task_id);
+        },
+        _ => {
+            error!("Failed to remove task from database: {}", task_id);
+        }
+    };
 }

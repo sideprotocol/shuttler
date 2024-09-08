@@ -38,6 +38,11 @@ pub enum Commands {
         #[clap(long, default_value = "false")]
         signer: bool,
     },
+    #[command(about = "Submit a bitcoin header to the sidechain")]
+    SubmitHeader {
+        #[clap(long, default_value = "0")]
+        height: u64,
+    },
     Address,
     Reset,
 }
@@ -48,4 +53,5 @@ pub mod init;
 pub mod start;
 pub mod address;
 pub mod reset;
+pub mod submit_header;
 

@@ -5,7 +5,7 @@ use libp2p:: Swarm;
 use tracing::{debug, error, info};
 
 
-use crate::{app::signer::Signer, helper::client_side::{get_withdraw_requests, send_cosmos_transaction}, protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, list_tasks, save_task, DKGTask}, sign::{collect_tss_packages, generate_nonce_and_commitments}, Round, TSSBehaviour}};
+use crate::{app::signer::Signer, helper::client_side::{get_withdraw_requests, send_cosmos_transaction}, protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, list_tasks, save_task, DKGTask}, sign::{self, collect_tss_packages, generate_nonce_and_commitments, list_sign_tasks}, Round, TSSBehaviour}};
 
 async fn fetch_withdraw_signing_requests(
     _behave: &mut TSSBehaviour,
@@ -16,15 +16,23 @@ async fn fetch_withdraw_signing_requests(
     match get_withdraw_requests(&host).await {
         Ok(response) => {
             let requests = response.into_inner().requests;
+            let tasks_in_process = requests.iter().map(|r| r.txid.clone() ).collect::<Vec<_>>();
+            debug!("Fetched Withdraw requests: {:?}", tasks_in_process);
+            list_sign_tasks().iter().for_each(|task| {
+                if !tasks_in_process.contains(&task.id) {
+                    debug!("Removing expired signing task: {:?}", task.id);
+                    sign::remove_task(&task.id);
+                }
+            });
             // mock for testing
             // if requests.len() == 0 {
-            //     requests.push(BitcoinWithdrawRequest {
-            //         address: "tb1pr8auk03a54w547e3q7w4xqu0wj57skgp3l8sfeus0skhdhltrq5qxtur6k".to_string(),
-            //         psbt: "cHNidP8BAI8CAAAAA+67aDQ4JUktcSgEunL5O7FG5T2plGO95wYDt2aIajrAAQAAAAD/////7rtoNDglSS1xKAS6cvk7sUblPamUY73nBgO3ZohqOsABAAAAAP/////uu2g0OCVJLXEoBLpy+TuxRuU9qZRjvecGA7dmiGo6wAEAAAAA/////wEAAAAAAAAAAAFqAAAAAAABASsQJwAAAAAAACJRIBn7yz49pV1K+zEHnVMDj3Sp6FkBj88E55B8LXbf6xgoAAEBKxAnAAAAAAAAIlEgGfvLPj2lXUr7MQedUwOPdKnoWQGPzwTnkHwtdt/rGCgAAQErECcAAAAAAAAiUSAZ+8s+PaVdSvsxB51TA490qehZAY/PBOeQfC123+sYKAAA".to_string(),
-            //         status: 1,
-            //         sequence: 0,
-            //         txid: "123455".to_string(),
-            //     });
+                // requests.push(BitcoinWithdrawRequest {
+                //     address: "tb1pr8auk03a54w547e3q7w4xqu0wj57skgp3l8sfeus0skhdhltrq5qxtur6k".to_string(),
+                //     psbt: "cHNidP8BAI8CAAAAA+67aDQ4JUktcSgEunL5O7FG5T2plGO95wYDt2aIajrAAQAAAAD/////7rtoNDglSS1xKAS6cvk7sUblPamUY73nBgO3ZohqOsABAAAAAP/////uu2g0OCVJLXEoBLpy+TuxRuU9qZRjvecGA7dmiGo6wAEAAAAA/////wEAAAAAAAAAAAFqAAAAAAABASsQJwAAAAAAACJRIBn7yz49pV1K+zEHnVMDj3Sp6FkBj88E55B8LXbf6xgoAAEBKxAnAAAAAAAAIlEgGfvLPj2lXUr7MQedUwOPdKnoWQGPzwTnkHwtdt/rGCgAAQErECcAAAAAAAAiUSAZ+8s+PaVdSvsxB51TA490qehZAY/PBOeQfC123+sYKAAA".to_string(),
+                //     status: 1,
+                //     sequence: 0,
+                //     txid: "123455".to_string(),
+                // });
             // }
             for request in requests {
                 generate_nonce_and_commitments(request, shuttler);
