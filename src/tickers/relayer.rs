@@ -293,7 +293,7 @@ pub async fn scan_vault_txs_loop(relayer: &Relayer) {
                 Ok(res) => res.get_ref().height,
                 Err(e) => {
                     error!("Failed to get tip from side chain: {}", e);
-                    continue;
+                    return;
                 }
             };
         if height > side_tip - 1 {
