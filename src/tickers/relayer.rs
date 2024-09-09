@@ -263,26 +263,29 @@ pub async fn send_block_headers(
 }
 
 pub async fn scan_vault_txs_loop(relayer: &Relayer) {
-    let height = get_last_scanned_height(relayer.config()) + 1;
+    let mut height = get_last_scanned_height(relayer.config()) + 1;
     debug!("Start to scan vault txs from height: {}", height);
 
-    let side_tip =
-        match client_side::get_bitcoin_tip_on_side(&relayer.config().side_chain.grpc).await {
-            Ok(res) => res.get_ref().height,
-            Err(e) => {
-                error!("Failed to get tip from side chain: {}", e);
-                return;
-            }
-        };
-    if height > side_tip - 1 {
-        debug!("No new txs to sync, sleep for 60 seconds...");
-        sleep(Duration::from_secs(60)).await;
-        return;
-    }
+    loop {
+        let side_tip =
+            match client_side::get_bitcoin_tip_on_side(&relayer.config().side_chain.grpc).await {
+                Ok(res) => res.get_ref().height,
+                Err(e) => {
+                    error!("Failed to get tip from side chain: {}", e);
+                    return;
+                }
+            };
+        if height > side_tip - 1 {
+            debug!("No new txs to sync, sleep for 60 seconds...");
+            sleep(Duration::from_secs(60)).await;
+            return;
+        }
 
-    debug!("Scanning height: {:?}, side tip: {:?}", height, side_tip);
-    scan_vault_txs(relayer, height).await;
-    save_last_scanned_height(height);
+        debug!("Scanning height: {:?}, side tip: {:?}", height, side_tip);
+        scan_vault_txs(relayer, height).await;
+        save_last_scanned_height(height);
+        height += 1;
+    }
 }
 
 pub async fn scan_vault_txs(relayer: &Relayer, height: u64) {
