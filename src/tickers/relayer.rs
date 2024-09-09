@@ -297,6 +297,7 @@ pub async fn scan_vault_txs_loop(relayer: &Relayer) {
                 }
             };
         if height > side_tip - 1 {
+            debug!("No new txs to sync, sleep for 60 seconds...");
             sleep(Duration::from_secs(60)).await;
             continue;
         }
