@@ -6,7 +6,7 @@ use futures::join;
 use prost_types::Any;
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
-use tokio::{sync::Mutex, time::sleep};
+use tokio::{select, sync::Mutex, time::sleep};
 use tonic::{Response, Status};
 use tracing::{debug, error, info};
 
@@ -49,139 +49,99 @@ lazy_static! {
 /// Only the coordinator will run the tasks, the coordinator is selected randomly from the active validator set
 pub async fn start_relayer_tasks(relayer: &Relayer, _rng: &mut ChaCha8Rng) {
 
-    // fetch latest active validator setx
-    let host = relayer.config().side_chain.grpc.clone();
-    let mut client = match TendermintServiceClient::connect(host.to_owned()).await {
-        Ok(client) => client,
-        Err(e) => {
-            error!("Failed to create tendermint query client: {host} {}", e);
-            return;
-        }
-    };
-    let response = match client.get_latest_validator_set(GetLatestValidatorSetRequest { pagination: None }).await {
-        Ok(response) => response,
-        Err(e) => {
-            error!("Failed to get latest validator set: {:?}", e);
-            return;
-        }
-    };
-
-    let mut validator_set = response.into_inner().validators;
-    validator_set.sort_by(|a, b| a.voting_power.cmp(&b.voting_power));
-    
+    let block_handler = tokio::spawn(async move { sync_btc_blocks(&relayer).await });
+    let tx_handler = tokio::spawn(async move { scan_vault_txs_loop(conf2).await });  
     join!(
-        sync_btc_blocks(&relayer),
-        scan_vault_txs_loop(&relayer)
+        block_handler, tx_handler
     );
-}
-
-fn _is_coordinator(
-    validator_set: &Vec<Validator>,
-    address: String,
-    rng: &mut ChaCha8Rng,
-) -> bool {
-    let len = if validator_set.len() > 21 {
-        21
-    } else {
-        validator_set.len()
-    };
-
-    let index = rng.gen_range(0..len);
-    debug!("generated index: {}", index);
-
-    match validator_set.iter().nth(index) {
-        Some(v) => {
-            debug!("Selected coordinator: {:?}", v);
-            // let b = bech32::decode(&v.address).unwrap().1;
-            // return b == address;
-            v.address == address
-        }
-        None => {
-            return false;
-        }
-    }
 }
 
 pub async fn sync_btc_blocks(relayer: &Relayer) {
 
+    let mut interval_relayer = tokio::time::interval(Duration::from_secs(60));
+
     loop {
-        let tip_on_bitcoin = match relayer.bitcoin_client.get_block_count() {
-            Ok(height) => height - 1,
-            Err(e) => {
-                error!(error=%e);
-                return;
-            }
-        };
-
-        let mut tip_on_side =
-            match client_side::get_bitcoin_tip_on_side(&relayer.config().side_chain.grpc).await {
-                Ok(res) => res.get_ref().height,
-                Err(e) => {
-                    error!(error=%e);
+        select! {
+            _ = interval_relayer.tick() => {
+                let tip_on_bitcoin = match relayer.bitcoin_client.get_block_count() {
+                    Ok(height) => height - 1,
+                    Err(e) => {
+                        error!(error=%e);
+                        return;
+                    }
+                };
+        
+                let mut tip_on_side =
+                    match client_side::get_bitcoin_tip_on_side(&relayer.config().side_chain.grpc).await {
+                        Ok(res) => res.get_ref().height,
+                        Err(e) => {
+                            error!(error=%e);
+                            return;
+                        }
+                    };
+        
+                if tip_on_bitcoin == tip_on_side {
+                    check_block_hash_is_corrent(&relayer, tip_on_side).await;
+                    debug!("No new blocks to sync, sleep for 60 seconds...");
+                    sleep(Duration::from_secs(60)).await;
+                    continue;
+                }
+        
+                let mut lock = LOADING.lock().await;
+                if lock.loading {
+                    info!("a previous task is running, skip!");
                     return;
                 }
-            };
-
-        if tip_on_bitcoin == tip_on_side {
-            check_block_hash_is_corrent(&relayer, tip_on_side).await;
-            debug!("No new blocks to sync, sleep for 60 seconds...");
-            sleep(Duration::from_secs(60)).await;
-            continue;
-        }
-
-        let mut lock = LOADING.lock().await;
-        if lock.loading {
-            info!("a previous task is running, skip!");
-            return;
-        }
-        lock.loading = true;
-
-        let mut block_headers: Vec<BlockHeader> = vec![];
-
-        let batch = if tip_on_side + 10 > tip_on_bitcoin {
-            tip_on_bitcoin
-        } else {
-            tip_on_side + 10
-        };
-
-        debug!("Syncing blocks from {} to {}", tip_on_side, batch);
-
-        while tip_on_side < batch {
-            tip_on_side = tip_on_side + 1;
-            let header = match fetch_block_header_by_height(relayer, tip_on_side).await {
-                Ok(header) => header,
-                Err(e) => {
-                    error!("Failed to fetch block header: {:?}", e);
+                lock.loading = true;
+        
+                let mut block_headers: Vec<BlockHeader> = vec![];
+        
+                let batch = if tip_on_side + 10 > tip_on_bitcoin {
+                    tip_on_bitcoin
+                } else {
+                    tip_on_side + 10
+                };
+        
+                debug!("Syncing blocks from {} to {}", tip_on_side, batch);
+        
+                while tip_on_side < batch {
+                    tip_on_side = tip_on_side + 1;
+                    let header = match fetch_block_header_by_height(relayer, tip_on_side).await {
+                        Ok(header) => header,
+                        Err(e) => {
+                            error!("Failed to fetch block header: {:?}", e);
+                            lock.loading = false;
+                            return;
+                        }
+                    };
+        
+                    block_headers.push(header);
+                }
+        
+                if block_headers.is_empty() {
                     lock.loading = false;
-                    return;
+                    continue;
                 }
-            };
-
-            block_headers.push(header);
-        }
-
-        if block_headers.is_empty() {
-            lock.loading = false;
-            continue;
-        }
-
-        // submit block headers in a batch
-        match send_block_headers(relayer, &block_headers).await {
-            Ok(resp) => {
-                let tx_response = resp.into_inner().tx_response.unwrap();
-                if tx_response.code != 0 {
-                    error!("Failed to send block headers: {:?}", tx_response);
-                    return;
-                }
-                info!("Sent block headers: {:?}", tx_response);
+        
+                // submit block headers in a batch
+                match send_block_headers(relayer, &block_headers).await {
+                    Ok(resp) => {
+                        let tx_response = resp.into_inner().tx_response.unwrap();
+                        if tx_response.code != 0 {
+                            error!("Failed to send block headers: {:?}", tx_response);
+                            return;
+                        }
+                        info!("Sent block headers: {:?}", tx_response);
+                    }
+                    Err(e) => {
+                        error!("Failed to send block headers: {:?}", e);
+                        return;
+                    }
+                };
+        
+                lock.loading = false;
             }
-            Err(e) => {
-                error!("Failed to send block headers: {:?}", e);
-                return;
-            }
-        };
-
-        lock.loading = false;
+        }
     }
 }
 
