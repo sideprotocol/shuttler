@@ -119,7 +119,6 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
         };
 
     if tip_on_bitcoin == tip_on_side {
-        check_block_hash_is_corrent(&relayer, tip_on_side).await;
         debug!("No new blocks to sync, sleep for 60 seconds...");
         sleep(Duration::from_secs(60)).await;
         return;
@@ -131,6 +130,9 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
         tip_on_side + 10
     };
     debug!("Syncing blocks from {} to {}", tip_on_side, batch);
+
+    // check current block hash before syncing blocks 
+    check_block_hash_is_corrent(&relayer, tip_on_side).await;
     
     let mut block_headers: Vec<BlockHeader> = vec![];
     while tip_on_side < batch {
