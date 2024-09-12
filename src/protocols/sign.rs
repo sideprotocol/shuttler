@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use bitcoin::{sighash::{self, SighashCache}, Address, Psbt, TapSighashType, Witness};
 use bitcoin_hashes::Hash;
 use bitcoincore_rpc::RpcApi;
-use cosmos_sdk_proto::side::btcbridge::{BitcoinWithdrawRequest, MsgSubmitWithdrawSignatures};
+use cosmos_sdk_proto::side::btcbridge::{SigningRequest, MsgSubmitSignatures};
 use cosmrs::Any;
 
 use rand::thread_rng;
@@ -62,7 +62,7 @@ pub struct SignSession {
     pub signatures: BTreeMap<Identifier, round2::SignatureShare>,
 }
 
-pub fn generate_nonce_and_commitments(request: BitcoinWithdrawRequest, signer: &Signer) {
+pub fn generate_nonce_and_commitments(request: SigningRequest, signer: &Signer) {
 
     match DB_TASK.contains_key(request.txid.as_bytes()) {
         Ok(false) => {
@@ -382,7 +382,7 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
     info!("Signed PSBT: {:?}", psbt_base64);
 
     // submit signed psbt to side chain
-    let msg = MsgSubmitWithdrawSignatures {
+    let msg = MsgSubmitSignatures {
         sender: signer.config().relayer_bitcoin_address(),
         txid: signed_tx.compute_txid().to_string(),
         psbt: psbt_base64,

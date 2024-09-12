@@ -5,19 +5,19 @@ use libp2p:: Swarm;
 use tracing::{debug, error, info};
 
 
-use crate::{app::signer::Signer, helper::client_side::{get_withdraw_requests, send_cosmos_transaction}, protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, list_tasks, save_task, DKGTask}, sign::{self, collect_tss_packages, generate_nonce_and_commitments, list_sign_tasks}, Round, TSSBehaviour}};
+use crate::{app::signer::Signer, helper::client_side::{get_signing_requests, send_cosmos_transaction}, protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, list_tasks, save_task, DKGTask}, sign::{self, collect_tss_packages, generate_nonce_and_commitments, list_sign_tasks}, Round, TSSBehaviour}};
 
-async fn fetch_withdraw_signing_requests(
+async fn fetch_signing_requests(
     _behave: &mut TSSBehaviour,
     shuttler: &Signer,
 ) {
     let host = shuttler.config().side_chain.grpc.as_str();
 
-    match get_withdraw_requests(&host).await {
+    match get_signing_requests(&host).await {
         Ok(response) => {
             let requests = response.into_inner().requests;
             let tasks_in_process = requests.iter().map(|r| r.txid.clone() ).collect::<Vec<_>>();
-            debug!("Fetched Withdraw requests: {:?}", tasks_in_process);
+            debug!("Fetched signing requests: {:?}", tasks_in_process);
             list_sign_tasks().iter().for_each(|task| {
                 if !tasks_in_process.contains(&task.id) {
                     debug!("Removing expired signing task: {:?}", task.id);
@@ -26,7 +26,7 @@ async fn fetch_withdraw_signing_requests(
             });
             // mock for testing
             // if requests.len() == 0 {
-                // requests.push(BitcoinWithdrawRequest {
+                // requests.push(SigningRequest {
                 //     address: "tb1pr8auk03a54w547e3q7w4xqu0wj57skgp3l8sfeus0skhdhltrq5qxtur6k".to_string(),
                 //     psbt: "cHNidP8BAI8CAAAAA+67aDQ4JUktcSgEunL5O7FG5T2plGO95wYDt2aIajrAAQAAAAD/////7rtoNDglSS1xKAS6cvk7sUblPamUY73nBgO3ZohqOsABAAAAAP/////uu2g0OCVJLXEoBLpy+TuxRuU9qZRjvecGA7dmiGo6wAEAAAAA/////wEAAAAAAAAAAAFqAAAAAAABASsQJwAAAAAAACJRIBn7yz49pV1K+zEHnVMDj3Sp6FkBj88E55B8LXbf6xgoAAEBKxAnAAAAAAAAIlEgGfvLPj2lXUr7MQedUwOPdKnoWQGPzwTnkHwtdt/rGCgAAQErECcAAAAAAAAiUSAZ+8s+PaVdSvsxB51TA490qehZAY/PBOeQfC123+sYKAAA".to_string(),
                 //     status: 1,
@@ -115,9 +115,9 @@ pub async fn tss_tasks_fetcher(
     fetch_dkg_requests(shuttler).await;
     // 2. collect dkg packages
     collect_dkg_packages(swarm);
-    // 3. fetch withdraw signing requests
-    fetch_withdraw_signing_requests( swarm.behaviour_mut(), shuttler).await;
-    // 4. collect withdraw tss packages
+    // 3. fetch signing requests
+    fetch_signing_requests( swarm.behaviour_mut(), shuttler).await;
+    // 4. collect signing requests tss packages
     collect_tss_packages(swarm, shuttler).await;
     // 5. submit dkg address
     submit_dkg_address(shuttler).await;

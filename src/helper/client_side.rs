@@ -12,8 +12,8 @@ use tonic::{Response, Status};
 use cosmos_sdk_proto::side::btcbridge::{
     query_client::QueryClient as BtcQueryClient, 
     QueryChainTipRequest, QueryChainTipResponse, 
-    QueryWithdrawRequestsRequest, QueryWithdrawRequestsResponse, 
-    QueryWithdrawRequestByTxHashRequest, QueryWithdrawRequestByTxHashResponse
+    QuerySigningRequestsRequest, QuerySigningRequestsResponse, 
+    QuerySigningRequestByTxHashRequest, QuerySigningRequestByTxHashResponse
 };
 
 use prost_types::Any;
@@ -31,7 +31,7 @@ pub struct Pagination {
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct WithdrawRequest {
+pub struct SigningRequest {
     pub address: String,
     pub psbt: String,
     pub status: String,
@@ -39,13 +39,13 @@ pub struct WithdrawRequest {
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct WithdrawRequestsResponse {
-    requests: Vec<WithdrawRequest>,
+pub struct SigningRequestsResponse {
+    requests: Vec<SigningRequest>,
     pagination: Option<Pagination>,
 }
 
-impl WithdrawRequestsResponse {
-    pub fn requests(&self) -> &Vec<WithdrawRequest> {
+impl SigningRequestsResponse {
+    pub fn requests(&self) -> &Vec<SigningRequest> {
         &self.requests
     }
 
@@ -65,7 +65,7 @@ pub async fn get_bitcoin_tip_on_side(host: &str ) -> Result<Response<QueryChainT
     btc_client.query_chain_tip(QueryChainTipRequest {}).await
 }
 
-pub async fn get_withdraw_requests(host: &str) -> Result<Response<QueryWithdrawRequestsResponse>, Status> {
+pub async fn get_signing_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {
     let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
         Err(e) => {
@@ -73,13 +73,13 @@ pub async fn get_withdraw_requests(host: &str) -> Result<Response<QueryWithdrawR
         }
     };
 
-    btc_client.query_withdraw_requests(QueryWithdrawRequestsRequest {
+    btc_client.query_signing_requests(QuerySigningRequestsRequest {
         pagination: None,
         status: 1i32
     }).await
 }
 
-pub async fn get_withdraw_request_by_txid(host: &str, txid: String) -> Result<Response<QueryWithdrawRequestByTxHashResponse>, Status> {
+pub async fn get_signing_request_by_txid(host: &str, txid: String) -> Result<Response<QuerySigningRequestByTxHashResponse>, Status> {
     let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
         Err(e) => {
@@ -87,15 +87,15 @@ pub async fn get_withdraw_request_by_txid(host: &str, txid: String) -> Result<Re
         }
     };
 
-    btc_client.query_withdraw_request_by_tx_hash(QueryWithdrawRequestByTxHashRequest {
+    btc_client.query_signing_request_by_tx_hash(QuerySigningRequestByTxHashRequest {
         txid,
     }).await
 }
 
-pub async fn mock_withdraw_requests() -> Result<WithdrawRequestsResponse, Error> {
-    Ok(WithdrawRequestsResponse {
+pub async fn mock_signing_requests() -> Result<SigningRequestsResponse, Error> {
+    Ok(SigningRequestsResponse {
         requests: vec![
-            WithdrawRequest {
+            SigningRequest {
                 address: "bc1q5wgdhplnzn075eq7xep4zes7lnk5jy2ke0scsm".to_string(),
                 psbt: "cHNidP8BAIkCAAAAARuMLk06K1ufndtymk3RaWdbLy21UYs9vUs8D6o8HjtNAAAAAAAAAAAAAkCcAAAAAAAAIlEglUAPVXmsEIekhIthcGwg/vRxs93mpUYfH3vFVlGNjiEoIwAAAAAAACJRIJVAD1V5rBCHpISLYXBsIP70cbPd5qVGHx97xVZRjY4hAAAAAAABAStQwwAAAAAAACJRIJVAD1V5rBCHpISLYXBsIP70cbPd5qVGHx97xVZRjY4hAQMEAAAAAAAAAA==".to_string(),
                 status: "pending".to_string(),
@@ -230,11 +230,11 @@ pub fn signed_msg_hash(msg: Vec<u8>) -> sha256d::Hash {
 #[tokio::test]
 async fn test_signature() {
 
-    use cosmos_sdk_proto::side::btcbridge::MsgSubmitWithdrawSignatures;
+    use cosmos_sdk_proto::side::btcbridge::MsgSubmitSignatures;
     use crate::app::config::Config;
 
     let conf = Config::from_file(".side3").expect("not found config file");
-    let msg = MsgSubmitWithdrawSignatures {
+    let msg = MsgSubmitSignatures {
         sender: conf.relayer_bitcoin_address(),
         txid: "abcd".to_string(),
         psbt: "123".to_string(),

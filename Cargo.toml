@@ -46,8 +46,8 @@ chrono = "0.4"
 #cosmrs = "0.17.0"
 prost = "0.13.1"
 prost-types = "0.13.1"
-cosmrs = { git = "https://github.com/sideprotocol/cosmos-rust", branch="main" }
-cosmos-sdk-proto  = { git = "https://github.com/sideprotocol/cosmos-rust", branch="main" }
+cosmrs = { git = "https://github.com/sideprotocol/cosmos-rust", branch = "main" }
+cosmos-sdk-proto  = { git = "https://github.com/sideprotocol/cosmos-rust", branch = "main" }
 # Optional dependencies
 tonic = { version = "0.12.1", features = ["codegen", "prost"] }
 void = "1.0"
