@@ -193,14 +193,30 @@ pub fn received_sign_response(response: SignResponse) {
             return;
         }
     };
+
     task.sessions.iter_mut().enumerate().for_each(|(i, session)| {
-        let packet = response.commitments.get(i).unwrap();
+        if response.commitments.len() == 0 {
+            error!("commitments length mismatch for task: {:?} {}", task_id, i);
+            return;
+        }
+        let packet = match response.commitments.get(i) {
+            Some(packet) => packet,
+            None => {
+                debug!("commitments not found for task: {:?} {}", task_id, i);
+                return;
+            }
+        };
         session.commitments.extend(packet); // merge received commitments
     });
 
     task.sessions.iter_mut().enumerate().for_each(|(i, session)| {
-        let packet = response.signatures_shares.get(i).unwrap();
-        session.signatures.extend(packet); // merge received signatures
+        if response.signatures_shares.len() == 0 {
+            error!("commitments length mismatch for task: {:?} {}", task_id, i);
+            return;
+        }
+        if let Some(packet) = response.signatures_shares.get(i){
+            session.signatures.extend(packet); // merge received signatures
+        }
     });
 
     debug!("Received response for task: {:?} {:?} {:?}", task_id, 
