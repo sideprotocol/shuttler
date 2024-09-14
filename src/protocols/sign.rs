@@ -196,7 +196,6 @@ pub fn received_sign_response(response: SignResponse) {
 
     task.sessions.iter_mut().enumerate().for_each(|(i, session)| {
         if response.commitments.len() == 0 {
-            error!("commitments length mismatch for task: {:?} {}", task_id, i);
             return;
         }
         let packet = match response.commitments.get(i) {
@@ -211,7 +210,6 @@ pub fn received_sign_response(response: SignResponse) {
 
     task.sessions.iter_mut().enumerate().for_each(|(i, session)| {
         if response.signatures_shares.len() == 0 {
-            error!("commitments length mismatch for task: {:?} {}", task_id, i);
             return;
         }
         if let Some(packet) = response.signatures_shares.get(i){
