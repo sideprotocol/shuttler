@@ -119,15 +119,17 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
         };
 
     if tip_on_bitcoin == tip_on_side {
-        debug!("No new blocks to sync, sleep for 60 seconds...");
-        sleep(Duration::from_secs(60)).await;
+        let interval = relayer.config().loop_interval;
+        debug!("No new blocks to sync, sleep for {} seconds...", interval);
+        sleep(Duration::from_secs(interval)).await;
         return;
     }
     
-    let batch = if tip_on_side + 10 > tip_on_bitcoin {
+    let batch_relayer_count = relayer.config().batch_relayer_count;
+    let batch = if tip_on_side + batch_relayer_count > tip_on_bitcoin {
         tip_on_bitcoin
     } else {
-        tip_on_side + 10
+        tip_on_side + batch_relayer_count
     };
     debug!("Syncing blocks from {} to {}", tip_on_side, batch);
 
@@ -278,8 +280,9 @@ pub async fn scan_vault_txs_loop(relayer: &Relayer) {
                 }
             };
         if height > side_tip - 1 {
-            debug!("No new txs to sync, sleep for 60 seconds...");
-            sleep(Duration::from_secs(60)).await;
+            let interval = relayer.config().loop_interval;
+            debug!("No new txs to sync, sleep for {} seconds...", interval);
+            sleep(Duration::from_secs(interval)).await;
             return;
         }
 
