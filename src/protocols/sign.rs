@@ -36,9 +36,9 @@ pub struct SignRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignResponse {
     task_id: String,
-    commitments: Vec<BTreeMap<Identifier, round1::SigningCommitments>>,
+    commitments: BTreeMap<usize, BTreeMap<Identifier, round1::SigningCommitments>>,
     // <sender, <receiver, package>>
-    signatures_shares: Vec<BTreeMap<Identifier, round2::SignatureShare>>,
+    signature_shares: BTreeMap<usize, BTreeMap<Identifier, round2::SignatureShare>>,
     nonce: u64,
 }
 
@@ -47,7 +47,7 @@ pub struct SignTask {
     pub id: String,
     pub psbt: String,
     pub round: Round,
-    pub sessions: Vec<SignSession>,
+    pub sessions: BTreeMap<usize, SignSession>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,7 +87,7 @@ pub fn generate_nonce_and_commitments(request: SigningRequest, signer: &Signer) 
 
     let len = psbt.inputs.len();
     debug!("(signing round 0) prepare for signing: {:?} sessions of {:?}", len, request.txid );
-    let mut sessions = Vec::new();
+    let mut sessions = BTreeMap::new();
     let preouts = psbt.inputs.iter()
         .filter(|i| i.witness_utxo.is_some())
         .map(|input| input.witness_utxo.clone().unwrap())
@@ -144,7 +144,7 @@ pub fn generate_nonce_and_commitments(request: SigningRequest, signer: &Signer) 
 
         let mut commitments_map = BTreeMap::new();
         commitments_map.insert(signer.identifier().clone(), commitments.clone());
-        let trasaction = SignSession {
+        let session = SignSession {
             task_id: group_task_id.clone(),
             index: i,
             sig_hash: hash.to_raw_hash().to_byte_array().to_vec(),
@@ -154,7 +154,7 @@ pub fn generate_nonce_and_commitments(request: SigningRequest, signer: &Signer) 
             signatures: BTreeMap::new(),
         };
 
-        sessions.push(trasaction);
+        sessions.insert(i, session);
  
     }
 
@@ -174,10 +174,16 @@ pub fn prepare_response_for_request(task_id: String) -> Option<SignResponse> {
         Some(task) => task,
         None => return None,
     };
+    let mut commitments = BTreeMap::new();
+    task.sessions.iter().for_each(|(_i, s)| {commitments.insert(s.index.clone(), s.commitments.clone());});
+    let mut signature_shares = BTreeMap::new();
+    task.sessions.iter().for_each(|(_i, s)| {signature_shares.insert(s.index.clone(), s.signatures.clone());});
     Some(SignResponse {
         task_id: task.id.clone(),
-        commitments: task.sessions.iter().map(|session| session.commitments.clone()).collect::<Vec<_>>(),
-        signatures_shares: task.sessions.iter().map(|session| session.signatures.clone()).collect::<Vec<_>>(),
+        // commitments: task.sessions.iter().map(|session| session.commitments.clone()).collect::<Vec<_>>(),
+        // signatures_shares: task.sessions.iter().map(|session| session.signatures.clone()).collect::<Vec<_>>(),
+        commitments,
+        signature_shares,
         nonce: now(),
     })
 }
@@ -194,32 +200,33 @@ pub fn received_sign_response(response: SignResponse) {
         }
     };
 
-    task.sessions.iter_mut().enumerate().for_each(|(i, session)| {
+    task.sessions.iter_mut().for_each(|(_i, session)| {
         if response.commitments.len() == 0 {
             return;
         }
-        let packet = match response.commitments.get(i) {
+        let packet = match response.commitments.get(&session.index) {
             Some(packet) => packet,
             None => {
-                debug!("commitments not found for task: {:?} {}", task_id, i);
+                debug!("commitments not found for task: {:?} {}", task_id, &session.index);
                 return;
             }
         };
         session.commitments.extend(packet); // merge received commitments
     });
 
-    task.sessions.iter_mut().enumerate().for_each(|(i, session)| {
-        if response.signatures_shares.len() == 0 {
+    task.sessions.iter_mut().for_each(|(_i, session)| {
+        if response.signature_shares.len() == 0 {
+            error!("commitments length mismatch for task: {:?} {}", task_id, &session.index);
             return;
         }
-        if let Some(packet) = response.signatures_shares.get(i){
+        if let Some(packet) = response.signature_shares.get(&session.index){
             session.signatures.extend(packet); // merge received signatures
         }
     });
 
     debug!("Received response for task: {:?} {:?} {:?}", task_id, 
-        task.sessions.iter().map(|s| s.commitments.clone()).collect::<Vec<_>>(),
-        task.sessions.iter().map(|s| s.signatures.clone()).collect::<Vec<_>>(),
+        task.sessions.iter().map(|(_, s)| s.commitments.clone()).collect::<Vec<_>>(),
+        task.sessions.iter().map(|(_, s)| s.signatures.clone()).collect::<Vec<_>>(),
     );
 
     save_sign_task(&task);
@@ -232,7 +239,7 @@ pub fn generate_signature_shares(task: &mut SignTask, identifier: Identifier) {
         return;
     }
 
-    task.sessions.iter_mut().enumerate().for_each(|(i, session)| {
+    task.sessions.iter_mut().for_each(|(i, session)| {
         // filter packets from unknown parties
         match config::get_keypair_from_db(&session.address) {
             Some(keypair) => {
@@ -297,7 +304,7 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
     };
 
     // task.sessions.iter().enumerate().for_each(|(index, session)| {
-    for (index, session) in task.sessions.iter().enumerate() {
+    for (index, session) in task.sessions.iter() {
 
         if session.commitments.len() != session.signatures.len() {
             return None;
@@ -346,15 +353,15 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
 
                 let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&signature.serialize()).unwrap();
 
-                psbt.inputs[index].tap_key_sig = Option::Some(bitcoin::taproot::Signature {
+                psbt.inputs[*index].tap_key_sig = Option::Some(bitcoin::taproot::Signature {
                     signature: sig,
                     sighash_type: TapSighashType::Default,
                 });
 
-                let witness = Witness::p2tr_key_spend(&psbt.inputs[index].tap_key_sig.unwrap());
-                psbt.inputs[index].final_script_witness = Some(witness);
-                psbt.inputs[index].partial_sigs = BTreeMap::new();
-                psbt.inputs[index].sighash_type = None;
+                let witness = Witness::p2tr_key_spend(&psbt.inputs[*index].tap_key_sig.unwrap());
+                psbt.inputs[*index].final_script_witness = Some(witness);
+                psbt.inputs[*index].partial_sigs = BTreeMap::new();
+                psbt.inputs[*index].sighash_type = None;
             }
             Err(e) => {
                 error!("Signature aggregation error: {:?}", e);
