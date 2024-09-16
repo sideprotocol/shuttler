@@ -128,7 +128,7 @@ pub async fn tss_tasks_fetcher(
 async fn submit_dkg_address(signer: &Signer) {
     for task in list_tasks().iter_mut() {
         if task.round != Round::Closed {
-            return;
+            continue;
         }
         let task_id = task.id.replace("dkg-", "").parse().unwrap();
         // submit the vault address to sidechain
@@ -148,13 +148,12 @@ async fn submit_dkg_address(signer: &Signer) {
                     error!("Failed to send dkg vault: {:?}", tx_response);
                     task.submitted = true;
                     save_task(task);
-                    return
+                    continue
                 }
                 info!("Sent dkg vault: {:?}", tx_response);
             },
             Err(e) => {
                 error!("Failed to send dkg vault: {:?}", e);
-                return
             },
         };
     };

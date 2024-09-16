@@ -43,6 +43,9 @@ pub struct Config {
     pub relay_runes: bool,
 
     pub last_scanned_height: u64,
+
+    pub loop_interval: u64,
+    pub batch_relayer_count: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -247,6 +250,8 @@ impl Config {
             relay_runes: false,
             // tweaks: BTreeMap::new(),
             last_scanned_height: 0,
+            loop_interval: 60,
+            batch_relayer_count: 10,
         }
     }
 

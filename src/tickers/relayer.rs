@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use bitcoin::{consensus::encode, Address, BlockHash, OutPoint, Transaction};
+use bitcoin::{consensus::encode, Address, Block, BlockHash, OutPoint, Transaction, Txid};
 use bitcoincore_rpc::{Error, RpcApi};
 use futures::join;
 use prost_types::Any;
@@ -119,15 +119,17 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
         };
 
     if tip_on_bitcoin == tip_on_side {
-        debug!("No new blocks to sync, sleep for 60 seconds...");
-        sleep(Duration::from_secs(60)).await;
+        let interval = relayer.config().loop_interval;
+        debug!("No new blocks to sync, sleep for {} seconds...", interval);
+        sleep(Duration::from_secs(interval)).await;
         return;
     }
     
-    let batch = if tip_on_side + 10 > tip_on_bitcoin {
+    let batch_relayer_count = relayer.config().batch_relayer_count;
+    let batch = if tip_on_side + batch_relayer_count > tip_on_bitcoin {
         tip_on_bitcoin
     } else {
-        tip_on_side + 10
+        tip_on_side + batch_relayer_count
     };
     debug!("Syncing blocks from {} to {}", tip_on_side, batch);
 
@@ -278,19 +280,20 @@ pub async fn scan_vault_txs_loop(relayer: &Relayer) {
                 }
             };
         if height > side_tip - 1 {
-            debug!("No new txs to sync, sleep for 60 seconds...");
-            sleep(Duration::from_secs(60)).await;
+            let interval = relayer.config().loop_interval;
+            debug!("No new txs to sync, sleep for {} seconds...", interval);
+            sleep(Duration::from_secs(interval)).await;
             return;
         }
 
         debug!("Scanning height: {:?}, side tip: {:?}", height, side_tip);
-        scan_vault_txs(relayer, height).await;
+        scan_vault_txs_by_height(relayer, height).await;
         save_last_scanned_height(height);
         height += 1;
     }
 }
 
-pub async fn scan_vault_txs(relayer: &Relayer, height: u64) {
+pub async fn scan_vault_txs_by_height(relayer: &Relayer, height: u64) {
     let block_hash = match relayer.bitcoin_client.get_block_hash(height) {
         Ok(hash) => hash,
         Err(e) => {
@@ -317,147 +320,202 @@ pub async fn scan_vault_txs(relayer: &Relayer, height: u64) {
             i
         );
 
-        if bitcoin_utils::may_be_withdraw_tx(&tx) {
-            let prev_txid = tx.input[0].previous_output.txid;
-            let prev_vout=tx.input[0].previous_output.vout;
+        check_and_handle_tx(relayer, &block_hash, &block, tx, i, &vaults).await
+    }
+}
 
-            let address = match relayer
-                .bitcoin_client
-                .get_raw_transaction (&prev_txid, None)
-            {
-                Ok(prev_tx) => {
-                    if prev_tx.output.len() <= prev_vout as usize {
-                        error!("Invalid previous tx");
-                        continue;
-                    }
+pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, block: &Block, tx: &Transaction, index: usize, vaults: &Vec<String>) {
+    if bitcoin_utils::may_be_withdraw_tx(&tx) {
+        let prev_txid = tx.input[0].previous_output.txid;
+        let prev_vout = tx.input[0].previous_output.vout;
 
-                    match Address::from_script(prev_tx.output[prev_vout as usize].script_pubkey.as_script(), relayer.config().bitcoin.network) {
-                        Ok(addr) => Some(addr),
-                        Err(e) => {
-                            error!("Failed to parse public key script: {}", e);
-                            None
-                        }
-                    }
+        let address = match relayer
+            .bitcoin_client
+            .get_raw_transaction (&prev_txid, None)
+        {
+            Ok(prev_tx) => {
+                if prev_tx.output.len() <= prev_vout as usize {
+                    error!("Invalid previous tx");
+                    return;
                 }
-                Err(e) => {
-                    error!(
-                        "Failed to get the previous tx: {:?}, err: {:?}",
-                        prev_txid, e
-                    );
 
-                    None
-                }
-            };
-
-            if address.is_some() {
-                let address = address.unwrap().to_string();
-                if vaults.contains(&address) {
-                    debug!("Withdrawal tx found... {:?}", &tx);
-
-                    let proof = bitcoin_utils::compute_tx_proof(
-                        block.txdata.iter().map(|tx| tx.compute_txid()).collect(),
-                        i,
-                    );
-
-                    match send_withdraw_tx(relayer, &block_hash, &tx, proof).await {
-                        Ok(resp) => {
-                            let tx_response = resp.into_inner().tx_response.unwrap();
-                            if tx_response.code != 0 {
-                                error!("Failed to submit withdrawal tx: {:?}", tx_response);
-                                continue;
-                            }
-        
-                            info!("Submitted withdrawal tx: {:?}", tx_response);
-                        }
-                        Err(e) => {
-                            error!("Failed to submit withdrawal tx: {:?}", e);
-                        }
+                match Address::from_script(prev_tx.output[prev_vout as usize].script_pubkey.as_script(), relayer.config().bitcoin.network) {
+                    Ok(addr) => Some(addr),
+                    Err(e) => {
+                        error!("Failed to parse public key script: {}", e);
+                        None
                     }
-
-                    continue;
                 }
             }
-        }
+            Err(e) => {
+                error!(
+                    "Failed to get the previous tx: {:?}, err: {:?}",
+                    prev_txid, e
+                );
 
-        if bitcoin_utils::is_deposit_tx(tx, relayer.config().bitcoin.network, &vaults) {
-            debug!("Deposit tx found... {:?}", &tx);
-
-            if bitcoin_utils::is_runes_deposit(tx) {
-                if !relayer.config().relay_runes {
-                    debug!("Skip the tx due to runes relaying not enabled");
-                    continue;
-                }
-
-                let edict = match bitcoin_utils::parse_runes(tx) {
-                    Some(edict) => edict,
-                    None => {
-                        debug!("Failed to parse runes deposit tx {}", tx.compute_txid());
-                        continue;
-                    }
-                };
-
-                // get the rune by id
-                let rune =match relayer.ordinals_client.get_rune(edict.id).await {
-                    Ok(rune) => rune.entry.spaced_rune,
-                    Err(e) => {
-                        error!("Failed to get rune {}: {}", edict.id, e);
-                        continue;
-                    }
-                };
-
-                // get the runes output
-                let output = match relayer.ordinals_client.get_output(OutPoint::new(tx.compute_txid(), edict.output)).await {
-                    Ok(output) => output,
-                    Err(e) => {
-                        error!("Failed to get output {}:{} from ord: {}", tx.compute_txid(), edict.output, e);
-                        continue;
-                    }
-                };
-
-                // validate if the runes deposit is valid
-                if !bitcoin_utils::validate_runes(&edict, &rune, &output) {
-                    debug!("Failed to validate runes deposit tx {}", tx.compute_txid());
-                    continue;
-                }
+                None
             }
+        };
 
-            let proof = bitcoin_utils::compute_tx_proof(
-                block.txdata.iter().map(|tx| tx.compute_txid()).collect(),
-                i,
-            );
+        if address.is_some() {
+            let address = address.unwrap().to_string();
+            if vaults.contains(&address) {
+                debug!("Withdrawal tx found... {:?}", &tx);
 
-            let prev_txid = tx.input[0].previous_output.txid;
-            let prev_tx = match relayer
-                .bitcoin_client
-                .get_raw_transaction(&prev_txid, None)
-            {
-                Ok(prev_tx) => prev_tx,
-                Err(e) => {
-                    error!(
-                        "Failed to get the previous tx: {:?}, err: {:?}",
-                        prev_txid, e
-                    );
+                let proof = bitcoin_utils::compute_tx_proof(
+                    block.txdata.iter().map(|tx| tx.compute_txid()).collect(),
+                    index,
+                );
 
-                    continue;
-                }
-            };
-
-            match send_deposit_tx(relayer, &block_hash, &prev_tx, &tx, proof).await {
-                Ok(resp) => {
-                    let tx_response = resp.into_inner().tx_response.unwrap();
-                    if tx_response.code != 0 {
-                        error!("Failed to submit deposit tx: {:?}", tx_response);
-                        continue;
+                match send_withdraw_tx(relayer, &block_hash, &tx, proof).await {
+                    Ok(resp) => {
+                        let tx_response = resp.into_inner().tx_response.unwrap();
+                        if tx_response.code != 0 {
+                            error!("Failed to submit withdrawal tx: {:?}", tx_response);
+                            return;
+                        }
+    
+                        info!("Submitted withdrawal tx: {:?}", tx_response);
                     }
+                    Err(e) => {
+                        error!("Failed to submit withdrawal tx: {:?}", e);
+                    }
+                }
 
-                    info!("Submitted deposit tx: {:?}", tx_response);
-                }
-                Err(e) => {
-                    error!("Failed to submit deposit tx: {:?}", e);
-                }
+                return;
             }
         }
     }
+
+    if bitcoin_utils::is_deposit_tx(tx, relayer.config().bitcoin.network, &vaults) {
+        debug!("Deposit tx found... {:?}", &tx);
+
+        if bitcoin_utils::is_runes_deposit(tx) {
+            if !relayer.config().relay_runes {
+                debug!("Skip the tx due to runes relaying not enabled");
+                return;
+            }
+
+            let edict = match bitcoin_utils::parse_runes(tx) {
+                Some(edict) => edict,
+                None => {
+                    debug!("Failed to parse runes deposit tx {}", tx.compute_txid());
+                    return;
+                }
+            };
+
+            // get the rune by id
+            let rune = match relayer.ordinals_client.get_rune(edict.id).await {
+                Ok(rune) => rune.entry.spaced_rune,
+                Err(e) => {
+                    error!("Failed to get rune {}: {}", edict.id, e);
+                    return;
+                }
+            };
+
+            // get the runes output
+            let output = match relayer.ordinals_client.get_output(OutPoint::new(tx.compute_txid(), edict.output)).await {
+                Ok(output) => output,
+                Err(e) => {
+                    error!("Failed to get output {}:{} from ord: {}", tx.compute_txid(), edict.output, e);
+                    return;
+                }
+            };
+
+            // validate if the runes deposit is valid
+            if !bitcoin_utils::validate_runes(&edict, &rune, &output) {
+                debug!("Failed to validate runes deposit tx {}", tx.compute_txid());
+                return;
+            }
+        }
+
+        let proof = bitcoin_utils::compute_tx_proof(
+            block.txdata.iter().map(|tx| tx.compute_txid()).collect(),
+            index,
+        );
+
+        let prev_txid = tx.input[0].previous_output.txid;
+        let prev_tx = match relayer
+            .bitcoin_client
+            .get_raw_transaction(&prev_txid, None)
+        {
+            Ok(prev_tx) => prev_tx,
+            Err(e) => {
+                error!(
+                    "Failed to get the previous tx: {:?}, err: {:?}",
+                    prev_txid, e
+                );
+
+                return;
+            }
+        };
+
+        match send_deposit_tx(relayer, &block_hash, &prev_tx, &tx, proof).await {
+            Ok(resp) => {
+                let tx_response = resp.into_inner().tx_response.unwrap();
+                if tx_response.code != 0 {
+                    error!("Failed to submit deposit tx: {:?}", tx_response);
+                    return;
+                }
+
+                info!("Submitted deposit tx: {:?}", tx_response);
+            }
+            Err(e) => {
+                error!("Failed to submit deposit tx: {:?}", e);
+            }
+        }
+    }
+}
+
+pub async fn check_and_handle_tx_by_hash(relayer: &Relayer, hash: &Txid) {
+    let tx_info = match relayer
+        .bitcoin_client
+        .get_raw_transaction_info(&hash, None)
+    {
+        Ok(tx_info) => tx_info,
+        Err(e) => {
+            error!(
+                "Failed to get the raw tx info: {}, err: {}",
+                hash, e
+            );
+
+            return;
+        }
+    };
+
+    let tx = match tx_info.transaction() {
+        Ok(tx) => tx,
+        Err(e) => {
+            error!(
+                "Failed to get the raw tx: {}, err: {}",
+                hash, e
+            );
+
+            return;
+        }
+    };
+
+    let block_hash = match tx_info.blockhash {
+        Some(block_hash) => block_hash,
+        None => {
+            error!("Failed to get the block hash of the tx: {}", hash);
+            return;
+        }
+    };
+
+    let block = match relayer.bitcoin_client.get_block(&block_hash) {
+        Ok(block) => block,
+        Err(e) => {
+            error!("Failed to get block: {}, err: {}", &block_hash, e);
+            return;
+        }
+    };
+
+    let tx_index = block.txdata.iter().position(|tx_in_block| tx_in_block == &tx).expect("the tx should be included in the block");
+
+    let vaults = get_cached_vaults(relayer.config().side_chain.grpc.clone()).await;
+
+    check_and_handle_tx(relayer, &block_hash, &block, &tx, tx_index, &vaults).await
 }
 
 pub async fn send_withdraw_tx(

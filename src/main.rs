@@ -1,5 +1,5 @@
 use clap::Parser;
-use shuttler::commands::{address, init, reset, start, submit_header, Cli, Commands};
+use shuttler::commands::{address, init, reset, start, submit_header, submit_tx, Cli, Commands};
 
 #[tokio::main(flavor = "multi_thread", worker_threads=4)]
 async fn main() {
@@ -21,6 +21,8 @@ async fn main() {
         Commands::SubmitHeader { height } => {
             submit_header::execute(&cli.home, *height).await;
         }
+        Commands::SubmitTx { hash} => {
+            submit_tx::execute(&cli.home, hash).await;
+        }
     }
 }
-
