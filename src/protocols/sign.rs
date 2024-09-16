@@ -309,6 +309,7 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
         if session.commitments.len() != session.signatures.len() {
             return None;
         }
+
         let keypair = match config::get_keypair_from_db(&session.address) {
             Some(keypair) => keypair,
             None => {
@@ -316,9 +317,21 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
                 return None;
             }
         };
+
         if session.signatures.len() < *keypair.priv_key.min_signers() as usize {
             return None;
         }
+
+        let mut commits = BTreeMap::new();
+        for key in session.signatures.keys() {
+            if let Some(c) = session.commitments.get(key) {
+                commits.insert(key.clone(), c.clone());
+            } else {
+                return None;
+            }
+        }
+
+
         let sig_target = frost::SigningTarget::new(
             &session.sig_hash,
             frost::SigningParameters {
@@ -329,7 +342,7 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
                 }
         );
         let signing_package = frost::SigningPackage::new(
-            session.commitments.clone(),
+            commits,
             sig_target
         );
 
