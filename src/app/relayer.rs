@@ -1,10 +1,8 @@
 
 
 use bitcoincore_rpc::{Auth, Client};
-use tokio::select;
 use crate::{app::config::Config, helper::client_ordinals::OrdinalsClient, tickers::relayer};
 
-use std::time::Duration;
 use tracing::info;
 
 #[derive(Debug)]
