@@ -50,13 +50,16 @@ pub enum Commands {
     },
     Address,
     Reset,
+    #[command(about = "Print TSS variables for debug")]
+    Debug {
+        txid: String,
+    },
 }
 
 pub mod init;
-// pub mod dkg;
-// pub mod sign;
 pub mod start;
 pub mod address;
 pub mod reset;
 pub mod submit_header;
 pub mod submit_tx;
+pub mod debug;

@@ -4,9 +4,7 @@ use bitcoin::{consensus::encode, Address, Block, BlockHash, OutPoint, Transactio
 use bitcoincore_rpc::{Error, RpcApi};
 use futures::join;
 use prost_types::Any;
-use rand::Rng;
-use rand_chacha::ChaCha8Rng;
-use tokio::{sync::Mutex, time::sleep};
+use tokio::time::sleep;
 use tonic::{Response, Status};
 use tracing::{debug, error, info};
 
@@ -18,25 +16,16 @@ use crate::{
 };
 
 use cosmos_sdk_proto::{
-    cosmos::{base::tendermint::v1beta1::{
-        service_client::ServiceClient as TendermintServiceClient, GetLatestValidatorSetRequest,
-        Validator,
-    }, tx::v1beta1::BroadcastTxResponse},
+    cosmos::tx::v1beta1::BroadcastTxResponse,
     side::btcbridge::{BlockHeader, MsgSubmitBlockHeaders, MsgSubmitDepositTransaction, MsgSubmitWithdrawTransaction, QueryParamsRequest},
 };
 use lazy_static::lazy_static;
-
-#[derive(Debug)]
-struct Lock {
-    loading: bool,
-}
 
 const DB_KEY_BITCOIN_TIP: &str = "bitcoin_tip";
 const DB_KEY_VAULTS: &str = "bitcoin_vaults";
 const DB_KEY_VAULTS_LAST_UPDATE: &str = "bitcoin_vaults_last_update";
 
 lazy_static! {
-    static ref LOADING: Mutex<Lock> = Mutex::new(Lock { loading: false });
     static ref DB: sled::Db = {
         let path = get_database_with_name("relayer");
         sled::open(path).unwrap()
@@ -46,58 +35,11 @@ lazy_static! {
 /// Start relayer tasks
 /// 1. Sync BTC blocks
 /// 2. Scan vault txs
-/// Only the coordinator will run the tasks, the coordinator is selected randomly from the active validator set
 pub async fn start_relayer_tasks(relayer: &Relayer) {
-    // fetch latest active validator setx
-    let host = relayer.config().side_chain.grpc.clone();
-    let mut client = match TendermintServiceClient::connect(host.to_owned()).await {
-        Ok(client) => client,
-        Err(e) => {
-            error!("Failed to create tendermint query client: {host} {}", e);
-            return;
-        }
-    };
-    let response = match client.get_latest_validator_set(GetLatestValidatorSetRequest { pagination: None }).await {
-        Ok(response) => response,
-        Err(e) => {
-            error!("Failed to get latest validator set: {:?}", e);
-            return;
-        }
-    };
-    let mut validator_set = response.into_inner().validators;
-    validator_set.sort_by(|a, b| a.voting_power.cmp(&b.voting_power));
-    
     join!(
         sync_btc_blocks(&relayer),
         scan_vault_txs_loop(&relayer)
     );
-}
-
-fn _is_coordinator(
-    validator_set: &Vec<Validator>,
-    address: String,
-    rng: &mut ChaCha8Rng,
-) -> bool {
-    let len = if validator_set.len() > 21 {
-        21
-    } else {
-        validator_set.len()
-    };
-
-    let index = rng.gen_range(0..len);
-    debug!("generated index: {}", index);
-
-    match validator_set.iter().nth(index) {
-        Some(v) => {
-            debug!("Selected coordinator: {:?}", v);
-            // let b = bech32::decode(&v.address).unwrap().1;
-            // return b == address;
-            v.address == address
-        }
-        None => {
-            return false;
-        }
-    }
 }
 
 pub async fn sync_btc_blocks(relayer: &Relayer) {
