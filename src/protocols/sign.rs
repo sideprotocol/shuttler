@@ -57,6 +57,7 @@ pub struct SignSession {
     pub sig_hash: Vec<u8>,
     pub address: String,
     /// NOTE: Should not share this with other parties
+    #[serde(skip_serializing)]
     pub nonces: SigningNonces,
     pub commitments: BTreeMap<Identifier, round1::SigningCommitments>,
     pub signatures: BTreeMap<Identifier, round2::SignatureShare>,
@@ -504,7 +505,7 @@ pub fn list_sign_tasks() -> Vec<SignTask> {
     tasks
 }
 
-fn get_sign_task(id: &str) -> Option<SignTask> {
+pub fn get_sign_task(id: &str) -> Option<SignTask> {
     match DB_TASK.get(id) {
         Ok(Some(task)) => {
             let task: SignTask = serde_json::from_slice(&task).unwrap();
