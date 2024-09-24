@@ -37,78 +37,89 @@ lazy_static! {
 /// 2. Scan vault txs
 pub async fn start_relayer_tasks(relayer: &Relayer) {
     join!(
-        sync_btc_blocks(&relayer),
+        sync_btc_blocks_loop(&relayer),
         scan_vault_txs_loop(&relayer)
     );
 }
 
-pub async fn sync_btc_blocks(relayer: &Relayer) {
-    let tip_on_bitcoin = match relayer.bitcoin_client.get_block_count() {
-        Ok(height) => height - 1,
-        Err(e) => {
-            error!(error=%e);
-            return;
-        }
-    };
+pub async fn sync_btc_blocks_loop(relayer: &Relayer) {
+    let interval = relayer.config().loop_interval;
 
-    let mut tip_on_side =
-        match client_side::get_bitcoin_tip_on_side(&relayer.config().side_chain.grpc).await {
+    loop {
+        let tip_on_bitcoin = match relayer.bitcoin_client.get_block_count() {
+            Ok(height) => height - 1,
+            Err(e) => {
+                error!(error=%e);
+                sleep(Duration::from_secs(interval)).await;
+                continue;
+            }
+        };
+    
+        let mut tip_on_side = match client_side::get_bitcoin_tip_on_side(&relayer.config().side_chain.grpc).await {
             Ok(res) => res.get_ref().height,
             Err(e) => {
                 error!(error=%e);
-                return;
+                sleep(Duration::from_secs(interval)).await;
+                continue;
             }
         };
-
-    if tip_on_bitcoin == tip_on_side {
-        let interval = relayer.config().loop_interval;
-        debug!("No new blocks to sync, sleep for {} seconds...", interval);
-        sleep(Duration::from_secs(interval)).await;
-        return;
-    }
     
-    let batch_relayer_count = relayer.config().batch_relayer_count;
-    let batch = if tip_on_side + batch_relayer_count > tip_on_bitcoin {
-        tip_on_bitcoin
-    } else {
-        tip_on_side + batch_relayer_count
-    };
-    debug!("Syncing blocks from {} to {}", tip_on_side, batch);
-
-    // check current block hash before syncing blocks 
-    check_block_hash_is_corrent(&relayer, tip_on_side).await;
+        if tip_on_bitcoin == tip_on_side {
+            debug!(
+                "No new blocks to sync, tip_on_bitcoin: {}, tip_on_side: {}, sleep for {} seconds...",
+                tip_on_bitcoin, tip_on_side, interval
+            );
+            sleep(Duration::from_secs(interval)).await;
+            continue;
+        }
+        
+        let batch_relayer_count = relayer.config().batch_relayer_count;
+        let batch = if tip_on_side + batch_relayer_count > tip_on_bitcoin {
+            tip_on_bitcoin
+        } else {
+            tip_on_side + batch_relayer_count
+        };
+        debug!("Syncing blocks from {} to {}", tip_on_side, batch);
     
-    let mut block_headers: Vec<BlockHeader> = vec![];
-    while tip_on_side < batch {
-        tip_on_side = tip_on_side + 1;
-        let header = match fetch_block_header_by_height(relayer, tip_on_side).await {
-            Ok(header) => header,
+        // check current block hash before syncing blocks 
+        check_block_hash_is_corrent(&relayer, tip_on_side).await;
+        
+        let mut block_headers: Vec<BlockHeader> = vec![];
+        while tip_on_side < batch {
+            tip_on_side = tip_on_side + 1;
+            let header = match fetch_block_header_by_height(relayer, tip_on_side).await {
+                Ok(header) => header,
+                Err(e) => {
+                    error!("Failed to fetch block header: {:?}", e);
+                    break;
+                }
+            };
+            block_headers.push(header);
+        }
+        if block_headers.is_empty() {
+            debug!("Block headers is empty, sleep for {} seconds...", interval);
+            sleep(Duration::from_secs(interval)).await;
+            continue;
+        }
+    
+        // submit block headers in a batch
+        match send_block_headers(relayer, &block_headers).await {
+            Ok(resp) => {
+                let tx_response = resp.into_inner().tx_response.unwrap();
+                if tx_response.code != 0 {
+                    error!("Failed to send block headers: {:?}", tx_response);
+                    sleep(Duration::from_secs(interval)).await;
+                    continue;
+                }
+                info!("Sent block headers: {:?}", tx_response);
+            }
             Err(e) => {
-                error!("Failed to fetch block header: {:?}", e);
-                return;
+                error!("Failed to send block headers: {:?}", e);
+                sleep(Duration::from_secs(interval)).await;
+                continue;
             }
         };
-        block_headers.push(header);
     }
-    if block_headers.is_empty() {
-        return;
-    }
-
-    // submit block headers in a batch
-    match send_block_headers(relayer, &block_headers).await {
-        Ok(resp) => {
-            let tx_response = resp.into_inner().tx_response.unwrap();
-            if tx_response.code != 0 {
-                error!("Failed to send block headers: {:?}", tx_response);
-                return;
-            }
-            info!("Sent block headers: {:?}", tx_response);
-        }
-        Err(e) => {
-            error!("Failed to send block headers: {:?}", e);
-            return;
-        }
-    };
 }
 
 pub async fn fetch_block_header_by_height(relayer: &Relayer, height: u64) -> Result<BlockHeader, Error> {
@@ -209,6 +220,7 @@ pub async fn send_block_headers(
 }
 
 pub async fn scan_vault_txs_loop(relayer: &Relayer) {
+    let interval = relayer.config().loop_interval;
     let mut height = get_last_scanned_height(relayer.config()) + 1;
     debug!("Start to scan vault txs from height: {}", height);
 
@@ -218,14 +230,15 @@ pub async fn scan_vault_txs_loop(relayer: &Relayer) {
                 Ok(res) => res.get_ref().height,
                 Err(e) => {
                     error!("Failed to get tip from side chain: {}", e);
-                    return;
+                    sleep(Duration::from_secs(interval)).await;
+                    continue;
                 }
             };
+
         if height > side_tip - 1 {
-            let interval = relayer.config().loop_interval;
-            debug!("No new txs to sync, sleep for {} seconds...", interval);
+            debug!("No new txs to sync, height: {}, side tip: {}, sleep for {} seconds...", height, side_tip, interval);
             sleep(Duration::from_secs(interval)).await;
-            return;
+            continue;
         }
 
         debug!("Scanning height: {:?}, side tip: {:?}", height, side_tip);
