@@ -247,7 +247,7 @@ pub async fn run_signer_daemon(conf: Config) {
                     event_handler(evt, &mut swarm, &signer).await;
                 },
                 SwarmEvent::NewListenAddr { address, .. } => {
-                    info!("Local node is listening on {address}");
+                    info!("Local node is listening on {address}/p2p/{}", swarm.local_peer_id());
                 },
                 SwarmEvent::ConnectionEstablished { peer_id, num_established, endpoint, ..} => {
                     swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
