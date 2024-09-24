@@ -18,10 +18,6 @@ use super::{Round, TSSBehaviour};
 use lazy_static::lazy_static;
 
 lazy_static! {
-    // static ref DB: sled::Db = {
-    //     let path = get_database_with_name("sign-variables");
-    //     sled::open(path).unwrap()
-    // };
     static ref DB_TASK: sled::Db = {
         let path = get_database_with_name("sign-task");
         sled::open(path).unwrap()
@@ -86,29 +82,24 @@ pub fn generate_nonce_and_commitments(request: SigningRequest, signer: &Signer) 
         }
     };
 
-    let len = psbt.inputs.len();
-    debug!("(signing round 0) prepare for signing: {:?} sessions of {:?}", len, request.txid );
+    debug!("(signing round 0) prepare for signing: {:?} sessions of {:?}", psbt.inputs.len(), request.txid );
     let mut sessions = BTreeMap::new();
     let preouts = psbt.inputs.iter()
-        .filter(|i| i.witness_utxo.is_some())
+        //.filter(|input| input.witness_utxo.is_some())
         .map(|input| input.witness_utxo.clone().unwrap())
         .collect::<Vec<_>>();
-    for i in 0..len {
 
-        let input = &psbt.inputs[i];
-        if input.witness_utxo.is_none() {
-            continue;
-        }
+    psbt.inputs.iter().enumerate().for_each(|(i, input)| {
 
-        let prev_utxo = match psbt.inputs[i].witness_utxo.clone() {
+        let prev_utxo = match input.witness_utxo.clone() {
             Some(utxo) => utxo,
             None => {
-                error!("Failed to get witness_utxo");
+                error!("Failed to get witness_utxo {}-{}", request.txid, i);
                 return;
             }
         };
 
-        info!("prev_tx: {:?}", prev_utxo.script_pubkey);
+        debug!("prev_tx: {:?}", prev_utxo.script_pubkey);
         let script = input.witness_utxo.clone().unwrap().script_pubkey;
         let address: Address = Address::from_script(&script, signer.config().bitcoin.network).unwrap();
 
@@ -136,7 +127,7 @@ pub fn generate_nonce_and_commitments(request: SigningRequest, signer: &Signer) 
             }
             None => {
                 error!("Failed to get signing key for address: {}", address);
-                continue;
+                return;
             }
         };
 
@@ -157,7 +148,7 @@ pub fn generate_nonce_and_commitments(request: SigningRequest, signer: &Signer) 
 
         sessions.insert(i, session);
  
-    }
+    });
 
     let task = SignTask {
         id: group_task_id.clone(),
@@ -181,8 +172,6 @@ pub fn prepare_response_for_request(task_id: String) -> Option<SignResponse> {
     task.sessions.iter().for_each(|(_i, s)| {signature_shares.insert(s.index.clone(), s.signatures.clone());});
     Some(SignResponse {
         task_id: task.id.clone(),
-        // commitments: task.sessions.iter().map(|session| session.commitments.clone()).collect::<Vec<_>>(),
-        // signatures_shares: task.sessions.iter().map(|session| session.signatures.clone()).collect::<Vec<_>>(),
         commitments,
         signature_shares,
         nonce: now(),
@@ -201,31 +190,27 @@ pub fn received_sign_response(response: SignResponse) {
         }
     };
 
-    task.sessions.iter_mut().for_each(|(_i, session)| {
-        if response.commitments.len() == 0 {
-            return;
-        }
-        let packet = match response.commitments.get(&session.index) {
-            Some(packet) => packet,
-            None => {
-                debug!("commitments not found for task: {:?} {}", task_id, &session.index);
-                return;
+    if response.commitments.len() > 0 {
+        response.commitments.iter().for_each(|(i, c)| {
+            if c.len() > 0 {
+                if let Some(session) = task.sessions.get_mut(i) {
+                    session.commitments.extend(c); // merge received commitments
+                }
             }
-        };
-        session.commitments.extend(packet); // merge received commitments
-    });
+        })
+    }
 
-    task.sessions.iter_mut().for_each(|(_i, session)| {
-        if response.signature_shares.len() == 0 {
-            error!("commitments length mismatch for task: {:?} {}", task_id, &session.index);
-            return;
-        }
-        if let Some(packet) = response.signature_shares.get(&session.index){
-            session.signatures.extend(packet); // merge received signatures
-        }
-    });
+    if response.signature_shares.len() > 0 {
+        response.signature_shares.iter().for_each(|(i, sig)| {
+            if sig.len() > 0 {
+                if let Some(session) = task.sessions.get_mut(i) {
+                    session.signatures.extend(sig); // merge received signature share
+                }
+            }
+        })
+    }
 
-    debug!("Received response for task: {:?} {:?} {:?}", task_id, 
+    debug!("Merged commitments and signatures: {:?} {:?} {:?}", task_id, 
         task.sessions.iter().map(|(_, s)| s.commitments.clone()).collect::<Vec<_>>(),
         task.sessions.iter().map(|(_, s)| s.signatures.clone()).collect::<Vec<_>>(),
     );
@@ -246,7 +231,7 @@ pub fn generate_signature_shares(task: &mut SignTask, identifier: Identifier) {
             Some(keypair) => {
 
                 if session.commitments.len() < *keypair.priv_key.min_signers() as usize {
-                    error!("skip task, not enough commitments for task: {:?} {}", task.id, i);
+                    debug!("skip task, have not received enough commitments for signing task: {:?} {}", task.id, i);
                     return;
                 }
 
@@ -280,7 +265,7 @@ pub fn generate_signature_shares(task: &mut SignTask, identifier: Identifier) {
                 session.signatures.insert(identifier, signature_shares);
             }
             None => {
-                error!("skip task, not found keypair for task: {:?}", task.id);
+                error!("skip, I am not the signer of task: {:?}", task.id);
             }
         };
     });
@@ -386,7 +371,7 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
     let is_complete = psbt.inputs.iter().all(|input| {
         input.final_script_witness.is_some()
     });
-    debug!("Is {} complete: {:?}", task.id, is_complete);
+    debug!("Is {} completed: {:?}", task.id, is_complete);
 
     if is_complete {
         task.round = Round::Closed;
@@ -459,42 +444,9 @@ pub async fn collect_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signe
 
         // publish its packages to other peers
         publish_sign_package(swarm, &task);
-
-        // request packages from other connected peers
-        // peers.iter().for_each(|p| {
-        //     let request = SignRequest {
-        //         task_id: task.id.clone()
-        //     };
-        //     debug!("Sent Signer Request to {p}: {:?}", &request);
-        //     swarm.behaviour_mut().signer.send_request(p, request);
-        // })
     };
 }
 
-// pub fn tss_event_handler(behave: &mut TSSBehaviour, peer: &PeerId, message: request_response::Message<SignRequest, SignResponse>) {
-//     // handle dkg events
-//     debug!("Received TSS response from {peer}: {:?}", &message);
-//     match message {
-//         request_response::Message::Request { request_id, request, channel } => {
-//             debug!("Received TSS Request from {peer}: {request_id}");
-//             if let Some(response) = prepare_response_for_request(request.task_id) {
-//                 match behave.signer.send_response(channel, response) {
-//                     Ok(_) => {
-//                         debug!("Sent TSS Response to {peer}: {request_id}");
-//                     }
-//                     Err(e) => {
-//                         error!("Failed to send TSS Response to {peer}: {request_id} - {:?}", e);
-//                     }
-//                 };
-//             }
-//         }
-
-//         request_response::Message::Response { request_id, response } => {
-//             debug!("Received TSS Response from {peer}: {request_id}");
-//             received_response(response);
-//         }
-//     }
-// }
 pub fn list_sign_tasks() -> Vec<SignTask> {
     let mut tasks = vec![];
     debug!("loading in-process sign tasks from database, total: {:?}", DB_TASK.len());
