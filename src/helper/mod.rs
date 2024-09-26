@@ -8,6 +8,7 @@ pub mod http;
 pub mod client_bitcoin;
 pub mod client_side;
 pub mod client_ordinals;
+pub mod client_oracle;
 
 pub fn now() -> u64 {
     std::time::SystemTime::now()

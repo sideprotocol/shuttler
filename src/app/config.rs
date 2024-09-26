@@ -40,6 +40,8 @@ pub struct Config {
     pub side_chain: CosmosChain,
     
     pub ordinals: OrdinalsCfg,
+    pub oracle: OracleCfg,
+
     pub relay_runes: bool,
 
     pub last_scanned_height: u64,
@@ -83,6 +85,13 @@ pub struct CosmosChain {
 pub struct OrdinalsCfg {
     /// Ord API endpoint
     pub endpoint: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct OracleCfg {
+    pub submit_fee_rate: bool,
+    pub submit_fee_rate_interval: u64,
+    pub fetch_fee_rate_url: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -246,6 +255,11 @@ impl Config {
             },
             ordinals: OrdinalsCfg {
                 endpoint: "".to_string(),
+            },
+            oracle: OracleCfg {
+                submit_fee_rate: false,
+                submit_fee_rate_interval: 60,
+                fetch_fee_rate_url: "https://mempool.space/testnet/api/v1/fees/recommended".to_string(),
             },
             relay_runes: false,
             // tweaks: BTreeMap::new(),
