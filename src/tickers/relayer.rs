@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use bitcoin::{blockdata::fee_rate, consensus::encode, Address, Block, BlockHash, OutPoint, Transaction, Txid};
+use bitcoin::{consensus::encode, Address, Block, BlockHash, OutPoint, Transaction, Txid};
 use bitcoincore_rpc::{Error, RpcApi};
 use futures::join;
 use prost_types::Any;
