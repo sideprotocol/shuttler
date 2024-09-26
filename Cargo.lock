@@ -1301,7 +1301,7 @@ dependencies = [
 [[package]]
 name = "cosmos-sdk-proto"
 version = "0.23.0-pre"
-source = "git+https://github.com/sideprotocol/cosmos-rust?branch=main#b9b59a0df2800e7fd3328fcc22dbd8add3a0c5cc"
+source = "git+https://github.com/sideprotocol/cosmos-rust?branch=main#a9ccaaa21c3041905fcf1f04417d3ad42eb360e3"
 dependencies = [
  "prost",
  "prost-types",
@@ -1312,7 +1312,7 @@ dependencies = [
 [[package]]
 name = "cosmrs"
 version = "0.18.0-pre"
-source = "git+https://github.com/sideprotocol/cosmos-rust?branch=main#b9b59a0df2800e7fd3328fcc22dbd8add3a0c5cc"
+source = "git+https://github.com/sideprotocol/cosmos-rust?branch=main#a9ccaaa21c3041905fcf1f04417d3ad42eb360e3"
 dependencies = [
  "bip32",
  "cosmos-sdk-proto",
@@ -5490,9 +5490,9 @@ dependencies = [
 
 [[package]]
 name = "serde_spanned"
-version = "0.6.7"
+version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb5b1b31579f3811bf615c144393417496f152e12ac8b7663bf664f4a815306d"
+checksum = "87607cb1398ed59d48732e575a4c28a7a8ebf2454b964fe3f224f2afc07909e1"
 dependencies = [
  "serde",
 ]
