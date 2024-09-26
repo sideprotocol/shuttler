@@ -109,17 +109,15 @@ pub async fn sync_btc_blocks_loop(relayer: &Relayer) {
                 let tx_response = resp.into_inner().tx_response.unwrap();
                 if tx_response.code != 0 {
                     error!("Failed to send block headers: {:?}", tx_response);
-                    sleep(Duration::from_secs(interval)).await;
-                    continue;
+                } else {
+                    info!("Sent block headers: {:?}", tx_response);
                 }
-                info!("Sent block headers: {:?}", tx_response);
             }
             Err(e) => {
                 error!("Failed to send block headers: {:?}", e);
-                sleep(Duration::from_secs(interval)).await;
-                continue;
             }
         };
+        sleep(Duration::from_secs(interval)).await;
     }
 }
 
