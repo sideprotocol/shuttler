@@ -17,7 +17,7 @@ use crate::{
 
 use cosmos_sdk_proto::{
     cosmos::tx::v1beta1::BroadcastTxResponse,
-    side::btcbridge::{BlockHeader, MsgSubmitBlockHeaders, MsgSubmitDepositTransaction, MsgSubmitWithdrawTransaction, QueryParamsRequest},
+    side::btcbridge::{BlockHeader, MsgSubmitBlockHeaders, MsgSubmitDepositTransaction, MsgSubmitFeeRate, MsgSubmitWithdrawTransaction, QueryParamsRequest},
 };
 use lazy_static::lazy_static;
 
@@ -38,7 +38,8 @@ lazy_static! {
 pub async fn start_relayer_tasks(relayer: &Relayer) {
     join!(
         sync_btc_blocks_loop(&relayer),
-        scan_vault_txs_loop(&relayer)
+        scan_vault_txs_loop(&relayer),
+        submit_fee_rate_loop(&relayer),
     );
 }
 
@@ -108,17 +109,15 @@ pub async fn sync_btc_blocks_loop(relayer: &Relayer) {
                 let tx_response = resp.into_inner().tx_response.unwrap();
                 if tx_response.code != 0 {
                     error!("Failed to send block headers: {:?}", tx_response);
-                    sleep(Duration::from_secs(interval)).await;
-                    continue;
+                } else {
+                    info!("Sent block headers: {:?}", tx_response);
                 }
-                info!("Sent block headers: {:?}", tx_response);
             }
             Err(e) => {
                 error!("Failed to send block headers: {:?}", e);
-                sleep(Duration::from_secs(interval)).await;
-                continue;
             }
         };
+        sleep(Duration::from_secs(interval)).await;
     }
 }
 
@@ -548,5 +547,49 @@ async fn get_cached_vaults(grpc: String) -> Vec<String> {
             vaults
         }
         None => vec![]
+    }
+}
+
+pub async fn submit_fee_rate_loop(relayer: &Relayer) {
+    let submit_fee_rate = relayer.config().oracle.submit_fee_rate;
+    if !submit_fee_rate {
+        return;
+    }
+
+    let interval = relayer.config().oracle.submit_fee_rate_interval;
+    loop {
+        match relayer.oracle_client.get_fees().await {
+            Ok(bitcoin_fees) => {
+                let fee_rate = bitcoin_fees.fastest_fee;
+                submit_fee_rate_to_side(relayer, fee_rate).await;
+            }
+            Err(e) => {
+                error!("Failed to get fee rates: {}", e);
+            }
+        }
+        sleep(Duration::from_secs(interval)).await;
+    }
+}
+
+pub async fn submit_fee_rate_to_side(relayer: &Relayer, fee_rate: i64) {
+    let msg_submit_fee_rate = MsgSubmitFeeRate {
+        sender: relayer.config().relayer_bitcoin_address().to_string(),
+        fee_rate
+    };
+
+    info!("Submitting fee rate: {:?}", msg_submit_fee_rate);
+    let any_msg = Any::from_msg(&msg_submit_fee_rate).unwrap();
+    match send_cosmos_transaction(relayer.config(), any_msg).await {
+        Ok(resp) => {
+            let tx_response = resp.into_inner().tx_response.unwrap();
+            if tx_response.code != 0 {
+                error!("Failed to submit fee rate: {:?}", tx_response);
+                return;
+            }
+            info!("Success to submit fee rate: {:?}", tx_response);
+        }
+        Err(e) => {
+            error!("Failed to submit fee rate: {:?}", e);
+        }
     }
 }

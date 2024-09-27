@@ -1,7 +1,7 @@
 
 
 use bitcoincore_rpc::{Auth, Client};
-use crate::{app::config::Config, helper::client_ordinals::OrdinalsClient, tickers::relayer};
+use crate::{app::config::Config, helper::{client_oracle::OracleClient, client_ordinals::OrdinalsClient}, tickers::relayer};
 
 use tracing::info;
 
@@ -10,6 +10,7 @@ pub struct Relayer {
     config: Config,
     pub bitcoin_client: Client,
     pub ordinals_client: OrdinalsClient,
+    pub oracle_client: OracleClient,
 }
 
 impl Relayer {
@@ -21,11 +22,13 @@ impl Relayer {
             .expect("Could not initial bitcoin RPC client");
 
         let ordinals_client = OrdinalsClient::new(&conf.ordinals.endpoint);
+        let oracle_client = OracleClient::new(&conf.oracle);
 
         Self {
             // priv_validator_key: validator_key,
             bitcoin_client,
             ordinals_client,
+            oracle_client,
             config: conf,
         }
     }
