@@ -53,7 +53,7 @@ pub struct SignSession {
     pub sig_hash: Vec<u8>,
     pub address: String,
     /// NOTE: Should not share this with other parties
-    #[serde(skip_serializing)]
+    // #[serde(skip_serializing)]
     pub nonces: SigningNonces,
     pub commitments: BTreeMap<Identifier, round1::SigningCommitments>,
     pub signatures: BTreeMap<Identifier, round2::SignatureShare>,
