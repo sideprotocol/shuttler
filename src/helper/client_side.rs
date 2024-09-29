@@ -146,7 +146,7 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
     let gas = conf.side_chain.gas;
     let fee = Coin::new(conf.side_chain.fee.amount as u128, conf.side_chain.fee.denom.as_str()).unwrap();
     let timeout_height = 0u16;
-    let memo = "tss_signer";
+    let memo = "";
 
     // Create transaction body from the MsgSend, memo, and timeout height.
     let tx_body = tx::Body::new(vec![msg], memo, timeout_height);

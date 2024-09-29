@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{f32::consts::E, time::Duration};
 
 use bitcoin::{consensus::encode, Address, Block, BlockHash, OutPoint, Transaction, Txid};
 use bitcoincore_rpc::{Error, RpcApi};
@@ -17,7 +17,7 @@ use crate::{
 
 use cosmos_sdk_proto::{
     cosmos::tx::v1beta1::BroadcastTxResponse,
-    side::btcbridge::{BlockHeader, MsgSubmitBlockHeaders, MsgSubmitDepositTransaction, MsgSubmitFeeRate, MsgSubmitWithdrawTransaction, QueryParamsRequest},
+    side::btcbridge::{BlockHeader, MsgSubmitBlockHeaders, MsgSubmitDepositTransaction, MsgSubmitFeeRate, MsgSubmitWithdrawTransaction, MsgWithdrawToBitcoin, QueryParamsRequest},
 };
 use lazy_static::lazy_static;
 
@@ -37,9 +37,10 @@ lazy_static! {
 /// 2. Scan vault txs
 pub async fn start_relayer_tasks(relayer: &Relayer) {
     join!(
-        sync_btc_blocks_loop(&relayer),
-        scan_vault_txs_loop(&relayer),
-        submit_fee_rate_loop(&relayer),
+        // sync_btc_blocks_loop(&relayer),
+        // scan_vault_txs_loop(&relayer),
+        // submit_fee_rate_loop(&relayer),
+        withdraw_to_btc_loop(relayer),
     );
 }
 
@@ -523,6 +524,43 @@ pub(crate) fn get_last_scanned_height(config: &Config) -> u64 {
             config.last_scanned_height
         }
     }
+}
+
+pub async fn withdraw_to_btc_loop(relayer: &Relayer) {
+    loop {
+        let amount = 22000+ rand::random::<u64>() % 15000;
+
+        match send_withdraw_to_btc_tx(relayer, format!("{}sat",amount)).await {
+            Ok(resp) => {
+                let tx_response = resp.into_inner().tx_response.unwrap();
+                if tx_response.code != 0 {
+                    error!("Failed to send withdrawal tx: {:?}", tx_response);
+                } else {
+                    info!("Sent withdrawal tx: {:?}", tx_response);
+                }
+            }
+            Err(e) => {
+                error!("Failed to send withdrawal tx: {:?}", e);
+            }
+        }
+
+        sleep(Duration::from_secs(60)).await;
+    }
+}
+
+pub async fn send_withdraw_to_btc_tx(
+    relayer: &Relayer,
+    amount: String,
+) -> Result<Response<BroadcastTxResponse>, Status> {
+    let msg = MsgWithdrawToBitcoin {
+        sender: relayer.config().relayer_bitcoin_address().to_string(),
+        amount,
+    };
+
+    info!("Sending withdrawal tx: {:?}", msg);
+
+    let any_msg = Any::from_msg(&msg).unwrap();
+    send_cosmos_transaction(relayer.config(), any_msg).await
 }
 
 fn save_last_scanned_height(height: u64) {
