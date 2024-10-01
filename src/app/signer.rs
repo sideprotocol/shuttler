@@ -211,7 +211,7 @@ pub async fn run_signer_daemon(conf: Config) {
                 .max_transmit_size(1000000)
                 .build()
                 .map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?; // Temporary hack because `build` does not return a proper `std::error::Error`.
-            
+
             // build a gossipsub network behaviour
             let gossip = gossipsub::Behaviour::new(
                 gossipsub::MessageAuthenticity::Signed(key.clone()),
