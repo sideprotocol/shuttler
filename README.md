@@ -24,9 +24,9 @@ The DKG procedure is as follows:
 
 Signing is the regular task for TSS nodes.
 
-1. Signing requests are fetched from the Side chain by the coordinator selected by the TSS network periodically.
+1. Signing requests are fetched from the Side chain by the TSS node periodically.
 
-2. Sign the requests when signing requests received from the TSS network.
+2. Sign the requests and broadcast the related messages when signing requests are received.
 
 ## Relaying
 
@@ -44,12 +44,18 @@ At the same time, the bridge related transactions including deposit and withdraw
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-2. Clone and install
+2. Clone and build
 
 ```
 git clone https://github.com/sideprotocol/tssigner.git
 cd tssigner
-cargo install --release
+cargo build --release
+```
+
+The binary can be placed into the bin directory of Cargo for convenience.
+
+```
+cp target/release/shuttler ~/.cargo/bin
 ```
 
 ### Configure
@@ -57,22 +63,34 @@ cargo install --release
 1. Initialize
 
 ```
-shuttler --home ~/.shuttler init --network testnet --port 5158
+shuttler --home ~/.shuttler init --network testnet
 ```
 
-The *home* directory and *port* can be replaced by your choice.
+The *home* directory can be replaced by your choice.
 
-The random port will be generated if *--port* not set
+You can specify the port by `--port`. The default port is `5158`.
 
 2. Set the bootstrapping nodes
 
 ```
-bootstrap_nodes = [<seed node addresses>]
+bootstrap_nodes = ["<peer address>",...,"<peer address>"]
 ```
 
 The bootstrapping nodes are used to help connect to the TSS network when started.
 
-The public nodes can be used commonly.
+The format of the peer address is like this:
+
+```
+/ip4/<IP>/tcp/<PORT>/p2p/<PEER ID>
+```
+
+The `local peer id` can be retrieved as the following command:
+
+```
+shuttler --home <home> id
+```
+
+You can share your node address if possible. And the public nodes published by the TSS network members can be used as well.
 
 3. Set the validator key
 
@@ -87,7 +105,7 @@ The item should be set to the correct location which is commonly the *.side/conf
 
 ```
 [side_chain]
-grpc = <gprc address>
+grpc = "<gprc address>"
 ```
 
 If you run own Side node on the same server, the item can be set to `http://localhost:9090`. The value can be configured by the actual deployment or set to the public Side node which provides the gRPC server.
@@ -96,21 +114,39 @@ If you run own Side node on the same server, the item can be set to `http://loca
 
 ```
 [bitcoin]
-rpc = <rpc address>
-user = <rpc username>
-password = <rpc password>
+network = "<network name>"
+rpc = "<rpc endpoint>"
+user = "<rpc username>"
+password = "<rpc password>"
 ```
 
 For signers and relayers, the bitcoin node rpc is required to send the signed transactions or sync the bitcoin block headers and the bridge related transactions to the Side chain.
 
-In the Side testnet phase 3, the corresponding bitcoin network is `testnet3`. The TSS node operator can deploy own bitcoin node or use the third-party server provider by demand.
+In the Side testnet phase 3, the corresponding bitcoin network is `testnet3`. For testnet3, the network name is `testnet` and defaut port is `18332`.
+
+The TSS node operator can deploy own bitcoin node or use the third-party server provider by demand.
+
+The public bitcoin node information provided by Side Labs is as follows:
+
+```
+network = "testnet"
+rpc = "http://192.248.150.102:18332"
+user = "side"
+password = "12345678"
+```
+
+**_Note_**: The `--txindex` is required to be set when starting the Bitcoin node as following:
+
+```
+bitcoind -txindex -rpcuser=<user> --rpcpassword=<password>
+```
 
 ### Fund the relayer address
 
 The relayer(Side transaction sender) address can be viewed by the following command:
 
 ```
-shuttler --home <home> addresses
+shuttler --home <home> address
 ```
 
 **Note**: Before starting the TSS node, the sender address needs to be funded for sending the transactions to the Side chain.
@@ -145,7 +181,7 @@ shuttler --home <home> start
 
 ### Hardware Specifications
 
-#### Standalone TSS node
+#### Running only the TSS node
 
 1. Minimum Requirements
 
@@ -167,7 +203,7 @@ shuttler --home <home> start
 
    - Network: 1 Gbps
 
-#### Standalone Bitcoin testnet3 node
+#### Running only the Bitcoin Testnet3 full node
 
 1. Minimum Requirements
 
@@ -189,7 +225,7 @@ shuttler --home <home> start
 
    - Network: 1 Gbps
 
-### Run both TSS and Bitcoin nodes
+#### Running both the TSS node and Bitcoin Testnet3 full node
 
 1. Minimum Requirements
 
@@ -210,3 +246,5 @@ shuttler --home <home> start
    - Storage: 500 GB
 
    - Network: 1 Gbps
+
+**Note**: To ensure service quality, we strongly recommend not running the Side Chain validator node on any of the machines listed above.
