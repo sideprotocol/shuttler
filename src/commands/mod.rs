@@ -54,6 +54,7 @@ pub enum Commands {
     Debug {
         txid: String,
     },
+    Id,
 }
 
 pub mod init;
@@ -63,3 +64,4 @@ pub mod reset;
 pub mod submit_header;
 pub mod submit_tx;
 pub mod debug;
+pub mod id;
