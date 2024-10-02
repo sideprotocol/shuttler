@@ -247,7 +247,7 @@ impl Config {
             },
             side_chain: CosmosChain {
                 grpc: "http://localhost:9090".to_string(),
-                gas: 200000,
+                gas: 1000000,
                 fee: Fee {
                     amount: 1000,
                     denom: "uside".to_string(),
