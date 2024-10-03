@@ -130,6 +130,11 @@ async fn submit_dkg_address(signer: &Signer) {
         if task.round != Round::Closed {
             continue;
         }
+
+        if task.submitted {
+            continue;
+        }
+
         let task_id = task.id.replace("dkg-", "").parse().unwrap();
         // submit the vault address to sidechain
         let cosm_msg = MsgCompleteDkg {
@@ -144,13 +149,15 @@ async fn submit_dkg_address(signer: &Signer) {
         match send_cosmos_transaction(signer.config(), any).await {
             Ok(resp) => {
                 let tx_response = resp.into_inner().tx_response.unwrap();
-                if tx_response.code != 0 {
-                    error!("Failed to send dkg vault: {:?}", tx_response);
+                if tx_response.code == 0 {
                     task.submitted = true;
                     save_task(task);
-                    continue
+                
+                    info!("Sent dkg vault: {:?}", tx_response);
+                    continue;
                 }
-                info!("Sent dkg vault: {:?}", tx_response);
+
+                error!("Failed to send dkg vault: {:?}", tx_response);
             },
             Err(e) => {
                 error!("Failed to send dkg vault: {:?}", e);
