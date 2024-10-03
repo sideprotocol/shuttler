@@ -237,21 +237,21 @@ impl Config {
         Self {
             p2p_keypair ,
             port: port as u32,
-            bootstrap_nodes: vec!["/ip4/127.0.0.1/tcp/5158/p2p/12D3KooWDnpzHGad9V7THWtgfkVE5XgsB3yqnR4Qoxm9zDwhYoqQ".to_string()],
-            log_level: "debug".to_string(),
+            bootstrap_nodes: vec!["/ip4/192.248.180.245/tcp/5158/p2p/12D3KooWMpMtmYQKSn1sZaSRn4CAcsraWZVrZ2zdNjEgsEPSd3Pv".to_string()],
+            log_level: "info".to_string(),
             mnemonic: mnemonic.to_string(),
             priv_validator_key_path: "priv_validator_key.json".to_string(),
             // keys: BTreeMap::new(),
             // pubkeys: BTreeMap::new(),
             bitcoin: BitcoinCfg {
                 network,
-                rpc: "http://signet:38332".to_string(),
+                rpc: "http://192.248.150.102:18332".to_string(),
                 user: "side".to_string(),
                 password: "12345678".to_string(),
             },
             side_chain: CosmosChain {
                 grpc: "http://localhost:9090".to_string(),
-                gas: 200000,
+                gas: 1000000,
                 fee: Fee {
                     amount: 1000,
                     denom: "uside".to_string(),
