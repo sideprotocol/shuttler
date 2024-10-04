@@ -363,7 +363,7 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
                 psbt.inputs[*index].sighash_type = None;
             }
             Err(e) => {
-                error!("Signature aggregation error: {:?}", e);
+                error!("Signature aggregation error: {:?} {:?}", task.id, e);
             }
         };
     };
