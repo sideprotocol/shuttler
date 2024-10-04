@@ -2,7 +2,7 @@ use bitcoin::Network;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "tssigner", version = "0.1.0", author = "Side Labs")]
+#[command(name = "tssigner", version = "0.1.1", author = "Side Labs")]
 #[command(about = "A threshold vault signer of Side Bitcoin Bridge", long_about = None)]
 pub struct Cli {
     #[clap(long, default_value = ".tssigner")]
@@ -54,6 +54,7 @@ pub enum Commands {
     Debug {
         txid: String,
     },
+    Id,
 }
 
 pub mod init;
@@ -63,3 +64,4 @@ pub mod reset;
 pub mod submit_header;
 pub mod submit_tx;
 pub mod debug;
+pub mod id;

@@ -16,9 +16,16 @@ pub struct Relayer {
 impl Relayer {
     pub fn new(conf: Config) -> Self {
 
+        let auth = if !conf.bitcoin.user.is_empty() {
+            Auth::UserPass(conf.bitcoin.user.clone(), conf.bitcoin.password.clone())
+        } else {
+            Auth::None
+        };
+
         let bitcoin_client = Client::new(
             &conf.bitcoin.rpc, 
-            Auth::UserPass(conf.bitcoin.user.clone(), conf.bitcoin.password.clone()))
+            auth,
+        )
             .expect("Could not initial bitcoin RPC client");
 
         let ordinals_client = OrdinalsClient::new(&conf.ordinals.endpoint);

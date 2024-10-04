@@ -190,12 +190,26 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
         }
     };
 
-    tx_client.broadcast_tx(BroadcastTxRequest {
+    match tx_client.broadcast_tx(BroadcastTxRequest {
         tx_bytes,
         mode: BroadcastMode::Sync.into(),    
-    }).await
-    
-   // post::<>(url.as_str(), tx).await
+    }).await {
+        Ok(response) => {
+            let tx_response = response.into_inner().tx_response;
+            let tx_response_clone = tx_response.clone();
+            if tx_response.is_some() && tx_response.unwrap().code == 0 {
+                let mut new_account  = base_account.clone();
+                new_account.sequence += 1;
+                config::save_relayer_account(&new_account);
+            }
+            return Ok(tonic::Response::new(BroadcastTxResponse {
+                tx_response: tx_response_clone,
+            }));
+        }
+        Err(e) => {
+            return Err(Status::aborted(format!("Failed to broadcast tx: {}", e)));
+        }
+    }
 }
 
 fn sign_with_bitcoin_algo(doc: &SignDoc, priv_key: &PrivateKey) -> Raw {

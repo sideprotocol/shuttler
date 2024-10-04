@@ -164,9 +164,9 @@ pub async fn get_relayer_account(conf: &Config) -> BaseAccount {
     let cache = BASE_ACCOUNT.lock().unwrap().clone().map(|account| account);
     match cache {
         Some(account) => {
-            let mut new_account = account.clone();
-            new_account.sequence += 1;
-            BASE_ACCOUNT.lock().unwrap().replace(new_account.clone());
+            let new_account  = account.clone();
+            // new_account.sequence += 1;
+            // BASE_ACCOUNT.lock().unwrap().replace(new_account.clone());
             return new_account;
         }
         None => {
@@ -180,7 +180,7 @@ pub async fn get_relayer_account(conf: &Config) -> BaseAccount {
                 Ok(response) => {
     
                     let base_account: BaseAccount = response.into_inner().account.unwrap().to_msg().unwrap();
-                    BASE_ACCOUNT.lock().unwrap().replace(base_account.clone());
+                    // BASE_ACCOUNT.lock().unwrap().replace(base_account.clone());
                     base_account
                 }
                 Err(_) => {
@@ -189,6 +189,10 @@ pub async fn get_relayer_account(conf: &Config) -> BaseAccount {
             }
         }
     }
+}
+
+pub fn save_relayer_account(account: &BaseAccount) {
+    BASE_ACCOUNT.lock().unwrap().replace(account.clone());
 }
 
 impl Config {
@@ -233,21 +237,21 @@ impl Config {
         Self {
             p2p_keypair ,
             port: port as u32,
-            bootstrap_nodes: vec!["/ip4/127.0.0.1/tcp/5158/p2p/12D3KooWDnpzHGad9V7THWtgfkVE5XgsB3yqnR4Qoxm9zDwhYoqQ".to_string()],
-            log_level: "debug".to_string(),
+            bootstrap_nodes: vec!["/ip4/192.248.180.245/tcp/5158/p2p/12D3KooWMpMtmYQKSn1sZaSRn4CAcsraWZVrZ2zdNjEgsEPSd3Pv".to_string()],
+            log_level: "info".to_string(),
             mnemonic: mnemonic.to_string(),
             priv_validator_key_path: "priv_validator_key.json".to_string(),
             // keys: BTreeMap::new(),
             // pubkeys: BTreeMap::new(),
             bitcoin: BitcoinCfg {
                 network,
-                rpc: "http://signet:38332".to_string(),
+                rpc: "http://192.248.150.102:18332".to_string(),
                 user: "side".to_string(),
                 password: "12345678".to_string(),
             },
             side_chain: CosmosChain {
                 grpc: "http://localhost:9090".to_string(),
-                gas: 200000,
+                gas: 1000000,
                 fee: Fee {
                     amount: 1000,
                     denom: "uside".to_string(),
@@ -326,7 +330,6 @@ impl Config {
     //     let pk_bytes = self.signer_priv_key().public_key().to_bytes();
     //     CompressedPublicKey::from_slice(pk_bytes.as_slice()).expect("failed to derive relayer address")
     // }
-
 }
 
 pub fn home_dir(app_home: &str) -> PathBuf {
