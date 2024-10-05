@@ -64,16 +64,20 @@ impl Signer {
         // load private key from priv_validator_key_path
         let local_key = match conf.get_validator_key() {
             Some(validator_key) => {
+                info!("Running as validator: {}", &validator_key.priv_key.value);
                 let b = from_base64(&validator_key.priv_key.value).expect("Decode private key failed");
                 SecretKey::from_slice(b.as_slice()).expect("invalid secret key")
             },
-            None => SecretKey::from_slice(random_bytes(SecretKey::BYTES).as_slice()).expect("invalid secret key")
+            None => {
+                info!("Running as non-validator with a random p2p key. ");
+                SecretKey::from_slice(random_bytes(SecretKey::BYTES).as_slice()).expect("invalid secret key")
+            } 
         };
 
         let id = frost::Secp256K1ScalarField::deserialize(&local_key.public_key().as_slice().try_into().unwrap()).unwrap();
         let identifier = frost_core::Identifier::new(id).unwrap(); 
 
-        info!("Threshold Signature Identifier: {:?}", identifier);
+        info!("Threshold Signature Identifier: {:?}", identifier, );
 
         let bitcoin_client = Client::new(
             &conf.bitcoin.rpc, 
@@ -239,7 +243,7 @@ pub async fn run_signer_daemon(conf: Config) {
     dail_bootstrap_nodes(&mut swarm, &conf);
     subscribe_gossip_topics(&mut swarm);
 
-    let mut interval = tokio::time::interval(Duration::from_secs(6));
+    let mut interval = tokio::time::interval(Duration::from_secs(30));
 
     loop {
         select! {
