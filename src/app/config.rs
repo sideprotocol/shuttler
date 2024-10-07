@@ -160,28 +160,17 @@ pub fn save_keypair_to_db(address: String, keypair: &Keypair) -> sled::Result<Op
 /// relayer account will be used to sign transactions on the side chain,
 /// such as sending block headers, depositing and withdrawing transactions
 pub async fn get_relayer_account(conf: &Config) -> BaseAccount {
-
     let cache = BASE_ACCOUNT.lock().unwrap().clone().map(|account| account);
     match cache {
         Some(account) => {
-            let new_account  = account.clone();
-            // new_account.sequence += 1;
-            // BASE_ACCOUNT.lock().unwrap().replace(new_account.clone());
-            return new_account;
+            return account.clone();
         }
         None => {
             let mut client = AuthQueryClient::connect(conf.side_chain.grpc.clone()).await.unwrap();
-            let request = QueryAccountRequest {
-                // address: conf.signer_cosmos_address().to_string(),
-                address: conf.relayer_bitcoin_address()
-            };
-    
+            let request = QueryAccountRequest { address: conf.relayer_bitcoin_address() };
             match client.account(request).await {
                 Ok(response) => {
-    
-                    let base_account: BaseAccount = response.into_inner().account.unwrap().to_msg().unwrap();
-                    // BASE_ACCOUNT.lock().unwrap().replace(base_account.clone());
-                    base_account
+                    response.into_inner().account.unwrap().to_msg().unwrap()
                 }
                 Err(_) => {
                     panic!("===============================================\n Relayer account don't exist on side chain \n===============================================");
@@ -193,6 +182,10 @@ pub async fn get_relayer_account(conf: &Config) -> BaseAccount {
 
 pub fn save_relayer_account(account: &BaseAccount) {
     BASE_ACCOUNT.lock().unwrap().replace(account.clone());
+}
+
+pub fn remove_relayer_account() {
+    *BASE_ACCOUNT.lock().unwrap() = None;
 }
 
 impl Config {

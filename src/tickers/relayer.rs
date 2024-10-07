@@ -82,9 +82,12 @@ pub async fn sync_btc_blocks_loop(relayer: &Relayer) {
         };
         debug!("Syncing blocks from {} to {}", tip_on_side, batch);
     
-        // check current block hash before syncing blocks 
-        check_block_hash_is_corrent(&relayer, tip_on_side).await;
-        
+        // check parent blocks hash before syncing blocks 
+        let confirmations = client_side::get_confirmations_on_side(&relayer.config().side_chain.grpc).await;
+        for n in 1..confirmations {
+            check_block_hash_is_corrent(&relayer, tip_on_side + n - confirmations).await;
+        }
+
         let mut block_headers: Vec<BlockHeader> = vec![];
         while tip_on_side < batch {
             tip_on_side = tip_on_side + 1;
@@ -234,7 +237,8 @@ pub async fn scan_vault_txs_loop(relayer: &Relayer) {
                 }
             };
 
-        if height > side_tip - 1 {
+        let confirmations = client_side::get_confirmations_on_side(&relayer.config().side_chain.grpc).await;
+        if height > side_tip - confirmations {
             debug!("No new txs to sync, height: {}, side tip: {}, sleep for {} seconds...", height, side_tip, interval);
             sleep(Duration::from_secs(interval)).await;
             continue;
