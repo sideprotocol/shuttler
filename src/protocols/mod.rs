@@ -17,8 +17,17 @@ pub struct TSSBehaviour {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Round {
+    Initial,
     Round1,
     Round2,
     Closed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SignTaskStatus {
+    Initial,
+    Pending,
+    Completed,
+    Failure,
 }
 

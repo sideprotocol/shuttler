@@ -1,18 +1,45 @@
-
-use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsRequest};
+use cosmos_sdk_proto::side::btcbridge::{
+    query_client::QueryClient as BtcQueryClient,
+    DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsRequest
+};
 use cosmrs::Any;
 use libp2p:: Swarm;
 use tracing::{debug, error, info};
 
+use crate::{
+    app::signer::Signer,
+    helper::client_side::{get_signing_requests, send_cosmos_transaction},
+    protocols::{
+        dkg::{self, collect_dkg_packages, generate_round1_package, list_tasks, save_task, DKGTask}, 
+        sign::{self, collect_tss_packages, generate_nonce_and_commitments, list_sign_tasks},
+        Round, TSSBehaviour
+    }
+};
 
-use crate::{app::signer::Signer, helper::client_side::{get_signing_requests, send_cosmos_transaction}, protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, list_tasks, save_task, DKGTask}, sign::{self, collect_tss_packages, generate_nonce_and_commitments, list_sign_tasks}, Round, TSSBehaviour}};
 
-async fn fetch_signing_requests(
-    _behave: &mut TSSBehaviour,
-    shuttler: &Signer,
-) {
-    let host = shuttler.config().side_chain.grpc.as_str();
+pub async fn tss_tasks_fetcher(swarm : &mut Swarm<TSSBehaviour>, signer: &Signer) {
+    if signer.config().get_validator_key().is_none() {
+        return;
+    }
+    if swarm.connected_peers().count() == 0 {
+        return;
+    }
+    debug!("Connected peers: {:?}", swarm.connected_peers().collect::<Vec<_>>());
 
+    // 1. fetch dkg requests
+    fetch_dkg_requests(signer).await;
+    // 2. collect dkg packages
+    collect_dkg_packages(swarm);
+    // 3. fetch signing requests
+    fetch_signing_requests( swarm.behaviour_mut(), signer).await;
+    // 4. collect signing requests tss packages
+    collect_tss_packages(swarm, signer).await;
+    // 5. submit dkg address
+    submit_dkg_address(signer).await;
+}
+
+async fn fetch_signing_requests(_behave: &mut TSSBehaviour, signer: &Signer) {
+    let host = signer.config().side_chain.grpc.as_str();
     match get_signing_requests(&host).await {
         Ok(response) => {
             let requests = response.into_inner().requests;
@@ -24,6 +51,7 @@ async fn fetch_signing_requests(
                     sign::remove_task(&task.id);
                 }
             });
+
             // mock for testing
             // if requests.len() == 0 {
                 // requests.push(SigningRequest {
@@ -35,7 +63,7 @@ async fn fetch_signing_requests(
                 // });
             // }
             for request in requests {
-                generate_nonce_and_commitments(request, shuttler);
+                generate_nonce_and_commitments(request, signer);
             }
         }
         Err(e) => {
@@ -90,41 +118,6 @@ async fn fetch_dkg_requests(shuttler: &Signer) {
     };
 }
 
-
-pub async fn tss_tasks_fetcher(
-    // peers: Vec<&PeerId>,
-    // behave: &mut TSSBehaviour,
-    swarm : &mut Swarm<TSSBehaviour>,
-    shuttler: &Signer,
-) {
-
-    if shuttler.config().get_validator_key().is_none() {
-        return;
-    }
-
-    if swarm.connected_peers().count() == 0 {
-        return;
-    }
-
-    debug!("Connected peers: {:?}", swarm.connected_peers().collect::<Vec<_>>());
-    // ===========================
-    // all participants tasks:
-    // ===========================
-
-    // 1. fetch dkg requests
-    fetch_dkg_requests(shuttler).await;
-    // 2. collect dkg packages
-    collect_dkg_packages(swarm);
-    // 3. fetch signing requests
-    fetch_signing_requests( swarm.behaviour_mut(), shuttler).await;
-    // 4. collect signing requests tss packages
-    collect_tss_packages(swarm, shuttler).await;
-    // 5. submit dkg address
-    submit_dkg_address(shuttler).await;
-
-
-}
-
 async fn submit_dkg_address(signer: &Signer) {
     for task in list_tasks().iter_mut() {
         if task.round != Round::Closed {
@@ -164,5 +157,4 @@ async fn submit_dkg_address(signer: &Signer) {
             },
         };
     };
-    
 }
