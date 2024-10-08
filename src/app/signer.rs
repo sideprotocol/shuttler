@@ -21,7 +21,7 @@ use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::from_base64;
 use crate::helper::gossip::{subscribe_gossip_topics, SubscribeTopic};
-use crate::protocols::sign::{received_sign_message, SignMesage, SignResponse};
+use crate::protocols::sign::{received_sign_message, SignMesage};
 use crate::tickers::tss::tss_tasks_fetcher;
 use crate::protocols::dkg::{received_dkg_response, DKGResponse};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
@@ -35,7 +35,7 @@ use tokio::select;
 
 use tracing::{debug, error, info, warn};
 
-use ed25519_compact:: SecretKey;
+use ed25519_compact::SecretKey;
 
 use lazy_static::lazy_static;
 

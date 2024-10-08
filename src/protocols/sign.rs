@@ -173,7 +173,7 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
     save_sign_task(&task);
 }
 
-pub async fn broadcast_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signer: &Signer) {
+pub async fn broadcast_tss_packages(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
 
     for item in DB_TASK.iter() {
         let mut task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
@@ -181,44 +181,69 @@ pub async fn broadcast_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, sig
         debug!("process task: {:?}", task);
         match task.round {
             Round::Round1 => {
-                let mut local_nonces = get_sign_local_nonces(&task.id);
-
-                let retry = local_nonces.len() + 1;
-                // If it is not completed after 10 retries, the task is considered closed
-                if retry >= 10 {
-                    task.round = Round::Closed;
-                    save_sign_task(&task);
-                    continue;
-                }
-
-                let mut nonces = BTreeMap::new();
-                let mut packages = BTreeMap::new();
-                task.inputs.iter().for_each(|(index, input)| {
-                    if let Some((nonce, commitment)) = generate_nonce_and_commitment(&input.address) {
-                        nonces.insert(*index, nonce);
-                        let mut map = BTreeMap::new();
-                        map.insert(signer.identifier().clone(), commitment);
-                        packages.insert(*index, map);
-                    }
-                });
-                // save local variable: nonces
-                local_nonces.insert(retry, nonces);
-                save_sign_local_variable(&task.id, &local_nonces);
-                // publish remote variable: commitment
-                publish_signing_package(swarm, &SignMesage {
-                    task_id: task.id,
-                    retry,
-                    package: SignPackage::Round1(packages)
-                });
+                generate_commitments(swarm, signer, &mut task);
             },
             Round::Round2 => {
                 generate_signature_shares(swarm, &mut task, signer.identifier());
             },
-            Round::Closed => {
+            Round::Aggregate => {
+                let psbt_bytes = from_base64(&task.psbt).unwrap();
+                let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
+                    Ok(psbt) => psbt,
+                    Err(e) => {
+                        error!("Failed to deserialize PSBT: {}", e);
+                        continue;
+                    }
+                };
+                let is_complete = psbt.inputs.iter().all(|input| {
+                    input.final_script_witness.is_some()
+                });
+                if is_complete {
+                    submit_signatures(psbt, signer).await;
+                } else {
+                    debug!("Re-sign {}:  {:?}", task.id, is_complete);
+                    task.round = Round::Round1;
+                    save_sign_task(&task);
+                }
+                
+            }
+            _ => {
 
             }
         }
     };
+}
+
+fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: &mut SignTask) {
+    let mut local_nonces = get_sign_local_nonces(&task.id);
+
+    let retry = local_nonces.len() + 1;
+    // If it is not completed after 10 retries, the task is considered closed
+    if retry >= 10 {
+        task.round = Round::Closed;
+        save_sign_task(&task);
+        return;
+    }
+
+    let mut nonces = BTreeMap::new();
+    let mut packages = BTreeMap::new();
+    task.inputs.iter().for_each(|(index, input)| {
+        if let Some((nonce, commitment)) = generate_nonce_and_commitment_by_address(&input.address) {
+            nonces.insert(*index, nonce);
+            let mut map = BTreeMap::new();
+            map.insert(signer.identifier().clone(), commitment);
+            packages.insert(*index, map);
+        }
+    });
+    // save local variable: nonces
+    local_nonces.insert(retry, nonces);
+    save_sign_local_variable(&task.id, &local_nonces);
+    // publish remote variable: commitment
+    publish_signing_package(swarm, &SignMesage {
+        task_id: task.id.clone(),
+        retry,
+        package: SignPackage::Round1(packages)
+    });
 }
 
 pub fn received_sign_message(msg: SignMesage) {
@@ -276,11 +301,27 @@ pub fn received_sign_message(msg: SignMesage) {
             }
             save_sign_remote_signature_shares(&task_id, &remote_sig_shares);
 
-            // aggregate signatures if it's possible
-            aggregate_signature_shares(&mut task);
+            // Move to Round2 if the commitment of all inputs received from the latest retry exceeds the minimum number of signers.
+            if remote_sig_shares.get(&msg.retry).unwrap().iter().all(|(index, shares)| {
+                match task.inputs.get(index) {
+                    Some(input) => {
+                        match config::get_keypair_from_db(&input.address) {
+                            Some(key) => shares.len() as u16 >= key.priv_key.min_signers().clone(),
+                            None => false
+                        }
+                    },
+                    None => false
+                }
+            }) {
+                task.round = Round::Aggregate;
+                save_sign_task(&task);
+
+                // aggregate signatures if it's possible
+                aggregate_signature_shares(&mut task);
+            }
+
         }
     }
-
 
 }
 
@@ -342,7 +383,6 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
                         }
                     };
                 
-                // input.signatures.insert(identifier, signature_shares);
                 let mut map = BTreeMap::new();
                 map.insert(identifier.clone(), signature_shares);
                 packages.insert(i.clone(), map);
@@ -386,15 +426,6 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
     if task.round == Round::Closed {
         return None;
     }
-    
-    let psbt_bytes = from_base64(&task.psbt).unwrap();
-    let mut psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
-        Ok(psbt) => psbt,
-        Err(e) => {
-            error!("Failed to deserialize PSBT: {}", e);
-            return None;
-        }
-    };
 
     let stored_nonces = get_sign_local_nonces(&task.id);
     let retry = stored_nonces.len(); // latest retry
@@ -411,7 +442,15 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
         None => return None
     };
 
-    // task.inputs.iter().enumerate().for_each(|(index, input)| {
+    let psbt_bytes = from_base64(&task.psbt).unwrap();
+    let mut psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
+        Ok(psbt) => psbt,
+        Err(e) => {
+            error!("Failed to deserialize PSBT: {}", e);
+            return None;
+        }
+    };
+
     for (index, input) in task.inputs.iter() {
 
         let signing_commitments = match latest_remote_commitments.get(index) {
@@ -548,7 +587,7 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
     // send message to the network
 }
 
-fn generate_nonce_and_commitment(address: &str) -> Option<(SigningNonces, SigningCommitments)> {
+fn generate_nonce_and_commitment_by_address(address: &str) -> Option<(SigningNonces, SigningCommitments)> {
     let sign_key = match config::get_keypair_from_db(address) {
         Some(key) => {
             debug!("loaded key for address: {:?}", address);
