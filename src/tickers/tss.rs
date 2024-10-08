@@ -4,8 +4,41 @@ use cosmrs::Any;
 use libp2p:: Swarm;
 use tracing::{debug, error, info};
 
+use crate::{
+    app::signer::Signer, 
+    helper::client_side::{get_signing_requests, send_cosmos_transaction}, 
+    protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, list_tasks, save_task, DKGTask}, 
+    sign::{self, broadcast_tss_packages, list_sign_tasks, save_task_into_signing_queue}, Round, TSSBehaviour
+}};
 
-use crate::{app::signer::Signer, helper::client_side::{get_signing_requests, send_cosmos_transaction}, protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, list_tasks, save_task, DKGTask}, sign::{self, collect_tss_packages, generate_nonce_and_commitments, list_sign_tasks}, Round, TSSBehaviour}};
+pub async fn tss_tasks_fetcher(
+    swarm : &mut Swarm<TSSBehaviour>,
+    shuttler: &Signer,
+) {
+
+    if shuttler.config().get_validator_key().is_none() {
+        return;
+    }
+
+    if swarm.connected_peers().count() == 0 {
+        return;
+    }
+
+    debug!("Connected peers: {:?}", swarm.connected_peers().collect::<Vec<_>>());
+
+    // 1. fetch dkg requests
+    fetch_dkg_requests(shuttler).await;
+    // 2. collect dkg packages
+    collect_dkg_packages(swarm);
+    // 3. fetch signing requests
+    fetch_signing_requests( swarm.behaviour_mut(), shuttler).await;
+    // 4. collect signing requests tss packages
+    broadcast_tss_packages(swarm, shuttler).await;
+    // 5. submit dkg address
+    submit_dkg_address(shuttler).await;
+
+
+}
 
 async fn fetch_signing_requests(
     _behave: &mut TSSBehaviour,
@@ -35,7 +68,7 @@ async fn fetch_signing_requests(
                 // });
             // }
             for request in requests {
-                generate_nonce_and_commitments(request, shuttler);
+                save_task_into_signing_queue(request, shuttler);
             }
         }
         Err(e) => {
@@ -88,41 +121,6 @@ async fn fetch_dkg_requests(shuttler: &Signer) {
             }
         }
     };
-}
-
-
-pub async fn tss_tasks_fetcher(
-    // peers: Vec<&PeerId>,
-    // behave: &mut TSSBehaviour,
-    swarm : &mut Swarm<TSSBehaviour>,
-    shuttler: &Signer,
-) {
-
-    if shuttler.config().get_validator_key().is_none() {
-        return;
-    }
-
-    if swarm.connected_peers().count() == 0 {
-        return;
-    }
-
-    debug!("Connected peers: {:?}", swarm.connected_peers().collect::<Vec<_>>());
-    // ===========================
-    // all participants tasks:
-    // ===========================
-
-    // 1. fetch dkg requests
-    fetch_dkg_requests(shuttler).await;
-    // 2. collect dkg packages
-    collect_dkg_packages(swarm);
-    // 3. fetch signing requests
-    fetch_signing_requests( swarm.behaviour_mut(), shuttler).await;
-    // 4. collect signing requests tss packages
-    collect_tss_packages(swarm, shuttler).await;
-    // 5. submit dkg address
-    submit_dkg_address(shuttler).await;
-
-
 }
 
 async fn submit_dkg_address(signer: &Signer) {

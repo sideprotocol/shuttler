@@ -21,7 +21,7 @@ use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::from_base64;
 use crate::helper::gossip::{subscribe_gossip_topics, SubscribeTopic};
-use crate::protocols::sign::{received_sign_response, SignResponse};
+use crate::protocols::sign::{received_sign_message, SignMesage, SignResponse};
 use crate::tickers::tss::tss_tasks_fetcher;
 use crate::protocols::dkg::{received_dkg_response, DKGResponse};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
@@ -239,7 +239,7 @@ pub async fn run_signer_daemon(conf: Config) {
     dail_bootstrap_nodes(&mut swarm, &conf);
     subscribe_gossip_topics(&mut swarm);
 
-    let mut interval = tokio::time::interval(Duration::from_secs(6));
+    let mut interval = tokio::time::interval(Duration::from_secs(30));
 
     loop {
         select! {
@@ -304,9 +304,9 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 debug!("Gossip Received DKG Response from {propagation_source}: {message_id} {:?}", response);
                 received_dkg_response(response, signer);
             } else if message.topic == SubscribeTopic::SIGNING.topic().hash() {
-                let response: SignResponse = serde_json::from_slice(&message.data).expect("Failed to deserialize Sign message");
-                debug!("Gossip Received TSS Response from {propagation_source}: {message_id} {:?}", response);
-                received_sign_response(response);
+                let msg: SignMesage = serde_json::from_slice(&message.data).expect("Failed to deserialize Sign message");
+                debug!("Gossip Received TSS Response from {propagation_source}: {message_id} {:?}", msg);
+                received_sign_message(msg);
             }
         }
         TSSBehaviourEvent::Identify(identify::Event::Received { peer_id, connection_id, info }) => {

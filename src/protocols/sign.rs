@@ -3,26 +3,42 @@ use std::collections::BTreeMap;
 use bitcoin::{sighash::{self, SighashCache}, Address, Psbt, TapSighashType, Witness};
 use bitcoin_hashes::Hash;
 use bitcoincore_rpc::RpcApi;
-use cosmos_sdk_proto::side::btcbridge::{SigningRequest, MsgSubmitSignatures};
+use cosmos_sdk_proto::side::btcbridge::{MsgSubmitSignatures, SigningRequest};
 use cosmrs::Any;
 
+use libp2p::Swarm;
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
 use frost::{Identifier, round1, round2}; 
-use frost_secp256k1_tr::{self as frost, round1::SigningNonces};
-use crate::{app::{config::{self, get_database_with_name}, signer::Signer}, helper::{client_side::send_cosmos_transaction, encoding::{self, from_base64}, gossip::publish_sign_package, now}};
+use frost_secp256k1_tr::{self as frost, round1::{SigningCommitments, SigningNonces}};
+use crate::{
+    app::{config::{self, get_database_with_name}, 
+    signer::Signer}, 
+    helper::{
+        client_side::send_cosmos_transaction, 
+        encoding::{self, from_base64}, 
+        gossip::publish_signing_package,
+    }};
 
 use super::{Round, TSSBehaviour};
 use lazy_static::lazy_static;
+use usize as Retry;
+use usize as Index;
 
 lazy_static! {
     static ref DB_TASK: sled::Db = {
         let path = get_database_with_name("sign-task");
         sled::open(path).unwrap()
     };
+    static ref DB_TASK_VARIABLES: sled::Db = {
+        let path = get_database_with_name("sign-task-variables");
+        sled::open(path).unwrap()
+    };
 }
+
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignRequest {
@@ -38,29 +54,36 @@ pub struct SignResponse {
     nonce: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignMesage {
+    pub task_id: String,
+    pub retry: Retry,
+    pub package: SignPackage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SignPackage {
+    Round1(BTreeMap<Index,BTreeMap<Identifier,round1::SigningCommitments>>),
+    Round2(BTreeMap<Index,BTreeMap<Identifier,round2::SignatureShare>>),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignTask {
     pub id: String,
     pub psbt: String,
     pub round: Round,
-    pub sessions: BTreeMap<usize, SignSession>,
+    pub inputs: BTreeMap<Index, TransactionInput>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SignSession {
+pub struct TransactionInput {
     pub task_id: String,
-    pub index: usize,
+    pub index: Index,
     pub sig_hash: Vec<u8>,
     pub address: String,
-    /// NOTE: Should not share this with other parties
-    // #[serde(skip_serializing)]
-    pub nonces: SigningNonces,
-    pub commitments: BTreeMap<Identifier, round1::SigningCommitments>,
-    pub signatures: BTreeMap<Identifier, round2::SignatureShare>,
 }
 
-pub fn generate_nonce_and_commitments(request: SigningRequest, signer: &Signer) {
-
+pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
     match DB_TASK.contains_key(request.txid.as_bytes()) {
         Ok(false) => {
             info!("Fetched a new signing task: {:?}", request);
@@ -82,8 +105,8 @@ pub fn generate_nonce_and_commitments(request: SigningRequest, signer: &Signer) 
         }
     };
 
-    debug!("(signing round 0) prepare for signing: {:?} sessions of {:?}", psbt.inputs.len(), request.txid );
-    let mut sessions = BTreeMap::new();
+    debug!("(signing round 0) prepare for signing: {:?} inputs in {:?}", psbt.inputs.len(), request.txid );
+    let mut inputs = BTreeMap::new();
     let preouts = psbt.inputs.iter()
         //.filter(|input| input.witness_utxo.is_some())
         .map(|input| input.witness_utxo.clone().unwrap())
@@ -120,67 +143,87 @@ pub fn generate_nonce_and_commitments(request: SigningRequest, signer: &Signer) 
             }
         };
 
-        let sign_key = match config::get_keypair_from_db(&address.to_string()) {
-            Some(key) => {
-                debug!("loaded key for address: {:?}", address);
-                key.priv_key
-            }
-            None => {
-                error!("Failed to get signing key for address: {}", address);
-                return;
-            }
+        if config::get_keypair_from_db(&address.to_string()).is_none() {
+            debug!("Skip, I am not signer of address: {}", address);
+            return;
         };
 
-        let mut rng = thread_rng();
-        let (nonce, commitments) = frost::round1::commit(sign_key.signing_share(), &mut rng);
-
-        let mut commitments_map = BTreeMap::new();
-        commitments_map.insert(signer.identifier().clone(), commitments.clone());
-        let session = SignSession {
+        let input = TransactionInput {
             task_id: group_task_id.clone(),
             index: i,
             sig_hash: hash.to_raw_hash().to_byte_array().to_vec(),
             address: address.to_string(),
-            nonces: nonce,
-            commitments: commitments_map,
-            signatures: BTreeMap::new(),
         };
 
-        sessions.insert(i, session);
+        inputs.insert(i, input);
  
     });
+
+    if inputs.len() == 0 {
+        return
+    }
 
     let task = SignTask {
         id: group_task_id.clone(),
         psbt: request.psbt.clone(),
         round: Round::Round1,
-        sessions,
+        inputs,
     };
 
     save_sign_task(&task);
-
 }
 
-pub fn prepare_response_for_request(task_id: String) -> Option<SignResponse> {
-    let task = match get_sign_task(&task_id) {
-        Some(task) => task,
-        None => return None,
+pub async fn broadcast_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signer: &Signer) {
+
+    for item in DB_TASK.iter() {
+        let mut task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
+
+        debug!("process task: {:?}", task);
+        match task.round {
+            Round::Round1 => {
+                let mut local_nonces = get_sign_local_nonces(&task.id);
+
+                let retry = local_nonces.len() + 1;
+                // If it is not completed after 10 retries, the task is considered closed
+                if retry >= 10 {
+                    task.round = Round::Closed;
+                    save_sign_task(&task);
+                    continue;
+                }
+
+                let mut nonces = BTreeMap::new();
+                let mut packages = BTreeMap::new();
+                task.inputs.iter().for_each(|(index, input)| {
+                    if let Some((nonce, commitment)) = generate_nonce_and_commitment(&input.address) {
+                        nonces.insert(*index, nonce);
+                        let mut map = BTreeMap::new();
+                        map.insert(signer.identifier().clone(), commitment);
+                        packages.insert(*index, map);
+                    }
+                });
+                // save local variable: nonces
+                local_nonces.insert(retry, nonces);
+                save_sign_local_variable(&task.id, &local_nonces);
+                // publish remote variable: commitment
+                publish_signing_package(swarm, &SignMesage {
+                    task_id: task.id,
+                    retry,
+                    package: SignPackage::Round1(packages)
+                });
+            },
+            Round::Round2 => {
+                generate_signature_shares(swarm, &mut task, signer.identifier());
+            },
+            Round::Closed => {
+
+            }
+        }
     };
-    let mut commitments = BTreeMap::new();
-    task.sessions.iter().for_each(|(_i, s)| {commitments.insert(s.index.clone(), s.commitments.clone());});
-    let mut signature_shares = BTreeMap::new();
-    task.sessions.iter().for_each(|(_i, s)| {signature_shares.insert(s.index.clone(), s.signatures.clone());});
-    Some(SignResponse {
-        task_id: task.id.clone(),
-        commitments,
-        signature_shares,
-        nonce: now(),
-    })
 }
 
-pub fn received_sign_response(response: SignResponse) {
+pub fn received_sign_message(msg: SignMesage) {
 
-    let task_id = response.task_id.clone();
+    let task_id = msg.task_id.clone();
 
     let mut task = match get_sign_task(&task_id) {
         Some(task) => task,
@@ -190,62 +233,93 @@ pub fn received_sign_response(response: SignResponse) {
         }
     };
 
-    if response.commitments.len() > 0 {
-        response.commitments.iter().for_each(|(i, c)| {
-            if c.len() > 0 {
-                if let Some(session) = task.sessions.get_mut(i) {
-                    session.commitments.extend(c); // merge received commitments
+    match msg.package {
+        SignPackage::Round1(commitments) => {
+            // merge all commitment by retry, input index
+            let mut remote_commitments = get_sign_remote_commitments(&task_id);
+            match remote_commitments.get_mut(&msg.retry) {
+                Some(srd) => {
+                    srd.extend(commitments);
+                },
+                None => {
+                    remote_commitments.insert(msg.retry, commitments);
                 }
             }
-        })
-    }
+            save_sign_remote_commitments(&task_id, &remote_commitments);
 
-    if response.signature_shares.len() > 0 {
-        response.signature_shares.iter().for_each(|(i, sig)| {
-            if sig.len() > 0 {
-                if let Some(session) = task.sessions.get_mut(i) {
-                    session.signatures.extend(sig); // merge received signature share
+            // Move to Round2 if the commitment of all inputs received from the latest retry exceeds the minimum number of signers.
+            if remote_commitments.get(&msg.retry).unwrap().iter().all(|(index, commitments)| {
+                match task.inputs.get(index) {
+                    Some(input) => {
+                        match config::get_keypair_from_db(&input.address) {
+                            Some(key) => commitments.len() as u16 >= key.priv_key.min_signers().clone(),
+                            None => false
+                        }
+                    },
+                    None => false
+                }
+            }) {
+                task.round = Round::Round2;
+                save_sign_task(&task);
+            }
+        },
+        SignPackage::Round2(sig_shares) => {
+            // merge all commitment by retry, input index
+            let mut remote_sig_shares = get_sign_remote_signature_shares(&task_id);
+            match remote_sig_shares.get_mut(&msg.retry) {
+                Some(srd) => {
+                    srd.extend(sig_shares);
+                },
+                None => {
+                    remote_sig_shares.insert(msg.retry, sig_shares);
                 }
             }
-        })
+            save_sign_remote_signature_shares(&task_id, &remote_sig_shares);
+
+            // aggregate signatures if it's possible
+            aggregate_signature_shares(&mut task);
+        }
     }
 
-    debug!("Merged commitments and signatures: {:?} {:?} {:?}", task_id, 
-        task.sessions.iter().map(|(_, s)| s.commitments.clone()).collect::<Vec<_>>(),
-        task.sessions.iter().map(|(_, s)| s.signatures.clone()).collect::<Vec<_>>(),
-    );
-
-    save_sign_task(&task);
 
 }
 
-pub fn generate_signature_shares(task: &mut SignTask, identifier: Identifier) {
+pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut SignTask, identifier: &Identifier) {
 
-    if task.round == Round::Closed {
-        return;
-    }
+    let stored_nonces = get_sign_local_nonces(&task.id);
+    let retry = stored_nonces.len(); // latest retry
+    let latest_nonces = match stored_nonces.get(&retry) {
+        Some(t) => t,
+        None => return
+    };
 
-    task.sessions.iter_mut().for_each(|(i, session)| {
+    let stored_remote_commitments = get_sign_remote_commitments(&task.id);
+    let latest_remote_commitments = match stored_remote_commitments.get(&retry) {
+        Some(t) => t,
+        None => return
+    };
+
+    let mut packages = BTreeMap::new();
+    task.inputs.iter_mut().for_each(|(i, input)| {
         // filter packets from unknown parties
-        match config::get_keypair_from_db(&session.address) {
+        match config::get_keypair_from_db(&input.address) {
             Some(keypair) => {
 
-                if session.commitments.len() < *keypair.priv_key.min_signers() as usize {
-                    debug!("skip task, have not received enough commitments for signing task: {:?} {}", task.id, i);
-                    return;
-                }
+                let signing_commitments = match latest_remote_commitments.get(i) {
+                    Some(e) => e.clone(),
+                    None => return
+                };
 
-                if session.signatures.contains_key(&identifier) {
-                    debug!("skip task, already signed for task: {:?} {}", task.id, i);
-                    return;
+                if signing_commitments.len() < keypair.priv_key.min_signers().clone() as usize {
+                    return
                 }
 
                 // when number of receved commitments is larger than min_signers
                 // the following code will be executed or re-executed
                 let signing_package = frost::SigningPackage::new(
-                    session.commitments.clone(), 
+                    signing_commitments, 
                     frost::SigningTarget::new(
-                        &session.sig_hash, 
+                        &input.sig_hash, 
                         frost::SigningParameters{
                             tapscript_merkle_root: match keypair.tweak {
                                 Some(tweak) => Some(tweak.to_vec()),
@@ -254,23 +328,56 @@ pub fn generate_signature_shares(task: &mut SignTask, identifier: Identifier) {
                         }
                     ));
 
+                let signer_nonces = match latest_nonces.get(&retry) {
+                    Some(d) => d,
+                    None => return,
+                };
+
                 let signature_shares =
-                    match frost::round2::sign(&signing_package, &session.nonces, &keypair.priv_key) {
+                    match frost::round2::sign(&signing_package, signer_nonces, &keypair.priv_key) {
                         Ok(shares) => shares,
                         Err(e) => {
                             error!("Error: {:?}", e);
                             return;
                         }
                     };
-                session.signatures.insert(identifier, signature_shares);
+                
+                // input.signatures.insert(identifier, signature_shares);
+                let mut map = BTreeMap::new();
+                map.insert(identifier.clone(), signature_shares);
+                packages.insert(i.clone(), map);
             }
             None => {
                 error!("skip, I am not the signer of task: {:?}", task.id);
+                return;
             }
         };
     });
 
-    save_sign_task(task)
+    if packages.len() < 1 {
+        return
+    }
+
+    let msg = SignMesage {
+        task_id: task.id.clone(),
+        retry,
+        package: SignPackage::Round2(packages.clone())
+    };
+
+    publish_signing_package(swarm, &msg);
+
+    // save local signature share
+    let mut remote_sig_shares = get_sign_remote_signature_shares(&task.id);
+    match remote_sig_shares.get_mut(&retry) {
+        Some(srd) => {
+            srd.extend(packages);
+        },
+        None => {
+            remote_sig_shares.insert(retry, packages);
+        }
+    }
+    save_sign_remote_signature_shares(&task.id, &remote_sig_shares);
+    // save_sign_task(task)
 
 }
 
@@ -289,37 +396,52 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
         }
     };
 
-    // task.sessions.iter().enumerate().for_each(|(index, session)| {
-    for (index, session) in task.sessions.iter() {
+    let stored_nonces = get_sign_local_nonces(&task.id);
+    let retry = stored_nonces.len(); // latest retry
 
-        if session.commitments.len() != session.signatures.len() {
+    let stored_remote_commitments = get_sign_remote_commitments(&task.id);
+    let latest_remote_commitments = match stored_remote_commitments.get(&retry) {
+        Some(t) => t,
+        None => return None
+    };
+
+    let stored_remote_signature_shares = get_sign_remote_signature_shares(&task.id);
+    let latest_remote_signature_shares = match stored_remote_signature_shares.get(&retry) {
+        Some(t) => t,
+        None => return None
+    };
+
+    // task.inputs.iter().enumerate().for_each(|(index, input)| {
+    for (index, input) in task.inputs.iter() {
+
+        let signing_commitments = match latest_remote_commitments.get(index) {
+            Some(e) => e.clone(),
+            None => return None
+        };
+
+        let signature_shares = match latest_remote_signature_shares.get(index) {
+            Some(e) => e.clone(),
+            None => return None
+        };
+
+        if signing_commitments.len() != signature_shares.len() {
             return None;
         }
 
-        let keypair = match config::get_keypair_from_db(&session.address) {
+        let keypair = match config::get_keypair_from_db(&input.address) {
             Some(keypair) => keypair,
             None => {
-                error!("Failed to get keypair for address: {}", session.address);
+                error!("Failed to get keypair for address: {}", input.address);
                 return None;
             }
         };
 
-        if session.signatures.len() < *keypair.priv_key.min_signers() as usize {
+        if signature_shares.len() < *keypair.priv_key.min_signers() as usize {
             return None;
         }
 
-        let mut commits = BTreeMap::new();
-        for key in session.signatures.keys() {
-            if let Some(c) = session.commitments.get(key) {
-                commits.insert(key.clone(), c.clone());
-            } else {
-                return None;
-            }
-        }
-
-
         let sig_target = frost::SigningTarget::new(
-            &session.sig_hash,
+            &input.sig_hash,
             frost::SigningParameters {
                 tapscript_merkle_root:  match keypair.tweak {
                         Some(tweak) => Some(tweak.to_vec()),
@@ -328,11 +450,11 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
                 }
         );
         let signing_package = frost::SigningPackage::new(
-            commits,
+            signing_commitments,
             sig_target
         );
 
-        match frost::aggregate(&signing_package, &session.signatures, &keypair.pub_key) {
+        match frost::aggregate(&signing_package, &signature_shares, &keypair.pub_key) {
             Ok(signature) => {
                 // println!("public key: {:?}", pub)
                 // let sighash = &hex::decode(sig_shares_message.message).unwrap();
@@ -426,25 +548,20 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
     // send message to the network
 }
 
-pub async fn collect_tss_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signer: &Signer) {
-
-    for item in DB_TASK.iter() {
-        let mut task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
-
-        debug!("Collected task: {:?}", task);
-        // try to generate signature shares if shares is enough
-        generate_signature_shares(&mut task, signer.identifier().clone());
-        if let Some(psbt) = aggregate_signature_shares(&mut task) {
-            submit_signatures(psbt, signer).await;
+fn generate_nonce_and_commitment(address: &str) -> Option<(SigningNonces, SigningCommitments)> {
+    let sign_key = match config::get_keypair_from_db(address) {
+        Some(key) => {
+            debug!("loaded key for address: {:?}", address);
+            key.priv_key
         }
-
-        if task.round == Round::Closed {
-            continue;
+        None => {
+            error!("Failed to get signing key for address: {}", address);
+            return None;
         }
-
-        // publish its packages to other peers
-        publish_sign_package(swarm, &task);
     };
+
+    let mut rng = thread_rng();
+    Some(frost::round1::commit(sign_key.signing_share(), &mut rng))
 }
 
 pub fn list_sign_tasks() -> Vec<SignTask> {
@@ -467,9 +584,55 @@ pub fn get_sign_task(id: &str) -> Option<SignTask> {
     }
 }
 
+fn get_sign_remote_commitments(id: &str) -> BTreeMap<Retry, BTreeMap<Index, BTreeMap<Identifier, round1::SigningCommitments>>> {
+    match DB_TASK_VARIABLES.get(format!("{}-commitments",id).as_bytes()) {
+        Ok(Some(value)) => {
+            serde_json::from_slice(&value).unwrap()
+        },
+        _ => BTreeMap::new()
+    }
+}
+
+fn get_sign_remote_signature_shares(id: &str) -> BTreeMap<Retry, BTreeMap<Index, BTreeMap<Identifier, round2::SignatureShare>>> {
+    match DB_TASK_VARIABLES.get(format!("{}-sig-shares",id).as_bytes()) {
+        Ok(Some(value)) => {
+            serde_json::from_slice(&value).unwrap()
+        },
+        _ => BTreeMap::new()
+    }
+}
+
+fn get_sign_local_nonces(id: &str) -> BTreeMap<Retry, BTreeMap<Index, SigningNonces>> {
+    match DB_TASK_VARIABLES.get(id.as_bytes()) {
+        Ok(Some(value)) => {
+            serde_json::from_slice(&value).unwrap()
+        },
+        _ => BTreeMap::new()
+    }
+}
+
 fn save_sign_task(task: &SignTask) {
     let value = serde_json::to_vec(&task).unwrap();
     DB_TASK.insert(task.id.as_bytes(), value).unwrap();
+}
+/// saved local variable of each retry
+/// <retry, SignLocalData>
+fn save_sign_local_variable(id: &str, data: &BTreeMap<Retry, BTreeMap<Index, SigningNonces>>) {
+    let value = serde_json::to_vec(&data).unwrap();
+    DB_TASK.insert(id.as_bytes(), value).unwrap();
+}
+/// saved remote variable of each retry
+/// <retry, SignRemoteData>
+fn save_sign_remote_commitments(id: &str, data: &BTreeMap<Retry, BTreeMap<Index, BTreeMap<Identifier, round1::SigningCommitments>>>) {
+    let value = serde_json::to_vec(&data).unwrap();
+    DB_TASK.insert(format!("{}-commitments",id).as_bytes(), value).unwrap();
+}
+
+/// saved remote variable of each retry
+/// <retry, SignRemoteData>
+fn save_sign_remote_signature_shares(id: &str, data: &BTreeMap<Retry, BTreeMap<Index, BTreeMap<Identifier, round2::SignatureShare>>>) {
+    let value = serde_json::to_vec(&data).unwrap();
+    DB_TASK.insert(format!("{}-sig-shares",id).as_bytes(), value).unwrap();
 }
 
 pub fn delete_tasks() {
