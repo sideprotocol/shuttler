@@ -239,7 +239,7 @@ pub async fn run_signer_daemon(conf: Config) {
     dail_bootstrap_nodes(&mut swarm, &conf);
     subscribe_gossip_topics(&mut swarm);
 
-    let mut interval = tokio::time::interval(Duration::from_secs(300));
+    let mut interval = tokio::time::interval(Duration::from_secs(30));
 
     loop {
         select! {

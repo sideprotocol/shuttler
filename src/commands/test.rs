@@ -10,10 +10,10 @@ use std::process::Command;
 
 use crate::{app::config, mock::{MockQuery, DKG, DKG_FILE_NAME}};
 
-pub async fn execute() {
+pub async fn execute(bin: &'static str, n: u32) {
     // parameters
-    let n: u32 = 3;
-    let executor = "/Users/developer/workspace/tssigner/target/debug/shuttler";
+    //let n: u32 = 3;
+    let executor = bin;
     let network = bitcoin::Network::Bitcoin;
     let port = 5150;
 
@@ -78,7 +78,6 @@ pub async fn execute() {
         });
 
         let handler = tokio::spawn( async move {
-            
             let log = File::create(home_i.join("log.txt")).expect("failed to open log");
 
             let mut child = Command::new(executor)

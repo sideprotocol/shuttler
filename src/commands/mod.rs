@@ -55,7 +55,12 @@ pub enum Commands {
         txid: String,
     },
     Id,
-    Test,
+    Test {
+        #[clap(long, default_value = "shuttler")]
+        bin: String,
+        #[clap(long, default_value = "3")]
+        n: u32,
+    },
 }
 
 pub mod init;

@@ -101,7 +101,10 @@ fn query_signing_requests<'life0,'async_trait>(&'life0 self,_request:tonic::Requ
             path.push(self.home.as_str());
             path.push(SINGING_FILE_NAME);
     
-            let text = fs::read_to_string(path).unwrap();
+            let text = match fs::read_to_string(path) {
+                Ok(t) => t,
+                Err(_) => "[]".to_string(),
+            };
             let srs: Vec<SR> = serde_json::from_str(&text).unwrap();
 
             let requests = srs.iter().map(|i| {
