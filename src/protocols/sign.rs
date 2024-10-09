@@ -250,14 +250,6 @@ pub fn received_sign_message(msg: SignMesage) {
 
     let task_id = msg.task_id.clone();
 
-    let mut task = match get_sign_task(&task_id) {
-        Some(task) => task,
-        None => {
-            debug!("task does not exist: {}", task_id);
-            return;
-        }
-    };
-
     match msg.package {
         SignPackage::Round1(commitments) => {
             // merge all commitment by retry, input index
@@ -272,21 +264,27 @@ pub fn received_sign_message(msg: SignMesage) {
             }
             save_sign_remote_commitments(&task_id, &remote_commitments);
 
-            // Move to Round2 if the commitment of all inputs received from the latest retry exceeds the minimum number of signers.
-            if remote_commitments.get(&msg.retry).unwrap().iter().all(|(index, commitments)| {
-                match task.inputs.get(index) {
-                    Some(input) => {
-                        match config::get_keypair_from_db(&input.address) {
-                            Some(key) => commitments.len() as u16 >= key.priv_key.min_signers().clone(),
+            match get_sign_task(&task_id) {
+                Some(mut task) => {
+                    // Move to Round2 if the commitment of all inputs received from the latest retry exceeds the minimum number of signers.
+                    if remote_commitments.get(&msg.retry).unwrap().iter().all(|(index, commitments)| {
+                        match task.inputs.get(index) {
+                            Some(input) => {
+                                match config::get_keypair_from_db(&input.address) {
+                                    Some(key) => commitments.len() as u16 >= key.priv_key.min_signers().clone(),
+                                    None => false
+                                }
+                            },
                             None => false
                         }
-                    },
-                    None => false
-                }
-            }) {
-                task.round = Round::Round2;
-                save_sign_task(&task);
-            }
+                    }) {
+                        task.round = Round::Round2;
+                        save_sign_task(&task);
+                    }
+                },
+                None => {}
+            };
+            
         },
         SignPackage::Round2(sig_shares) => {
             // merge all commitment by retry, input index
@@ -300,6 +298,14 @@ pub fn received_sign_message(msg: SignMesage) {
                 }
             }
             save_sign_remote_signature_shares(&task_id, &remote_sig_shares);
+
+            let mut task = match get_sign_task(&task_id) {
+                Some(t) => t,
+                None => {
+                    debug!("Skip, not found the task {} from local sign queue.", &task_id);
+                    return
+                }
+            };
 
             // Move to Round2 if the commitment of all inputs received from the latest retry exceeds the minimum number of signers.
             if remote_sig_shares.get(&msg.retry).unwrap().iter().all(|(index, shares)| {
@@ -658,20 +664,20 @@ fn save_sign_task(task: &SignTask) {
 /// <retry, SignLocalData>
 fn save_sign_local_variable(id: &str, data: &BTreeMap<Retry, BTreeMap<Index, SigningNonces>>) {
     let value = serde_json::to_vec(&data).unwrap();
-    DB_TASK.insert(id.as_bytes(), value).unwrap();
+    DB_TASK_VARIABLES.insert(id.as_bytes(), value).unwrap();
 }
 /// saved remote variable of each retry
 /// <retry, SignRemoteData>
 fn save_sign_remote_commitments(id: &str, data: &BTreeMap<Retry, BTreeMap<Index, BTreeMap<Identifier, round1::SigningCommitments>>>) {
     let value = serde_json::to_vec(&data).unwrap();
-    DB_TASK.insert(format!("{}-commitments",id).as_bytes(), value).unwrap();
+    DB_TASK_VARIABLES.insert(format!("{}-commitments",id).as_bytes(), value).unwrap();
 }
 
 /// saved remote variable of each retry
 /// <retry, SignRemoteData>
 fn save_sign_remote_signature_shares(id: &str, data: &BTreeMap<Retry, BTreeMap<Index, BTreeMap<Identifier, round2::SignatureShare>>>) {
     let value = serde_json::to_vec(&data).unwrap();
-    DB_TASK.insert(format!("{}-sig-shares",id).as_bytes(), value).unwrap();
+    DB_TASK_VARIABLES.insert(format!("{}-sig-shares",id).as_bytes(), value).unwrap();
 }
 
 pub fn delete_tasks() {

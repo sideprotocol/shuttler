@@ -31,7 +31,7 @@ pub async fn tss_tasks_fetcher(
     // 2. collect dkg packages
     collect_dkg_packages(swarm);
     // 3. fetch signing requests
-    fetch_signing_requests( swarm.behaviour_mut(), shuttler).await;
+    fetch_signing_requests(shuttler).await;
     // 4. collect signing requests tss packages
     broadcast_tss_packages(swarm, shuttler).await;
     // 5. submit dkg address
@@ -41,7 +41,6 @@ pub async fn tss_tasks_fetcher(
 }
 
 async fn fetch_signing_requests(
-    _behave: &mut TSSBehaviour,
     shuttler: &Signer,
 ) {
     let host = shuttler.config().side_chain.grpc.as_str();
