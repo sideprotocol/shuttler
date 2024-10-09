@@ -92,7 +92,6 @@ async fn fetch_dkg_requests(shuttler: &Signer) {
         })
         .await
     {
-
         let requests = requests_response.into_inner().requests;
         let tasks_in_process = requests.iter().map(|r| format!("dkg-{}", r.id)).collect::<Vec<_>>();
         debug!("Fetched DKG requests: {:?}", tasks_in_process);

@@ -1,25 +1,45 @@
-use std::{fs, path::PathBuf};
+use std::{fs::{self, File}, path::PathBuf};
 
+use cosmos_sdk_proto::side::btcbridge::query_server::QueryServer;
 use futures::future::join_all;
 use tempfile::TempDir;
 use tendermint::{account::Id, PrivateKey};
 use tendermint_config::PrivValidatorKey;
+use tonic::transport::Server;
+use std::process::Command;
 
-use crate::{app::config, commands::start};
+use crate::{app::config, mock::{MockQuery, DKG, DKG_FILE_NAME}};
 
 pub async fn execute() {
-    let testdir = TempDir::new().expect("Unable to create test directory!");
-
-    println!("Create test home: {:?}", testdir);
-
     // parameters
     let n: u32 = 3;
+    let executor = "/Users/developer/workspace/tssigner/target/debug/shuttler";
     let network = bitcoin::Network::Bitcoin;
     let port = 5150;
 
+    let testdir = TempDir::new().expect("Unable to create test directory!");
+    println!("Create test home: {:?}", testdir);
+
     // prepare 
     let mut handles = vec![];
-    for i in 1..n {
+    let home = String::from(testdir.path().to_str().unwrap());
+    // Start mock gRPC server
+    let handle = tokio::spawn(async move {
+        let addr = "[::1]:9090".parse().expect("msg");
+        let s = MockQuery::new(home);
+        
+        Server::builder()
+            // .add_service(Service::new(greeter))
+            .add_service(QueryServer::new(s))
+            .serve(addr)
+            .await.unwrap();
+    });
+    handles.push(handle);
+
+    
+    let mut participants = vec![];
+    
+    for i in 1..=n {
         let mut home_i = PathBuf::new();
         home_i.push(testdir.path());
         home_i.push(format!("home{}", i));
@@ -37,6 +57,8 @@ pub async fn execute() {
             pub_key: priv_key.public_key(),
             priv_key,
         };
+
+        participants.push(priv_validator_key.address.to_string());
 
         let text= serde_json::to_string_pretty(&priv_validator_key).unwrap();
         
@@ -56,11 +78,34 @@ pub async fn execute() {
         });
 
         let handler = tokio::spawn( async move {
-            start::execute(home_i.to_str().unwrap(), false, true).await;
+            
+            let log = File::create(home_i.join("log.txt")).expect("failed to open log");
+
+            let mut child = Command::new(executor)
+                .arg("--home")
+                .arg(home_i.to_str().unwrap())
+                .arg("start")
+                .arg("--signer")
+                .stdout(log)
+                .spawn()
+                .expect("failed to start echo");
+
+            child.wait().expect("failed to finish echo");
         });
 
         handles.push(handler);
     }
+
+    let dkg = DKG{
+        id: 1,
+        threshold: (participants.len() * 2/3 ) as u32,
+        participants,
+    };
+    let contents = serde_json::to_string(&dkg).unwrap();
+    let mut path = PathBuf::new();
+    path.push(testdir.path());
+    path.push(DKG_FILE_NAME);
+    fs::write(path, contents).unwrap();
 
     join_all(handles).await;
 

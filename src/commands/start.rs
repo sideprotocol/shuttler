@@ -12,7 +12,10 @@ pub async fn execute(home: &str, relayer: bool, signer: bool) {
     let subscriber = FmtSubscriber::builder()
         .with_env_filter(filter) // Enable log filtering through environment variable
         .finish();
-    tracing::subscriber::with_default(subscriber, || {});
+    if tracing::subscriber::set_global_default(subscriber).is_err() {
+        println!("Unable to set global log config!");
+    }
+        
 
     if relayer && !signer {
         relayer::run_relayer_daemon(conf).await;

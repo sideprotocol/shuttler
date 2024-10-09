@@ -38,8 +38,6 @@ lazy_static! {
     };
 }
 
-
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignRequest {
     pub task_id: String,
