@@ -55,15 +55,16 @@ void = "1.0"
 ord = "0.19.1"
 ordinals = "0.0.9"
 
+tendermint-config = "0.39.1"
+ed25519-consensus = "2.1.0"
+tempfile = "3.13.0"
+
 [dev-dependencies]
 criterion = "0.5"
 insta = { version = "1.31.0", features = ["yaml"] }
-tendermint-config = "0.39.1"
-ed25519-consensus = "2.1.0"
 
 proptest = "1.0"
 rand_chacha = "0.3"
-tempfile = "3.13.0"
 
 [features]
 nightly = []
