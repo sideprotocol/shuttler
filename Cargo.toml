@@ -46,6 +46,7 @@ chrono = "0.4"
 #cosmrs = "0.17.0"
 prost = "0.13.1"
 prost-types = "0.13.1"
+tendermint = {version="0.39.1", features=["rust-crypto"]}
 cosmrs = { git = "https://github.com/sideprotocol/cosmos-rust", branch = "main" }
 cosmos-sdk-proto  = { git = "https://github.com/sideprotocol/cosmos-rust", branch = "main" }
 # Optional dependencies
@@ -57,9 +58,12 @@ ordinals = "0.0.9"
 [dev-dependencies]
 criterion = "0.5"
 insta = { version = "1.31.0", features = ["yaml"] }
+tendermint-config = "0.39.1"
+ed25519-consensus = "2.1.0"
 
 proptest = "1.0"
 rand_chacha = "0.3"
+tempfile = "3.13.0"
 
 [features]
 nightly = []
