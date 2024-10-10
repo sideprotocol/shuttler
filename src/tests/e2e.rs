@@ -15,6 +15,7 @@ use tonic::transport::Server;
 use crate::app::config;
 use crate::mock::{DKG_FILE_NAME, MockQuery, DKG};
 
+
 #[tokio::test]
 async fn test_mock_service() {
     let addr = "[::1]:9090".parse().expect("msg");

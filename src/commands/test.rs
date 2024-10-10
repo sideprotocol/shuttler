@@ -29,13 +29,13 @@ pub async fn execute(bin: &'static str, n: u32) {
     // Start mock gRPC server
     let handle = tokio::spawn(async move {
         let addr = "[::1]:9090".parse().expect("msg");
-        let s = MockQuery::new(home);
+        let s = MockQuery::new(home.clone());
         
         Server::builder()
             // .add_service(Service::new(greeter))
             .add_service(QueryServer::new(s.clone()))
             .add_service(AuthServer::new(s))
-            .add_service(TxServer::new(MockTxService{}))
+            .add_service(TxServer::new(MockTxService{home: home.clone()}))
             .add_service(BlockServer::new(MockBlockService{}))
             .serve(addr)
             .await.unwrap();

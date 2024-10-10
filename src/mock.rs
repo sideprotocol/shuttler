@@ -4,21 +4,21 @@ use std::fs;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountResponse};
 use cosmos_sdk_proto::cosmos::base::abci::v1beta1::TxResponse;
 use cosmos_sdk_proto::side::btcbridge::query_server::Query;
-use cosmos_sdk_proto::side::btcbridge::{DkgParticipant, DkgRequest, DkgRequestStatus, QueryDkgRequestsResponse, QuerySigningRequestsResponse, SigningRequest};
+use cosmos_sdk_proto::side::btcbridge::{DkgParticipant, DkgRequest, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsResponse, QuerySigningRequestsResponse, SigningRequest};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_server::Query as AuthService;
 use cosmos_sdk_proto::cosmos::tx::v1beta1::service_server::Service as TxService;
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_server::Service as BlockService;
 
 use cosmos_sdk_proto::tendermint::v0_34::types::{Block, Header};
-use cosmrs::Any;
+use cosmrs::{Any, Tx};
 use prost_types::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::helper::now;
 
-pub const SINGING_FILE_NAME: &str = "mock/signing-requests.json";
-pub const DKG_FILE_NAME: &str = "mock/dkg-request.json";
-pub const VAULT_FILE_NAME: &str = "mock/address.txt";
+pub const SINGING_FILE_NAME: &str = "signing-requests.json";
+pub const DKG_FILE_NAME: &str = "dkg-request.json";
+pub const VAULT_FILE_NAME: &str = "address.txt";
 
 #[derive(Serialize, Deserialize)]
 pub struct DKG {
@@ -42,7 +42,7 @@ pub struct MockQuery {
 }
 
 pub struct MockTxService {
-
+    pub home: String
 }
 
 pub struct MockBlockService;
@@ -56,6 +56,21 @@ impl MockQuery {
 }
 
 // produce mock data
+
+fn mock_psbt(home: &str, tx_bytes: &Vec<u8>) {
+    if let Ok(tx) = Tx::from_bytes(tx_bytes) {
+        tx.body.messages.iter().for_each(|m| {
+            if m.type_url == "/side.btcbridge.MsgCompleteDKG" {
+                if let Ok(msg) = m.to_msg::<MsgCompleteDkg>() {
+                    let mut path = PathBuf::new();
+                    path.push(home);
+                    path.push("test.txt");
+                    let _ = fs::write(path, msg.vaults.join(","));
+                }
+            }
+        })
+    }
+}
 
 // 1. signing requests
 async fn load_signing_requests(home: &str) -> Result<tonic::Response<QuerySigningRequestsResponse>, tonic::Status> {
@@ -72,8 +87,7 @@ async fn load_signing_requests(home: &str) -> Result<tonic::Response<QuerySignin
     let mut path_2 = PathBuf::new();
     path_2.push(home);
     path_2.push(VAULT_FILE_NAME);
-    if let Ok(s) = fs::read(path_2) {
-        let address = String::from_utf8_lossy(&s).to_string();
+    if let Ok(address) = fs::read_to_string(path_2) {
         srs.push(SR {
             address,
             sequence: 3,
@@ -111,7 +125,7 @@ async fn loading_dkg_request(home: &str) -> Result<tonic::Response<QueryDkgReque
     }).collect::<Vec<_>>();
 
     let timeout = Timestamp {
-        seconds: now() as i64 + 86400,
+        seconds: now() as i64 + 3600,
         nanos: 0,
     };
     let res = QueryDkgRequestsResponse { requests: vec![
@@ -361,6 +375,9 @@ fn get_tx<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_p
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
 fn broadcast_tx<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::cosmos::tx::v1beta1::BroadcastTxRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::cosmos::tx::v1beta1::BroadcastTxResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+        
+        mock_psbt(self.home.as_str(), &_request.get_ref().tx_bytes);
+
         let x = mock_broadcast_tx();
         Box::pin(x)
     }
