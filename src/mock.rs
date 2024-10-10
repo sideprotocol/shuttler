@@ -511,7 +511,7 @@ fn generate_mock_psbt(addr: &str, input_num: Option<u32>) -> (String, String) {
     let sequence: u32 = (1 << 31) + 0xde;
 
     let mut inputs = Vec::<TxIn>::new();
-    for i in 1..num {
+    for i in 0..num {
         let tx_in = TxIn {
             previous_output: OutPoint {
                 txid: Txid::all_zeros(),
