@@ -1,4 +1,4 @@
-use std::{fs::{self, File}, path::PathBuf};
+use std::{fs::{self, File}, path::PathBuf, thread::sleep, time::Duration};
 
 use cosmos_sdk_proto::side::btcbridge::query_server::QueryServer;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_server::QueryServer as AuthServer;
@@ -72,6 +72,7 @@ pub async fn execute(bin: &'static str, n: u32) {
 
         let handler = tokio::spawn( async move {
             // sleep(Duration::from_secs(3)).await;
+            sleep(Duration::from_secs(3));
             let log = File::create(home_i.join("log.txt")).expect("failed to open log");
 
             let mut child = Command::new(executor)

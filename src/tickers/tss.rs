@@ -20,9 +20,9 @@ pub async fn tss_tasks_fetcher(
         return;
     }
 
-    if swarm.connected_peers().count() == 0 {
-        return;
-    }
+    // if swarm.connected_peers().count() == 0 {
+    //     return;
+    // }
 
     debug!("Connected peers: {:?}", swarm.connected_peers().collect::<Vec<_>>());
 
