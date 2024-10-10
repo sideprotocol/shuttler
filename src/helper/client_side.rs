@@ -1,3 +1,4 @@
+use std::time::Duration;
 
 use bitcoin::{ consensus::Encodable, key::Secp256k1, secp256k1::Message, sign_message::BITCOIN_SIGNED_MSG_PREFIX, PrivateKey};
 use bitcoin_hashes::{sha256d, Hash, HashEngine};
@@ -20,6 +21,9 @@ use prost_types::Any;
 use lazy_static::lazy_static;
 
 use crate::app::config;
+use crate::helper::grpc::Dst;
+
+const TIMEOUT: Duration = Duration::from_secs(15);
 
 lazy_static! {
     static ref lock: Mutex<()> = Mutex::new(());
@@ -55,7 +59,7 @@ impl SigningRequestsResponse {
 }
 
 pub async fn get_bitcoin_tip_on_side(host: &str ) -> Result<Response<QueryChainTipResponse>, Status> {
-    let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
+    let mut btc_client = match BtcQueryClient::connect(Dst::new(host.to_string(), TIMEOUT)).await {
         Ok(client) => client,
         Err(e) => {
             return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
@@ -66,7 +70,7 @@ pub async fn get_bitcoin_tip_on_side(host: &str ) -> Result<Response<QueryChainT
 }
 
 pub async fn get_signing_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {
-    let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
+    let mut btc_client = match BtcQueryClient::connect(Dst::new(host.to_string(), TIMEOUT)).await {
         Ok(client) => client,
         Err(e) => {
             return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
@@ -80,7 +84,7 @@ pub async fn get_signing_requests(host: &str) -> Result<Response<QuerySigningReq
 }
 
 pub async fn get_signing_request_by_txid(host: &str, txid: String) -> Result<Response<QuerySigningRequestByTxHashResponse>, Status> {
-    let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
+    let mut btc_client = match BtcQueryClient::connect(Dst::new(host.to_string(), TIMEOUT)).await {
         Ok(client) => client,
         Err(e) => {
             return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
@@ -125,7 +129,7 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
     let _l = lock.lock().await;
     let base_account = config::get_relayer_account(conf).await;
     
-    let mut base_client = match TendermintServiceClient::connect(conf.side_chain.grpc.to_string()).await {
+    let mut base_client = match TendermintServiceClient::connect(Dst::new(conf.side_chain.grpc.to_string(), TIMEOUT)).await {
         Ok(client) => client,
         Err(e) => {
             return Err(Status::aborted(format!("Failed to create tendermint client: {}", e)));
@@ -183,7 +187,7 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
     // Serialize the raw transaction as bytes (i.e. `Vec<u8>`).
     let tx_bytes = tx_signed.to_bytes().unwrap();
 
-    let mut tx_client = match TxServiceClient::connect(conf.side_chain.grpc.to_string()).await {
+    let mut tx_client = match TxServiceClient::connect(Dst::new(conf.side_chain.grpc.to_string(), TIMEOUT)).await {
         Ok(client) => client,
         Err(e) => {
             return Err(Status::aborted(format!("Failed to create tx client: {}", e)));

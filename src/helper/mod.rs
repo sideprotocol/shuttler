@@ -5,6 +5,7 @@ pub mod mem_store;
 pub mod bitcoin;
 pub mod merkle_proof;
 pub mod http;
+pub mod grpc;
 pub mod client_bitcoin;
 pub mod client_side;
 pub mod client_ordinals;
