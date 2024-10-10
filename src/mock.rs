@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::fs;
 use std::str::FromStr;
 
-use bitcoin_hashes::Hash;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountResponse};
 use cosmos_sdk_proto::cosmos::base::abci::v1beta1::TxResponse;
 use cosmos_sdk_proto::side::btcbridge::query_server::Query;
@@ -20,6 +19,7 @@ use bitcoin::{
     opcodes, psbt::PsbtSighashType, transaction::Version, Amount, OutPoint, Psbt, Sequence, TxIn,
     TxOut, Address, ScriptBuf, Transaction, Txid
 };
+use bitcoin_hashes::Hash;
 
 use crate::helper::encoding::to_base64;
 
@@ -432,23 +432,34 @@ fn abci_query<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_s
     }
 }
 
-fn generate_psbt(addr: &str) -> (String, String){
+fn generate_mock_psbt(addr: &str, input_num: Option<u32>) -> (String, String) {
     let address = Address::from_str(addr).unwrap().assume_checked();
+    
+    let num = match input_num {
+        Some(num) => num,
+        None => 1
+    };
 
-    let MAGIC_SEQUENCE: u32 = (1 << 31) + 0xde;
+    let sequence: u32 = (1 << 31) + 0xde;
+
+    let mut inputs = Vec::<TxIn>::new();
+    for i in 1..num {
+        let tx_in = TxIn {
+            previous_output: OutPoint {
+                txid: Txid::all_zeros(),
+                vout: i,
+            },
+            sequence: Sequence(sequence),
+            ..Default::default()
+        };
+
+        inputs.push(tx_in);
+    }
 
     let unsigned_tx = Transaction {
         version: Version::TWO,
         lock_time: bitcoin::absolute::LockTime::ZERO,
-        input: [TxIn {
-            previous_output: OutPoint {
-                txid: Txid::all_zeros(),
-                vout: 0,
-            },
-            sequence: Sequence(MAGIC_SEQUENCE),
-            ..Default::default()
-        }]
-        .to_vec(),
+        input: inputs,
         output: [TxOut {
             value: Amount::from_sat(1000),
             script_pubkey: ScriptBuf::builder()
