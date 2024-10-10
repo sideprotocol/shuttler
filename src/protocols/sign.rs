@@ -71,6 +71,7 @@ pub struct SignTask {
     pub psbt: String,
     pub round: Round,
     pub inputs: BTreeMap<Index, TransactionInput>,
+    pub is_signature_submitted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,6 +167,7 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
         psbt: request.psbt.clone(),
         round: Round::Round1,
         inputs,
+        is_signature_submitted: false,
     };
 
     save_sign_task(&task);
@@ -193,20 +195,31 @@ pub async fn broadcast_tss_packages(swarm: &mut Swarm<TSSBehaviour>, signer: &Si
                         continue;
                     }
                 };
-                let is_complete = psbt.inputs.iter().all(|input| {
-                    input.final_script_witness.is_some()
-                });
-                if is_complete {
+                if psbt.inputs.iter().all(|input| input.final_script_witness.is_some() ) {
                     submit_signatures(psbt, signer).await;
                 } else {
-                    debug!("Re-sign {}:  {:?}", task.id, is_complete);
+                    debug!("Re-sign incompleted task: {}.", task.id);
                     task.round = Round::Round1;
                     save_sign_task(&task);
+                }  
+            },
+            Round::Closed => {
+                if task.is_signature_submitted {
+                    continue;
                 }
-                
-            }
-            _ => {
-
+                let psbt_bytes = from_base64(&task.psbt).unwrap();
+                let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
+                    Ok(psbt) => psbt,
+                    Err(e) => {
+                        error!("Failed to deserialize PSBT: {}", e);
+                        continue;
+                    }
+                };
+                if psbt.inputs.iter().all(|input| input.final_script_witness.is_some() ) {
+                    submit_signatures(psbt, signer).await;
+                    task.is_signature_submitted = true;
+                    save_sign_task(&task);
+                }
             }
         }
     };
@@ -259,7 +272,6 @@ pub fn received_sign_message(msg: SignMesage) {
             let mut remote_commitments = get_sign_remote_commitments(&task_id);
             match remote_commitments.get_mut(&msg.retry) {
                 Some(srd) => {
-                    debug!("srd {:?}, {:?}", srd, commitments);
                     // srd.extend(commitments);
                     // debug!("srd {:?}", srd);
                     srd.iter_mut().for_each(|(index, map)| {
@@ -272,8 +284,7 @@ pub fn received_sign_message(msg: SignMesage) {
             }
             save_sign_remote_commitments(&task_id, &remote_commitments);
 
-            
-            debug!("Current received commitments: {:?}", serde_json::to_string(&remote_commitments).unwrap());
+            debug!("Received commitments: {:?}", serde_json::to_string(&remote_commitments).unwrap());
 
             match get_sign_task(&task_id) {
                 Some(mut task) => {
@@ -283,10 +294,8 @@ pub fn received_sign_message(msg: SignMesage) {
                             Some(input) => {
                                 match config::get_keypair_from_db(&input.address) {
                                     Some(key) => {
-                                        debug!("commitment lens: {}>={}?", commitments.len(), key.priv_key.min_signers());
-                                        debug!("commitments: {:?}", commitments);
-                                        let x = commitments.len() as u16 >= key.priv_key.min_signers().clone();
-                                        x
+                                        debug!("{task_id}:{index} commitment lens: {}>={}?", commitments.len(), key.priv_key.min_signers());
+                                        commitments.len() as u16 >= key.priv_key.min_signers().clone()
                                     },
                                     None => false
                                 }
@@ -294,19 +303,33 @@ pub fn received_sign_message(msg: SignMesage) {
                             None => false
                         }
                     }) {
-                        debug!("Move to round2: {}", task_id);
+                        info!("Move to round2: {}", task_id);
                         task.round = Round::Round2;
                         save_sign_task(&task);
                     }
                 },
                 None => {
-                    debug!("Have not initial task {} on my sided", task_id);
+                    debug!("Not found task {} on my sided", task_id);
                 }
             };
             
         },
         SignPackage::Round2(sig_shares) => {
-            // merge all commitment by retry, input index
+            let mut task = match get_sign_task(&task_id) {
+                Some(t) => t,
+                None => {
+                    debug!("Skip, not found the task {} from local sign queue.", &task_id);
+                    return
+                }
+            };
+
+            // Double check task's round is still in round2
+            // The task could be closed in previously aggregation.
+            if task.round == Round::Closed {
+                return
+            }
+
+            // Merge all commitments by retry, input index
             let mut remote_sig_shares = get_sign_remote_signature_shares(&task_id);
             match remote_sig_shares.get_mut(&msg.retry) {
                 Some(srd) => {
@@ -318,19 +341,12 @@ pub fn received_sign_message(msg: SignMesage) {
                     remote_sig_shares.insert(msg.retry, sig_shares);
                 }
             }
+            
+            debug!("Received signature shares: {:?}", serde_json::to_string(&remote_sig_shares).unwrap());
             save_sign_remote_signature_shares(&task_id, &remote_sig_shares);
-
-            let mut task = match get_sign_task(&task_id) {
-                Some(t) => t,
-                None => {
-                    debug!("Skip, not found the task {} from local sign queue.", &task_id);
-                    return
-                }
-            };
 
             // Move to Round2 if the commitment of all inputs received from the latest retry exceeds the minimum number of signers.
             if remote_sig_shares.get(&msg.retry).unwrap().iter().all(|(index, shares)| {
-                debug!("Received shares: {index}, {}, {:?}", shares.len(), shares);
                 match task.inputs.get(index) {
                     Some(input) => {
                         match config::get_keypair_from_db(&input.address) {
@@ -341,7 +357,7 @@ pub fn received_sign_message(msg: SignMesage) {
                     None => false
                 }
             }) {
-                debug!("Move to Round::Aggregate: {}", task_id);
+                info!("Move to Round::Aggregate: {}", task_id);
                 task.round = Round::Aggregate;
                 save_sign_task(&task);
 
@@ -531,18 +547,12 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
             Ok(signature) => {
                 // println!("public key: {:?}", pub)
                 // let sighash = &hex::decode(sig_shares_message.message).unwrap();
-                let is_signature_valid = keypair.pub_key
-                    .verifying_key()
-                    .verify(signing_package.sig_target().clone(), &signature)
-                    .is_ok();
-                info!(
-                    "Signature: {:?} verified: {:?}",
-                    signature, is_signature_valid
-                );
-
-                if !is_signature_valid {
-                    error!("Signature is invalid");
-                    return None;
+                match keypair.pub_key.verifying_key().verify(signing_package.sig_target().clone(), &signature) {
+                    Ok(_) => info!( "Signature: {:?} is verified", signature ),
+                    Err(e) => {
+                        error!("Signature is invalid {}", e);
+                        return None;
+                    }
                 }
 
                 let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&signature.serialize()).unwrap();
@@ -563,21 +573,18 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
         };
     };
 
-    let is_complete = psbt.inputs.iter().all(|input| {
-        input.final_script_witness.is_some()
-    });
-    debug!("Is {} completed: {:?}", task.id, is_complete);
-
-    if is_complete {
+    if psbt.inputs.iter().all(|input| input.final_script_witness.is_some() ) {
+        debug!("Signing Task {} completed", task.id);
         task.round = Round::Closed;
         save_sign_task(task);
-        return Some(psbt.to_owned())
+        Some(psbt.to_owned())
+    } else {
+        None
     }
 
-    save_sign_task(task);
-    None
 }
 
+// need check whether other participants have submitted or not.
 pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
 
     // broadcast to bitcoin network
