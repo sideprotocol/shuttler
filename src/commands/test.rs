@@ -1,6 +1,9 @@
 use std::{fs::{self, File}, path::PathBuf};
 
 use cosmos_sdk_proto::side::btcbridge::query_server::QueryServer;
+use cosmos_sdk_proto::cosmos::auth::v1beta1::query_server::QueryServer as AuthServer;
+use cosmos_sdk_proto::cosmos::tx::v1beta1::service_server::ServiceServer as TxServer;
+use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_server::ServiceServer as BlockServer;
 use futures::future::join_all;
 use tempfile::TempDir;
 use tendermint::{account::Id, PrivateKey};
@@ -8,7 +11,7 @@ use tendermint_config::PrivValidatorKey;
 use tonic::transport::Server;
 use std::process::Command;
 
-use crate::{app::config, mock::{MockQuery, DKG, DKG_FILE_NAME}};
+use crate::{app::config, mock::{MockBlockService, MockQuery, MockTxService, DKG, DKG_FILE_NAME}};
 
 pub async fn execute(bin: &'static str, n: u32) {
     // parameters
@@ -30,7 +33,10 @@ pub async fn execute(bin: &'static str, n: u32) {
         
         Server::builder()
             // .add_service(Service::new(greeter))
-            .add_service(QueryServer::new(s))
+            .add_service(QueryServer::new(s.clone()))
+            .add_service(AuthServer::new(s))
+            .add_service(TxServer::new(MockTxService{}))
+            .add_service(BlockServer::new(MockBlockService{}))
             .serve(addr)
             .await.unwrap();
     });
@@ -62,20 +68,19 @@ pub async fn execute(bin: &'static str, n: u32) {
 
         let text= serde_json::to_string_pretty(&priv_validator_key).unwrap();
         
-        println!("key: {}", text);
         fs::write(home_i.join("priv_validator_key.json"), text).unwrap();
 
-        let x = fs::read_dir(home_i.clone()).unwrap();
-        x.for_each(|f| {
-            match f {
-                Ok(d) => {
-                    println!("file: {:?}", d);
-                },
-                Err(e) => {
-                    println!("error: {}", e);
-                }
-            }
-        });
+        // let x = fs::read_dir(home_i.clone()).unwrap();
+        // x.for_each(|f| {
+        //     match f {
+        //         Ok(d) => {
+        //             println!("file: {:?}", d);
+        //         },
+        //         Err(e) => {
+        //             println!("error: {}", e);
+        //         }
+        //     }
+        // });
 
         let handler = tokio::spawn( async move {
             let log = File::create(home_i.join("log.txt")).expect("failed to open log");
