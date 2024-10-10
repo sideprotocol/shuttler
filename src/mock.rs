@@ -73,7 +73,7 @@ fn mock_psbt(home: &str, tx_bytes: &Vec<u8>) {
             if m.type_url == "/side.btcbridge.MsgCompleteDKG" {
                 if let Ok(msg) = m.to_msg::<MsgCompleteDkg>() {
                     println!("Received: {} from {}", msg.vaults.join(","), msg.sender);
-                    let num = rand::random::<u32>() % 5;
+                    let num = rand::random::<u32>() % 5 + 1;
                     let mut srs = vec![];
                     msg.vaults.iter().for_each(|addr| {
                         
@@ -81,6 +81,7 @@ fn mock_psbt(home: &str, tx_bytes: &Vec<u8>) {
                         let mut path = PathBuf::new();
                         path.push(home);
                         path.push("mock");
+                        path.push("addresses");
                         path.push(addr);
                         
                         if path.is_dir() {
@@ -88,8 +89,15 @@ fn mock_psbt(home: &str, tx_bytes: &Vec<u8>) {
                         }
                         let _ = fs::create_dir_all(path.as_path());
 
+                        // clear dkg request.
+                        let mut path_dkg = PathBuf::new();
+                        path_dkg.push(home);
+                        path_dkg.push("mock");
+                        path_dkg.push(DKG_FILE_NAME);
+                        let _ = fs::write(path_dkg, "");
+
                         // generate psbt
-                        let (txid, psbt) = generate_mock_psbt(addr, Some(num+1));
+                        let (txid, psbt) = generate_mock_psbt(addr, Some(num));
                         srs.push(SR {
                             address: addr.clone(),
                             sequence: num as u64,
@@ -99,15 +107,16 @@ fn mock_psbt(home: &str, tx_bytes: &Vec<u8>) {
                         })
                     });
 
-                    let mut path = PathBuf::new();
-                    path.push(home);
-                    path.push("mock");
-                    path.push(SINGING_FILE_NAME);
-
                     if srs.len() == 0 {
                         return
                     }
                     if let Ok(contents) = serde_json::to_string_pretty(&srs) {
+
+                        let mut path = PathBuf::new();
+                        path.push(home);
+                        path.push("mock");
+                        path.push(SINGING_FILE_NAME);
+
                         println!("txs: {}", contents);
                         let _ = fs::write(path, &contents);
                     }
@@ -166,19 +175,20 @@ async fn loading_dkg_request(home: &str) -> Result<tonic::Response<QueryDkgReque
     path.push(DKG_FILE_NAME);
 
     let text = fs::read_to_string(path).unwrap();
-    let dkg: DKG = serde_json::from_str(&text).unwrap();
-    let participants = dkg.participants.iter().map(|i: &String| DkgParticipant {
-        moniker: i.clone(),
-        operator_address: i.clone(),
-        consensus_address: i.to_string(),
-    }).collect::<Vec<_>>();
+    let mut requests = vec![];
+    if text.len() > 5 {
+        let timeout = Timestamp {
+            seconds: now() as i64 + 180,
+            nanos: 0,
+        };
+        let dkg: DKG = serde_json::from_str(&text).unwrap();
+        let participants = dkg.participants.iter().map(|i: &String| DkgParticipant {
+            moniker: i.clone(),
+            operator_address: i.clone(),
+            consensus_address: i.to_string(),
+        }).collect::<Vec<_>>();
 
-    let timeout = Timestamp {
-        seconds: now() as i64 + 3600,
-        nanos: 0,
-    };
-    let res = QueryDkgRequestsResponse { requests: vec![
-        DkgRequest { 
+        requests.push( DkgRequest { 
             id: dkg.id, 
             participants,
             threshold: dkg.threshold,
@@ -189,8 +199,10 @@ async fn loading_dkg_request(home: &str) -> Result<tonic::Response<QueryDkgReque
             fee_rate: "1000".to_string(), 
             expiration: Some(timeout), 
             status: DkgRequestStatus::Pending as i32 
-        },
-    ] };
+        })
+    }
+
+    let res = QueryDkgRequestsResponse { requests };
     Ok(tonic::Response::new(res))
 }
 
