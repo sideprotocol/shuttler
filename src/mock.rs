@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::fs;
+use std::str::FromStr;
 
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountResponse};
 use cosmos_sdk_proto::cosmos::base::abci::v1beta1::TxResponse;
@@ -13,6 +14,14 @@ use cosmos_sdk_proto::tendermint::v0_34::types::{Block, Header};
 use cosmrs::{Any, Tx};
 use prost_types::Timestamp;
 use serde::{Deserialize, Serialize};
+
+use bitcoin::{
+    opcodes, psbt::PsbtSighashType, transaction::Version, Amount, OutPoint, Psbt, Sequence, TxIn,
+    TxOut, Address, ScriptBuf, Transaction, Txid
+};
+use bitcoin_hashes::Hash;
+
+use crate::helper::encoding::to_base64;
 
 use crate::helper::now;
 
@@ -438,4 +447,57 @@ fn get_validator_set_by_height<'life0,'async_trait>(&'life0 self,_request:tonic:
 fn abci_query<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::AbciQueryRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::AbciQueryResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
+}
+
+fn generate_mock_psbt(addr: &str, input_num: Option<u32>) -> (String, String) {
+    let address = Address::from_str(addr).unwrap().assume_checked();
+    
+    let num = match input_num {
+        Some(num) => num,
+        None => 1
+    };
+
+    let sequence: u32 = (1 << 31) + 0xde;
+
+    let mut inputs = Vec::<TxIn>::new();
+    for i in 1..num {
+        let tx_in = TxIn {
+            previous_output: OutPoint {
+                txid: Txid::all_zeros(),
+                vout: i,
+            },
+            sequence: Sequence(sequence),
+            ..Default::default()
+        };
+
+        inputs.push(tx_in);
+    }
+
+    let unsigned_tx = Transaction {
+        version: Version::TWO,
+        lock_time: bitcoin::absolute::LockTime::ZERO,
+        input: inputs,
+        output: [TxOut {
+            value: Amount::from_sat(1000),
+            script_pubkey: ScriptBuf::builder()
+                .push_opcode(opcodes::all::OP_RETURN)
+                .into_script(),
+        }]
+        .to_vec(),
+    };
+
+    let mut psbt = Psbt::from_unsigned_tx(unsigned_tx.clone()).unwrap();
+
+    psbt.inputs.iter_mut().for_each(|input| {
+        input.sighash_type = Some(PsbtSighashType::from_u32(0));
+        input.witness_utxo = Some(TxOut {
+            value: Amount::from_sat(1000),
+            script_pubkey: address.script_pubkey(),
+        })
+    });
+
+    let tx_id = unsigned_tx.compute_txid().to_string();
+    let psbt_b64 = to_base64(psbt.serialize().as_slice());
+
+    (tx_id, psbt_b64)
 }
