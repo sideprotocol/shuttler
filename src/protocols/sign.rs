@@ -247,7 +247,7 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
 pub fn received_sign_message(msg: SignMesage) {
 
     let task_id = msg.task_id.clone();
-
+    debug!("Received: {:?}", msg);
     match msg.package {
         SignPackage::Round1(commitments) => {
             // merge all commitment by retry, input index
@@ -276,6 +276,9 @@ pub fn received_sign_message(msg: SignMesage) {
                             None => false
                         }
                     }) {
+                        if task.round == Round::Round1 {
+                            debug!("Move to round2: {}", task_id);
+                        }
                         task.round = Round::Round2;
                         save_sign_task(&task);
                     }
@@ -317,6 +320,7 @@ pub fn received_sign_message(msg: SignMesage) {
                     None => false
                 }
             }) {
+                debug!("Move to Round::Aggregate: {}", task_id);
                 task.round = Round::Aggregate;
                 save_sign_task(&task);
 

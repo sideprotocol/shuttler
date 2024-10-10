@@ -70,19 +70,8 @@ pub async fn execute(bin: &'static str, n: u32) {
         
         fs::write(home_i.join("priv_validator_key.json"), text).unwrap();
 
-        // let x = fs::read_dir(home_i.clone()).unwrap();
-        // x.for_each(|f| {
-        //     match f {
-        //         Ok(d) => {
-        //             println!("file: {:?}", d);
-        //         },
-        //         Err(e) => {
-        //             println!("error: {}", e);
-        //         }
-        //     }
-        // });
-
         let handler = tokio::spawn( async move {
+            // sleep(Duration::from_secs(3)).await;
             let log = File::create(home_i.join("log.txt")).expect("failed to open log");
 
             let mut child = Command::new(executor)
@@ -108,6 +97,8 @@ pub async fn execute(bin: &'static str, n: u32) {
     let contents = serde_json::to_string(&dkg).unwrap();
     let mut path = PathBuf::new();
     path.push(testdir.path());
+    path.push("mock");
+    let _ = fs::create_dir_all(&path);
     path.push(DKG_FILE_NAME);
     fs::write(path, contents).unwrap();
 

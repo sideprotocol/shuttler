@@ -67,15 +67,53 @@ impl MockQuery {
 // produce mock data
 
 fn mock_psbt(home: &str, tx_bytes: &Vec<u8>) {
+    
     if let Ok(tx) = Tx::from_bytes(tx_bytes) {
         tx.body.messages.iter().for_each(|m| {
             if m.type_url == "/side.btcbridge.MsgCompleteDKG" {
                 if let Ok(msg) = m.to_msg::<MsgCompleteDkg>() {
+                    println!("Received: {} from {}", msg.vaults.join(","), msg.sender);
+                    let num = rand::random::<u32>() % 5;
+                    let mut srs = vec![];
+                    msg.vaults.iter().for_each(|addr| {
+                        
+                        // check duplication
+                        let mut path = PathBuf::new();
+                        path.push(home);
+                        path.push("mock");
+                        path.push(addr);
+                        
+                        if path.is_dir() {
+                            return
+                        }
+                        let _ = fs::create_dir_all(path.as_path());
+
+                        // generate psbt
+                        let (txid, psbt) = generate_mock_psbt(addr, Some(num+1));
+                        srs.push(SR {
+                            address: addr.clone(),
+                            sequence: num as u64,
+                            txid,
+                            psbt,
+                            status: 1,
+                        })
+                    });
+
                     let mut path = PathBuf::new();
                     path.push(home);
-                    path.push("test.txt");
-                    let _ = fs::write(path, msg.vaults.join(","));
+                    path.push("mock");
+                    path.push(SINGING_FILE_NAME);
+
+                    if srs.len() == 0 {
+                        return
+                    }
+                    if let Ok(contents) = serde_json::to_string_pretty(&srs) {
+                        println!("txs: {}", contents);
+                        let _ = fs::write(path, &contents);
+                    }
                 }
+            } else {
+                println!("Received msg: {}", m.type_url);
             }
         })
     }
@@ -85,6 +123,7 @@ fn mock_psbt(home: &str, tx_bytes: &Vec<u8>) {
 async fn load_signing_requests(home: &str) -> Result<tonic::Response<QuerySigningRequestsResponse>, tonic::Status> {
     let mut path = PathBuf::new();
     path.push(home);
+    path.push("mock");
     path.push(SINGING_FILE_NAME);
 
     let text = match fs::read_to_string(path) {
@@ -123,6 +162,7 @@ async fn load_signing_requests(home: &str) -> Result<tonic::Response<QuerySignin
 async fn loading_dkg_request(home: &str) -> Result<tonic::Response<QueryDkgRequestsResponse>, tonic::Status> {
     let mut path = PathBuf::new();
     path.push(home);
+    path.push("mock");
     path.push(DKG_FILE_NAME);
 
     let text = fs::read_to_string(path).unwrap();
@@ -384,7 +424,6 @@ fn get_tx<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_p
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
 fn broadcast_tx<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::cosmos::tx::v1beta1::BroadcastTxRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::cosmos::tx::v1beta1::BroadcastTxResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
-        
         mock_psbt(self.home.as_str(), &_request.get_ref().tx_bytes);
 
         let x = mock_broadcast_tx();
