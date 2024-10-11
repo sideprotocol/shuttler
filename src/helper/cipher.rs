@@ -14,7 +14,7 @@ pub fn encrypt(data: &[u8], secret: &[u8; 32]) -> Vec<u8> {
     let cipher = ChaCha20Poly1305::new_from_slice(secret).unwrap();
     // cipher.encrypt(nonce, plaintext.as_ref()).expect("encryption failure!");
     let ciphertext = cipher.encrypt(nonce, data).expect("encryption failure!");
-    println!("{:?}", ciphertext);
+    // println!("{:?}", ciphertext);
     return ciphertext;
 }
 
@@ -23,7 +23,7 @@ pub fn decrypt(data: &[u8], secret: &[u8; 32]) -> Vec<u8> {
     // Encrypt the plaintext
     let cipher = ChaCha20Poly1305::new_from_slice(secret).unwrap();
     let text = cipher.decrypt(nonce, data).expect("decryption failure!");
-    println!("{:?}", text);
+    // println!("{:?}", text);
     return text;
 }
 
