@@ -130,7 +130,7 @@ pub fn generate_round2_packages(identifier: &Identifier, enc_key: &SecretKey, ta
         return Err(DKGError(format!("Have not received enough packages: {}", task_id)));
     }
 
-    info!("Generating round2 packages: {task_id}");
+    info!("Generating round2 packages: {}", task_id);
 
     let mut cloned = round1_packages.clone();
     cloned.remove(identifier);
@@ -320,7 +320,7 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
     }
 
     if task.participants.len() == local.len() {
-        info!("Received round2 packets from all participants: {}", task.id);
+        // info!("Received round2 packets from all participants: {}", task.id);
 
         let mut round2_packages = BTreeMap::new();
         local.iter().for_each(|(sender, packages)| {
@@ -334,7 +334,7 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
 
                     let packet = decrypt(packet.as_slice(), share_key.as_slice().try_into().unwrap());
                     let received_round2_package = frost::keys::dkg::round2::Package::deserialize(&packet).unwrap();
-                    debug!("Received {} round2 package from: {:?}", task.id, sender.clone());
+                    // debug!("Received {} round2 package from: {:?}", task.id, sender.clone());
                     round2_packages.insert(sender.clone(), received_round2_package);
                 }
             })
