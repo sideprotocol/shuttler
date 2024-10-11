@@ -49,7 +49,7 @@ pub async fn fetch_signing_requests(
         Ok(response) => {
             let requests = response.into_inner().requests;
             let tasks_in_process = requests.iter().map(|r| r.txid.clone() ).collect::<Vec<_>>();
-            debug!("Fetched signing requests: {:?}", tasks_in_process);
+            debug!("In-process signing tasks: {:?}", tasks_in_process);
             list_sign_tasks().iter().for_each(|task| {
                 if !tasks_in_process.contains(&task.id) {
                     debug!("Removing expired signing task: {:?}", task.id);

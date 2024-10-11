@@ -14,7 +14,7 @@ use frost::{keys, Identifier, Secp256K1Sha256};
 
 use frost_core::keys::dkg::round1::Package;
 use super::{Round, TSSBehaviour};
-use crate::{app::{config:: get_database_with_name, signer::Signer}, helper::{gossip::publish_dkg_packages, now, mem_store}};
+use crate::{app::{config:: get_database_with_name, signer::Signer}, helper::{encoding::to_base64, gossip::publish_dkg_packages, mem_store, now}};
 use crate::helper::cipher::{decrypt, encrypt};
 
 
@@ -255,6 +255,9 @@ pub fn received_round1_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
     // merge packets with local
     local.extend(packets);
 
+    let k = local.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
+    debug!("Received round1 packets length: {} {}", task.id, k.join(","));
+
     if DB.insert(format!("dkg-{}-round1", task.id), serde_json::to_vec(&local).unwrap()).is_err() {
         error!("Failed to store DKG Round 1 packets: {} ", task.id);
     }
@@ -301,6 +304,10 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
     };
 
     local.extend(packets);
+
+
+    let k = local.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
+    debug!("Received round2 packets length: {} {}", task.id, k.join(","));
 
     // store round 2 packets
     if DB.insert(format!("dkg-{}-round2", task.id), serde_json::to_vec(&local).unwrap()).is_err() {

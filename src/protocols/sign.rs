@@ -169,7 +169,7 @@ pub async fn broadcast_tss_packages(swarm: &mut Swarm<TSSBehaviour>, signer: &Si
     for item in DB_TASK.iter() {
         let mut task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
 
-        debug!("process task: {:?}", task);
+        info!("Process: {:?}", task);
         match task.round {
             Round::Round1 => {
                 generate_commitments(swarm, signer, &mut task);
@@ -270,24 +270,22 @@ pub fn received_sign_message(msg: SignMesage) {
 
             match get_sign_task(&task_id) {
                 Some(mut task) => {
+                    let first = 0; 
                     // Move to Round2 if the commitment of all inputs received from the latest retry exceeds the minimum number of signers.
-                    if remote_commitments.get(&msg.retry).unwrap().iter().all(|(index, commitments)| {
-                        match task.inputs.get(index) {
-                            Some(input) => {
-                                match config::get_keypair_from_db(&input.address) {
-                                    Some(key) => {
-                                        debug!("{task_id}:{}:{index} commitment lens: {}>={}?", msg.retry, commitments.len(), key.priv_key.min_signers());
-                                        commitments.len() as u16 >= key.priv_key.min_signers().clone()
-                                    },
-                                    None => false
+                    // Only check the first input, because all other inputs are in the same package.
+                    if let Some(commitments) = remote_commitments.get(&msg.retry).unwrap().get(&first) {
+                        if let Some(input) = task.inputs.get(&first) {
+                            if let Some(key) = config::get_keypair_from_db(&input.address) {
+                                let threshold = key.priv_key.min_signers().clone() as usize;
+                                if commitments.len() >= threshold {
+                                    info!("{task_id}:{}:{first} is ready for Round2: {}>={}?", msg.retry, commitments.len(), threshold);
+                                    task.round = Round::Round2;
+                                    save_sign_task(&task);
+                                } else {
+                                    debug!("{task_id}:{}:{first} commitment lens: {}>={}?", msg.retry, commitments.len(), threshold);
                                 }
-                            },
-                            None => false
+                            }
                         }
-                    }) {
-                        info!("Ready for round2: {}", task_id);
-                        task.round = Round::Round2;
-                        save_sign_task(&task);
                     }
                 },
                 None => {
@@ -356,25 +354,22 @@ pub fn received_sign_message(msg: SignMesage) {
             
             save_sign_remote_signature_shares(&task_id, &remote_sig_shares);
 
+            let first = 0;
             // Move to Round2 if the commitment of all inputs received from the latest retry exceeds the minimum number of signers.
-            if remote_sig_shares.get(&msg.retry).unwrap().iter().any(|(index, shares)| {
-                match task.inputs.get(index) {
-                    Some(input) => {
-                        match config::get_keypair_from_db(&input.address) {
-                            Some(key) => {
-                                let threshold = key.priv_key.min_signers().clone() as usize;
-                                debug!("Received signature shares: {}:{}:{index} {:?}>={}", &task_id, &msg.retry, shares.len(), threshold);
-                                shares.len() >= threshold
-                            },
-                            None => false
+            // Only check the first input, because all other inputs are in the same package.
+            if let Some(shares) = remote_sig_shares.get(&msg.retry).unwrap().get(&first) {
+                if let Some(input) = task.inputs.get(&first) {
+                    if let Some(key) = config::get_keypair_from_db(&input.address) {
+                        let threshold = key.priv_key.min_signers().clone() as usize;
+                        if shares.len() >= threshold {
+                            info!("Ready for aggregration: {}:{}:{first} {:?}>={}", &task_id, &msg.retry, shares.len(), threshold);
+                            task.round = Round::Aggregate;
+                            save_sign_task(&task);
+                        } else {
+                            debug!("Received signature shares: {}:{}:{first} {:?}>={}", &task_id, &msg.retry, shares.len(), threshold);
                         }
-                    },
-                    None => false
+                    }
                 }
-            }) {
-                info!("Ready for aggregation: {}", task_id);
-                task.round = Round::Aggregate;
-                save_sign_task(&task);
             }
         }
     }
