@@ -363,7 +363,7 @@ pub fn received_sign_message(msg: SignMesage) {
                         match config::get_keypair_from_db(&input.address) {
                             Some(key) => {
                                 let threshold = key.priv_key.min_signers().clone() as usize;
-                                debug!("Received signature shares: {}:{index} {:?}>={}",&msg.retry, shares.len(), threshold);
+                                debug!("Received signature shares: {}:{}:{index} {:?}>={}", &task_id, &msg.retry, shares.len(), threshold);
                                 shares.len() >= threshold
                             },
                             None => false

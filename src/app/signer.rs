@@ -284,7 +284,7 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<TSSBehaviour>, conf: &Config) {
         let address = Multiaddr::from_str(addr_text).expect("invalid bootstrap node address");
         let peer = PeerId::from_str(addr_text.split("/").last().unwrap()).expect("invalid peer id");
         swarm.behaviour_mut().kad.add_address(&peer, address);
-        debug!("Adding bootstrap node: {:?}", addr_text);
+        info!("Adding bootstrap node: {:?}", addr_text);
     }
     if conf.bootstrap_nodes.len() > 0 {
         match swarm.behaviour_mut().kad.bootstrap() {
@@ -319,17 +319,17 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
             // info!(" @@(Received) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
             info.listen_addrs.iter().for_each(|addr| {
                 if !addr.to_string().starts_with("/ip4/127.0.0.1") {
-                    debug!("Discoverd new address: {addr}/p2p/{peer_id} ");
+                    debug!("Discovered new address: {addr}/p2p/{peer_id} ");
                     swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
                 }
             });
         }
         TSSBehaviourEvent::Kad(libp2p::kad::Event::RoutablePeer { peer, address }) => {
-            info!("@@@ Kad @@@ discoverd a new routable peer {peer} - {:?}", address);
+            info!("@@@ Kad @@@ discovered a new routable peer {peer} - {:?}", address);
             swarm.behaviour_mut().kad.add_address(&peer, address);
         } 
         TSSBehaviourEvent::Kad(libp2p::kad::Event::RoutingUpdated { peer, is_new_peer, addresses, .. }) => {
-            info!("KAD Routing updated for {peer} {is_new_peer}: {:?}", addresses);
+            debug!("KAD Routing updated for {peer} {is_new_peer}: {:?}", addresses);
             if is_new_peer {
                 swarm.behaviour_mut().gossip.add_explicit_peer(&peer);
             }
@@ -357,7 +357,7 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Expired(list)) => {
             for (peer_id, _multiaddr) in list {
-                info!("mDNS discover peer has expired: {peer_id}");
+                info!("mDNS peer has expired: {peer_id}");
             }
         }
         _ => {}
