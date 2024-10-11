@@ -89,10 +89,7 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
         Ok(false) => {
             info!("Fetched a new signing task: {:?}", request);
         }
-        _ => {
-            debug!("Task already exists: {:?}", request.txid);
-            return;
-        }
+        _ => return
     }
 
     let psbt_bytes = from_base64(&request.psbt).unwrap();
@@ -106,7 +103,7 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
         }
     };
 
-    debug!("(signing round 0) prepare for signing: {:?} inputs in {:?}", psbt.inputs.len(), request.txid );
+    debug!("Prepare for signing: {:?} with {:?} inputs ",request.txid, psbt.inputs.len()  );
     let mut inputs = BTreeMap::new();
     let preouts = psbt.inputs.iter()
         //.filter(|input| input.witness_utxo.is_some())
@@ -115,15 +112,6 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
 
     psbt.inputs.iter().enumerate().for_each(|(i, input)| {
 
-        let prev_utxo = match input.witness_utxo.clone() {
-            Some(utxo) => utxo,
-            None => {
-                error!("Failed to get witness_utxo {}-{}", request.txid, i);
-                return;
-            }
-        };
-
-        debug!("prev_tx: {:?}", prev_utxo.script_pubkey);
         let script = input.witness_utxo.clone().unwrap().script_pubkey;
         let address: Address = Address::from_script(&script, signer.config().bitcoin.network).unwrap();
 
@@ -297,7 +285,7 @@ pub fn received_sign_message(msg: SignMesage) {
                             None => false
                         }
                     }) {
-                        info!("Move to round2: {}", task_id);
+                        info!("Ready for round2: {}", task_id);
                         task.round = Round::Round2;
                         save_sign_task(&task);
                     }
@@ -359,7 +347,6 @@ pub fn received_sign_message(msg: SignMesage) {
                 Some(srd) => {
                     srd.iter_mut().for_each(|(index, map)| {
                         map.extend(sig_shares.get(index).unwrap());
-                        debug!("Received signature shares: {}:{index} {:?}",&msg.retry, map.keys());
                     });
                 },
                 None => {
@@ -370,18 +357,22 @@ pub fn received_sign_message(msg: SignMesage) {
             save_sign_remote_signature_shares(&task_id, &remote_sig_shares);
 
             // Move to Round2 if the commitment of all inputs received from the latest retry exceeds the minimum number of signers.
-            if remote_sig_shares.get(&msg.retry).unwrap().iter().all(|(index, shares)| {
+            if remote_sig_shares.get(&msg.retry).unwrap().iter().any(|(index, shares)| {
                 match task.inputs.get(index) {
                     Some(input) => {
                         match config::get_keypair_from_db(&input.address) {
-                            Some(key) => shares.len() as u16 >= key.priv_key.min_signers().clone(),
+                            Some(key) => {
+                                let threshold = key.priv_key.min_signers().clone() as usize;
+                                debug!("Received signature shares: {}:{index} {:?}>={}",&msg.retry, shares.len(), threshold);
+                                shares.len() >= threshold
+                            },
                             None => false
                         }
                     },
                     None => false
                 }
             }) {
-                info!("Move to Round::Aggregate: {}", task_id);
+                info!("Ready for aggregation: {}", task_id);
                 task.round = Round::Aggregate;
                 save_sign_task(&task);
             }
@@ -677,7 +668,6 @@ fn generate_nonce_and_commitment_by_address(address: &str) -> Option<(SigningNon
 
 pub fn list_sign_tasks() -> Vec<SignTask> {
     let mut tasks = vec![];
-    debug!("loading in-process sign tasks from database, total: {:?}", DB_TASK.len());
     for task in DB_TASK.iter() {
         let (_, task) = task.unwrap();
         tasks.push(serde_json::from_slice(&task).unwrap());

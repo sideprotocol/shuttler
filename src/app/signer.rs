@@ -156,7 +156,7 @@ impl Signer {
         }
         
         // self.config.save().expect("Failed to save generated keys");
-        info!("Generated {:?} and vault addresses: {:?}", pubkey.verifying_key().serialize(), addrs);
+        info!("Generated vault addresses: {:?}", addrs);
         addrs
     }
 

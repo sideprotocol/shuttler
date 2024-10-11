@@ -73,8 +73,8 @@ fn mock_psbt(home: &str, tx_bytes: &Vec<u8>) {
             if m.type_url == "/side.btcbridge.MsgCompleteDKG" {
                 if let Ok(msg) = m.to_msg::<MsgCompleteDkg>() {
                     println!("Received: {} from {}", msg.vaults.join(","), msg.sender);
-                    let mut num = rand::random::<u32>() % 5 + 1;
-                    num = 1;
+                    let num = rand::random::<u32>() % 5 + 1;
+                    // num = 1;
                     let mut srs = vec![];
                     msg.vaults.iter().for_each(|addr| {
                         

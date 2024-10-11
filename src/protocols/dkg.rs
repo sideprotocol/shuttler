@@ -260,8 +260,8 @@ pub fn received_round1_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
     }
 
     if task.participants.len() == local.len() {
+        
         info!("Received round1 packets from all participants: {}", task.id);
-
         match generate_round2_packages(identifier, enc_key, task, local) {
             Ok(_) => {
                 task.round = Round::Round2;
@@ -328,7 +328,7 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
             })
         });
 
-        info!("Received round2 packages from all participants: {}, {:?}", task.id, round2_packages.keys());
+        info!("Received round2 packages from all participants: {}", task.id);
 
         // compute the threshold key
         let round2_secret_package = match mem_store::get_dkg_round2_secret_packet(&task.id) {
