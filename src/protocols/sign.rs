@@ -187,21 +187,7 @@ pub async fn broadcast_tss_packages(swarm: &mut Swarm<TSSBehaviour>, signer: &Si
                 generate_signature_shares(swarm, &mut task, signer.identifier());
             },
             Round::Aggregate => {
-                // let psbt_bytes = from_base64(&task.psbt).unwrap();
-                // let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
-                //     Ok(psbt) => psbt,
-                //     Err(e) => {
-                //         error!("Failed to deserialize PSBT: {}", e);
-                //         continue;
-                //     }
-                // };
-                // if psbt.inputs.iter().all(|input| input.final_script_witness.is_some() ) {
-                //     submit_signatures(psbt, signer).await;
-                // } else {
-                //     debug!("Re-sign incompleted task: {}.", task.id);
-                //     task.round = Round::Round1;
-                //     save_sign_task(&task);
-                // }  
+                aggregate_signature_shares(&mut task);
             },
             Round::Closed => {
                 if task.is_signature_submitted {
@@ -272,11 +258,9 @@ pub fn received_sign_message(msg: SignMesage) {
             let mut remote_commitments = get_sign_remote_commitments(&task_id);
             match remote_commitments.get_mut(&msg.retry) {
                 Some(srd) => {
-                    // srd.extend(commitments);
-                    // debug!("srd {:?}", srd);
                     srd.iter_mut().for_each(|(index, map)| {
                         map.extend(commitments.get(index).unwrap());
-                        debug!("Received commitments: {}:{index} {:?}",&msg.retry, map.keys());
+                        // debug!("Received commitments: {}:{index} {:?}",&msg.retry, map.keys());
                     });
                 },
                 None => {
@@ -359,11 +343,7 @@ pub fn received_sign_message(msg: SignMesage) {
                 info!("Move to Round::Aggregate: {}", task_id);
                 task.round = Round::Aggregate;
                 save_sign_task(&task);
-
-                // aggregate signatures if it's possible
-                aggregate_signature_shares(&mut task);
             }
-
         }
     }
 
@@ -399,7 +379,7 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
                     return
                 }
 
-                debug!("Commitments: {}, {:?}", signing_commitments.len(), signing_commitments);
+                debug!("Commitments: {}, {:?}", signing_commitments.len(), signing_commitments.keys());
 
                 // when number of receved commitments is larger than min_signers
                 // the following code will be executed or re-executed
@@ -513,6 +493,7 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
         };
 
         if signing_commitments.len() != signature_shares.len() {
+            error!("Aggregate error: {} != {}", signing_commitments.len(), signature_shares.len());
             return None;
         }
 

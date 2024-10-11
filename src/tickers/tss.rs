@@ -84,13 +84,14 @@ async fn fetch_dkg_requests(shuttler: &Signer) {
     {
         let requests = requests_response.into_inner().requests;
         let tasks_in_process = requests.iter().map(|r| format!("dkg-{}", r.id)).collect::<Vec<_>>();
-        debug!("Fetched DKG requests: {:?}", tasks_in_process);
         list_tasks().iter().for_each(|task| {
             if !tasks_in_process.contains(&task.id) {
                 debug!("Removing expired task: {:?}", task.id);
                 dkg::remove_task(&task.id);
             }
         });
+        
+        debug!("Fetched in-process DKGs: {:?}", requests.iter().map(|a| a.id));
         for request in requests {
             if request
                 .participants
@@ -104,7 +105,7 @@ async fn fetch_dkg_requests(shuttler: &Signer) {
                     continue;
                 };
                 generate_round1_package(shuttler.identifier().clone(), &task);
-                debug!("generated round1 packages: {:?} {:?}", &task.id, request);
+                info!("Start DKG {:?}", &task.id );
                 dkg::save_task(&task);
             }
         }

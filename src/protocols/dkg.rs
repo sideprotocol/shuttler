@@ -107,13 +107,8 @@ pub fn generate_round1_package(identifier: Identifier, task: &DKGTask) {
         round1_packages.insert(identifier, round1_package);
 
         let value = serde_json::to_vec(&round1_packages).unwrap();
-        match DB.insert(format!("dkg-{}-round1", task.id), value) {
-            Ok(_) => {
-                info!("DKG round 1 completed: {}", task.id);
-            }
-            Err(e) => {
-                error!("error in DKG round 1: {:?}", e);
-            }
+        if DB.insert(format!("dkg-{}-round1", task.id), value).is_err() {
+            error!("error to store dkg task: {:?}", task.id);
         }
      } else {
         error!("error in DKG round 1: {:?}", task.id);
@@ -164,13 +159,8 @@ pub fn generate_round2_packages(identifier: &Identifier, enc_key: &SecretKey, ta
 
             let value = serde_json::to_vec(&merged).unwrap();
 
-            match DB.insert(format!("dkg-{}-round2", &task_id), value) {
-                Ok(_) => {
-                    info!("DKG round 2 completed: {task_id}");
-                }
-                Err(e) => {
-                    return Err(DKGError(e.to_string()));
-                }
+            if DB.insert(format!("dkg-{}-round2", &task_id), value).is_err() {
+                return Err(DKGError("Storage error".to_string()));
             };
         }
         Err(e) => {

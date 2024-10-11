@@ -1,7 +1,6 @@
 
 use frost_core::serde::{Serialize, Deserialize};
 use libp2p::{gossipsub::IdentTopic, Swarm};
-use tracing::debug;
 
 use crate::protocols::{dkg::{self, prepare_response_for_task}, sign::SignMesage, TSSBehaviour};
 
@@ -29,13 +28,13 @@ pub fn subscribe_gossip_topics(swarm: &mut Swarm<TSSBehaviour>) {
 
 pub fn publish_dkg_packages(swarm: &mut Swarm<TSSBehaviour>, task: &dkg::DKGTask) {
     let response = prepare_response_for_task(task.id.clone());
-    debug!("Broadcasting: {:?}", response);
+    // debug!("Broadcasting: {:?}", response.);
     let message = serde_json::to_vec(&response).expect("Failed to serialize DKG package");
     publish_message(swarm, SubscribeTopic::DKG, message);
 }
 
 pub fn publish_signing_package(swarm: &mut Swarm<TSSBehaviour>, package: &SignMesage) {
-    debug!("Broadcasting: {:?}", package);
+    // debug!("Broadcasting: {:?}", package);
     let message = serde_json::to_vec(&package).expect("Failed to serialize Sign package");
     publish_message(swarm, SubscribeTopic::SIGNING, message);
 }
