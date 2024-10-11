@@ -208,6 +208,7 @@ pub async fn broadcast_tss_packages(swarm: &mut Swarm<TSSBehaviour>, signer: &Si
                     continue;
                 }
                 let psbt_bytes = from_base64(&task.psbt).unwrap();
+                debug!("psbt: {:?}", task.psbt);
                 let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
                     Ok(psbt) => psbt,
                     Err(e) => {
@@ -216,9 +217,12 @@ pub async fn broadcast_tss_packages(swarm: &mut Swarm<TSSBehaviour>, signer: &Si
                     }
                 };
                 if psbt.inputs.iter().all(|input| input.final_script_witness.is_some() ) {
+                    debug!("psbt is ready for submitting");
                     submit_signatures(psbt, signer).await;
                     task.is_signature_submitted = true;
                     save_sign_task(&task);
+                } else {
+                    debug!("psbt is not ready");
                 }
             }
         }
@@ -284,7 +288,7 @@ pub fn received_sign_message(msg: SignMesage) {
             }
             save_sign_remote_commitments(&task_id, &remote_commitments);
 
-            debug!("Received commitments: {:?}", serde_json::to_string(&remote_commitments).unwrap());
+            debug!("Received commitments: {}", serde_json::to_string(&remote_commitments).unwrap());
 
             match get_sign_task(&task_id) {
                 Some(mut task) => {
@@ -574,8 +578,11 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
     };
 
     if psbt.inputs.iter().all(|input| input.final_script_witness.is_some() ) {
-        debug!("Signing Task {} completed", task.id);
+        debug!("Signing task {} completed", task.id);
         task.round = Round::Closed;
+        let psbt_bytes = psbt.serialize();
+        let psbt_base64 = encoding::to_base64(&psbt_bytes);
+        task.psbt = psbt_base64;
         save_sign_task(task);
         Some(psbt.to_owned())
     } else {
