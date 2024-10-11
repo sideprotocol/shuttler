@@ -130,8 +130,6 @@ pub fn generate_round2_packages(identifier: &Identifier, enc_key: &SecretKey, ta
         return Err(DKGError(format!("Have not received enough packages: {}", task_id)));
     }
 
-    info!("Generating round2 packages: {}", task_id);
-
     let mut cloned = round1_packages.clone();
     cloned.remove(identifier);
 
@@ -257,13 +255,8 @@ pub fn received_round1_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
     // merge packets with local
     local.extend(packets);
 
-    match DB.insert(format!("dkg-{}-round1", task.id), serde_json::to_vec(&local).unwrap()) {
-        Ok(_) => {
-            debug!("Stored DKG Round 1 packets: {}: {:?} packages", task.id, local.keys());
-        }
-        Err(e) => {
-            error!("Failed to store DKG Round 1 packets: {} - {:?}", task.id, e);
-        }
+    if DB.insert(format!("dkg-{}-round1", task.id), serde_json::to_vec(&local).unwrap()).is_err() {
+        error!("Failed to store DKG Round 1 packets: {} ", task.id);
     }
 
     if task.participants.len() == local.len() {
@@ -310,13 +303,8 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
     local.extend(packets);
 
     // store round 2 packets
-    match DB.insert(format!("dkg-{}-round2", task.id), serde_json::to_vec(&local).unwrap()) {
-        Ok(_) => {
-            debug!("Stored DKG Round 2 packets: {}: {:?} packages", task.id, local.keys());
-        }
-        Err(e) => {
-            error!("Failed to store DKG Round 2 packets: {} - {:?}", task.id, e);
-        }
+    if DB.insert(format!("dkg-{}-round2", task.id), serde_json::to_vec(&local).unwrap()).is_err() {
+        error!("Failed to store DKG Round 2 packets: {} ", task.id);
     }
 
     if task.participants.len() == local.len() {
