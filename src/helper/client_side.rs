@@ -165,8 +165,6 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
     // Compute auth info from signer info by associating a fee.
     let auth_info = signer_info.auth_info(Fee::from_amount_and_gas(fee, gas as u64));
 
-    println!("Auth Info: {:?}",  auth_info);
-
     //////////////////////////
     // Signing transactions //
     //////////////////////////
@@ -177,8 +175,6 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
     // Sign the "sign doc" with the sender's private key, producing a signed raw transaction.
     // let tx_signed = sign_doc.sign(&signing_key).unwrap();
     let tx_signed = sign_with_bitcoin_algo(&sign_doc, &sender_private_key);
-
-    println!("Signed Tx: {:?}", tx_signed);
 
     // Serialize the raw transaction as bytes (i.e. `Vec<u8>`).
     let tx_bytes = tx_signed.to_bytes().unwrap();
