@@ -2,9 +2,9 @@
 use bitcoin::{ consensus::Encodable, key::Secp256k1, secp256k1::Message, sign_message::BITCOIN_SIGNED_MSG_PREFIX, PrivateKey};
 use bitcoin_hashes::{sha256d, Hash, HashEngine};
 use cosmrs::{ crypto::secp256k1::SigningKey, tx::{self, Fee, ModeInfo, Raw, SignDoc, SignerInfo, SignerPublicKey}, Coin};
-use cosmos_sdk_proto::cosmos::{
+use cosmos_sdk_proto::{cosmos::{
     base::tendermint::v1beta1::GetLatestBlockRequest, tx::v1beta1::{service_client::ServiceClient as TxServiceClient, BroadcastMode, BroadcastTxRequest, BroadcastTxResponse}
-};
+}, side::btcbridge::QueryParamsRequest};
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_client::ServiceClient as TendermintServiceClient;
 use reqwest::Error;
 use tokio::sync::Mutex;
@@ -63,6 +63,17 @@ pub async fn get_bitcoin_tip_on_side(host: &str ) -> Result<Response<QueryChainT
     };
 
     btc_client.query_chain_tip(QueryChainTipRequest {}).await
+}
+
+pub async fn get_confirmations_on_side(host: &str ) -> u64 {
+    let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(_) => {
+            return 1 as u64;
+        }
+    };
+    let x = btc_client.query_params(QueryParamsRequest{}).await.unwrap().into_inner();
+    x.params.unwrap().confirmations as u64
 }
 
 pub async fn get_signing_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {
@@ -203,6 +214,9 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
             }));
         }
         Err(e) => {
+            if e.message().contains("account sequence mismatch") {
+                config::remove_relayer_account();
+            }
             return Err(Status::aborted(format!("Failed to broadcast tx: {}", e)));
         }
     }
