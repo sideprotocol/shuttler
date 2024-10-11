@@ -18,7 +18,7 @@ use crate::{
     signer::Signer}, 
     helper::{
         client_side::send_cosmos_transaction, 
-        encoding::{self, from_base64, hash}, 
+        encoding::{self, from_base64, hash, to_base64}, 
         gossip::publish_signing_package,
     }};
 
@@ -103,7 +103,7 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
         }
     };
 
-    debug!("Prepare for signing: {:?} with {:?} inputs ",request.txid, psbt.inputs.len()  );
+    info!("Prepare for signing: {:?} {} inputs ",request.txid, psbt.inputs.len()  );
     let mut inputs = BTreeMap::new();
     let preouts = psbt.inputs.iter()
         //.filter(|input| input.witness_utxo.is_some())
@@ -407,7 +407,8 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
                     return
                 }
 
-                debug!("Commitments: {}, {:?}", signing_commitments.len(), signing_commitments.keys());
+                let k = signing_commitments.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
+                debug!("Commitments: {}, {:?}", signing_commitments.len(), k);
 
                 // add data fingerprint
                 if *index == 0 as usize {
