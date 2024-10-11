@@ -187,28 +187,27 @@ pub async fn broadcast_tss_packages(swarm: &mut Swarm<TSSBehaviour>, signer: &Si
                 generate_signature_shares(swarm, &mut task, signer.identifier());
             },
             Round::Aggregate => {
-                let psbt_bytes = from_base64(&task.psbt).unwrap();
-                let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
-                    Ok(psbt) => psbt,
-                    Err(e) => {
-                        error!("Failed to deserialize PSBT: {}", e);
-                        continue;
-                    }
-                };
-                if psbt.inputs.iter().all(|input| input.final_script_witness.is_some() ) {
-                    submit_signatures(psbt, signer).await;
-                } else {
-                    debug!("Re-sign incompleted task: {}.", task.id);
-                    task.round = Round::Round1;
-                    save_sign_task(&task);
-                }  
+                // let psbt_bytes = from_base64(&task.psbt).unwrap();
+                // let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
+                //     Ok(psbt) => psbt,
+                //     Err(e) => {
+                //         error!("Failed to deserialize PSBT: {}", e);
+                //         continue;
+                //     }
+                // };
+                // if psbt.inputs.iter().all(|input| input.final_script_witness.is_some() ) {
+                //     submit_signatures(psbt, signer).await;
+                // } else {
+                //     debug!("Re-sign incompleted task: {}.", task.id);
+                //     task.round = Round::Round1;
+                //     save_sign_task(&task);
+                // }  
             },
             Round::Closed => {
                 if task.is_signature_submitted {
                     continue;
                 }
                 let psbt_bytes = from_base64(&task.psbt).unwrap();
-                debug!("psbt: {:?}", task.psbt);
                 let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
                     Ok(psbt) => psbt,
                     Err(e) => {
@@ -217,12 +216,9 @@ pub async fn broadcast_tss_packages(swarm: &mut Swarm<TSSBehaviour>, signer: &Si
                     }
                 };
                 if psbt.inputs.iter().all(|input| input.final_script_witness.is_some() ) {
-                    debug!("psbt is ready for submitting");
                     submit_signatures(psbt, signer).await;
                     task.is_signature_submitted = true;
                     save_sign_task(&task);
-                } else {
-                    debug!("psbt is not ready");
                 }
             }
         }
@@ -280,6 +276,7 @@ pub fn received_sign_message(msg: SignMesage) {
                     // debug!("srd {:?}", srd);
                     srd.iter_mut().for_each(|(index, map)| {
                         map.extend(commitments.get(index).unwrap());
+                        debug!("Received commitments: {}:{index} {:?}",&msg.retry, map.keys());
                     });
                 },
                 None => {
@@ -287,8 +284,6 @@ pub fn received_sign_message(msg: SignMesage) {
                 }
             }
             save_sign_remote_commitments(&task_id, &remote_commitments);
-
-            debug!("Received commitments: {}", serde_json::to_string(&remote_commitments).unwrap());
 
             match get_sign_task(&task_id) {
                 Some(mut task) => {
@@ -339,6 +334,7 @@ pub fn received_sign_message(msg: SignMesage) {
                 Some(srd) => {
                     srd.iter_mut().for_each(|(index, map)| {
                         map.extend(sig_shares.get(index).unwrap());
+                        debug!("Received signature shares: {}:{index} {:?}",&msg.retry, map.keys());
                     });
                 },
                 None => {
@@ -346,7 +342,6 @@ pub fn received_sign_message(msg: SignMesage) {
                 }
             }
             
-            debug!("Received signature shares: {:?}", serde_json::to_string(&remote_sig_shares).unwrap());
             save_sign_remote_signature_shares(&task_id, &remote_sig_shares);
 
             // Move to Round2 if the commitment of all inputs received from the latest retry exceeds the minimum number of signers.
@@ -552,7 +547,7 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
                 // println!("public key: {:?}", pub)
                 // let sighash = &hex::decode(sig_shares_message.message).unwrap();
                 match keypair.pub_key.verifying_key().verify(signing_package.sig_target().clone(), &signature) {
-                    Ok(_) => info!( "Signature: {:?} is verified", signature ),
+                    Ok(_) => info!( "{}:{} {:?} is verified",task.id, index, signature ),
                     Err(e) => {
                         error!("Signature is invalid {}", e);
                         return None;

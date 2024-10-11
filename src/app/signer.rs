@@ -296,16 +296,16 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<TSSBehaviour>, conf: &Config) {
 // handle sub events from the swarm
 async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
     match event {
-        TSSBehaviourEvent::Gossip(gossipsub::Event::Message { propagation_source, message_id, message }) => {
+        TSSBehaviourEvent::Gossip(gossipsub::Event::Message {message, .. }) => {
             // debug!("Received message: {:?}", message);
             if message.topic == SubscribeTopic::DKG.topic().hash() {
                 let response: DKGResponse = serde_json::from_slice(&message.data).expect("Failed to deserialize DKG message");
                 // dkg_event_handler(shuttler, swarm.behaviour_mut(), &propagation_source, dkg_message);
-                debug!("Gossip Received DKG Response from {propagation_source}: {message_id} {:?}", response);
+                // debug!("Gossip Received DKG Response from {propagation_source}: {message_id} {:?}", response);
                 received_dkg_response(response, signer);
             } else if message.topic == SubscribeTopic::SIGNING.topic().hash() {
                 let msg: SignMesage = serde_json::from_slice(&message.data).expect("Failed to deserialize Sign message");
-                debug!("Gossip Received TSS Response from {propagation_source}: {message_id} {:?}", msg);
+                // debug!("Gossip Received TSS Response from {propagation_source}: {message_id} {:?}", msg);
                 received_sign_message(msg);
             }
         }

@@ -100,10 +100,7 @@ pub fn generate_round1_package(identifier: Identifier, task: &DKGTask) {
         task.threshold as u16,
         &mut rng,
     ) {
-        debug!(
-            "round1_secret_package: {:?}, {:?}",
-            task.id, &round1_package
-        );
+        debug!("round1_secret_package: {:?}", task.id );
         mem_store::set_dkg_round1_secret_packet(task.id.to_string().as_str(), secret_packet);
 
         let mut round1_packages = BTreeMap::new();
@@ -138,7 +135,7 @@ pub fn generate_round2_packages(identifier: &Identifier, enc_key: &SecretKey, ta
         return Err(DKGError(format!("Have not received enough packages: {}", task_id)));
     }
 
-    info!("Generating round2 packages: {task_id}, {:?}", &round1_packages);
+    info!("Generating round2 packages: {task_id}");
 
     let mut cloned = round1_packages.clone();
     cloned.remove(identifier);
@@ -248,55 +245,9 @@ pub fn received_dkg_response(response: DKGResponse, signer: &Signer) {
         debug!("DKG has already completed on my side: {}", task_id);
     }
 }
-// pub fn prepare_round1_package_for_request(task_id: String) -> DKGResponse {
-
-//     // behave.dkg.send_response(channel, DKGResponse::Round1 { task_id, packets: BTreeMap::new() });
-//     let packets = match DB.get(format!("dkg-{}-round1", task_id)) {
-//         Ok(Some(packets)) => {
-//             match serde_json::from_slice(&packets) {
-//                 Ok(packets) => packets,
-//                 Err(e) => {
-//                     error!("Failed to deserialize DKG Round 1 packets: {:?}", e);
-//                     BTreeMap::new()
-//                 }
-//             }
-//         },
-//         _ => {
-//             debug!("No DKG Round 1 packets found: {task_id}");
-//             BTreeMap::new()
-//         },
-//     };
-//     DKGResponse::Round1 { task_id, packets, nonce: now() }
-// }
-
-// pub fn prepare_round2_package_for_request(task_id: String) -> DKGResponse {
-//     // behave.dkg.send_response(channel, DKGResponse::Round2 { task_id, packets: BTreeMap::new() });
-//     let packets = match DB.get(format!("dkg-{}-round2", task_id)) {
-//         Ok(Some(packets)) => {
-//             match serde_json::from_slice(&packets) {
-//                 Ok(packets) => packets,
-//                 Err(e) => {
-//                     error!("Failed to deserialize DKG Round 2 packets: {:?}", e);
-//                     BTreeMap::new()
-//                 }
-//             }
-//         },
-//         _ => {
-//             debug!("No DKG Round 2 packets found: {task_id}");
-//             BTreeMap::new()
-//         },
-//     };
-//     DKGResponse::Round2 { task_id, packets, nonce: now() }
-// }
 
 pub fn received_round1_packages(task: &mut DKGTask, packets: BTreeMap<Identifier, keys::dkg::round1::Package>, identifier: &Identifier, enc_key: &SecretKey) {
-    // let mut task = match get_task(&task_id) {
-    //     Some(task) => task,
-    //     None => {
-    //         error!("No task found for DKG: {}", task_id);
-    //         return;
-    //     }
-    // };
+
     // store round 1 packets
     let mut local = match DB.get(format!("dkg-{}-round1", task.id)) {
         Ok(Some(local)) => {
@@ -309,7 +260,6 @@ pub fn received_round1_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
             }
         },
         _ => {
-            debug!("No local DKG Round 1 packets found: {}", task.id);
             BTreeMap::new()
         },
     };
@@ -319,7 +269,7 @@ pub fn received_round1_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
 
     match DB.insert(format!("dkg-{}-round1", task.id), serde_json::to_vec(&local).unwrap()) {
         Ok(_) => {
-            debug!("Stored DKG Round 1 packets: {}: {} packages", task.id, local.len());
+            debug!("Stored DKG Round 1 packets: {}: {:?} packages", task.id, local.keys());
         }
         Err(e) => {
             error!("Failed to store DKG Round 1 packets: {} - {:?}", task.id, e);
@@ -345,13 +295,6 @@ pub fn received_round1_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
 }
 
 pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>, signer: &Signer) {
-    // let mut task = match get_task(&task_id) {
-    //     Some(task) => task,
-    //     None => {
-    //         error!("No task found for DKG: {}", task_id);
-    //         return;
-    //     }
-    // };
 
     if task.round == Round::Closed {
         debug!("DKG is already closed: {}", task.id);
@@ -370,7 +313,6 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
             }
         },
         _ => {
-            debug!("Not found local DKG Round 2 packets: {}", task.id);
             BTreeMap::new()
         },
     };
@@ -380,7 +322,7 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
     // store round 2 packets
     match DB.insert(format!("dkg-{}-round2", task.id), serde_json::to_vec(&local).unwrap()) {
         Ok(_) => {
-            debug!("Stored DKG Round 2 packets: {}:  {} packages", task.id, local.len());
+            debug!("Stored DKG Round 2 packets: {}: {:?} packages", task.id, local.keys());
         }
         Err(e) => {
             error!("Failed to store DKG Round 2 packets: {} - {:?}", task.id, e);
@@ -402,13 +344,13 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
 
                     let packet = decrypt(packet.as_slice(), share_key.as_slice().try_into().unwrap());
                     let received_round2_package = frost::keys::dkg::round2::Package::deserialize(&packet).unwrap();
-                    debug!("Received round2 package: {:?}", received_round2_package);
+                    debug!("Received {} round2 package from: {:?}", task.id, sender.clone());
                     round2_packages.insert(sender.clone(), received_round2_package);
                 }
             })
         });
 
-        info!("Received round2 packages from all participants: {}, {:?}", task.id, round2_packages);
+        info!("Received round2 packages from all participants: {}, {:?}", task.id, round2_packages.keys());
 
         // compute the threshold key
         let round2_secret_package = match mem_store::get_dkg_round2_secret_packet(&task.id) {
@@ -461,56 +403,6 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
         
     }
 }
-
-// pub fn dkg_event_handler(signer: &Signer, behave: &mut TSSBehaviour, peer: &PeerId, message: Message<DKGRequest, DKGResponse>) {
-//     // handle dkg events
-//     debug!("Reqeust-Response Received DKG response from {peer}: {:?}", &message);
-//     match message {
-//         request_response::Message::Request { request_id, request, channel } => {
-//             debug!("Received DKG Request from {peer}: {request_id}");
-//             let response = match request { DKGRequest { task_id, round } => {
-//                     match round {
-//                         Round::Round1 => {
-//                             // send round 1 packets to requester
-//                             debug!("Received DKG Round 1 Request from {peer}, {request_id}");
-//                             prepare_round1_package_for_request(task_id)
-//                         }
-//                         Round::Round2 => {
-//                             // send round 2 packets to requester
-//                             debug!("Received DKG Round 2 Request from {peer}: {request_id}");
-//                             prepare_round2_package_for_request(task_id)
-//                         }
-//                         // skip other rounds
-//                         _ => {return;},
-//                     }
-//                 }
-//             };
-//             match behave.dkg.send_response(channel, response) {
-//                 Ok(_) => {
-//                     debug!("Sent DKG Response to {peer}: {request_id}");
-//                 }
-//                 Err(e) => {
-//                     error!("Failed to send DKG Response to {peer}: {request_id} - {:?}", e);
-//                 }
-//             };
-//         }
-
-//         request_response::Message::Response { request_id, response } => {
-//             debug!("Received DKG Response from {peer}: {request_id}");
-//             match response {
-//                 // collect round 1 packets
-//                 DKGResponse::Round1 { task_id, packets, nonce: _ } => {
-//                     received_round1_packages(task_id, packets, signer.identifier(), &signer.identity_key);
-//                 }
-//                 // collect round 2 packets
-//                 DKGResponse::Round2 { task_id, packets, nonce: _ } => {
-//                     received_round2_packages(task_id, packets, signer);
-//                 }
-//             }
-
-//         }
-//     }
-// }
 
 #[derive(Debug, Clone)]
 pub struct DKGError(String);
