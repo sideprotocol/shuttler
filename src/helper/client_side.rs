@@ -10,7 +10,8 @@ use reqwest::Error;
 use tokio::sync::Mutex;
 use tonic::{Response, Status};
 use cosmos_sdk_proto::side::btcbridge::{
-    query_client::QueryClient as BtcQueryClient, 
+    query_client::QueryClient as BtcQueryClient,
+    QueryBlockHeaderByHeightRequest, QueryBlockHeaderByHeightResponse,
     QueryChainTipRequest, QueryChainTipResponse, 
     QuerySigningRequestsRequest, QuerySigningRequestsResponse, 
     QuerySigningRequestByTxHashRequest, QuerySigningRequestByTxHashResponse
@@ -54,7 +55,7 @@ impl SigningRequestsResponse {
     }
 }
 
-pub async fn get_bitcoin_tip_on_side(host: &str ) -> Result<Response<QueryChainTipResponse>, Status> {
+pub async fn get_bitcoin_tip_on_side(host: &str) -> Result<Response<QueryChainTipResponse>, Status> {
     let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
         Err(e) => {
@@ -65,7 +66,18 @@ pub async fn get_bitcoin_tip_on_side(host: &str ) -> Result<Response<QueryChainT
     btc_client.query_chain_tip(QueryChainTipRequest {}).await
 }
 
-pub async fn get_confirmations_on_side(host: &str ) -> u64 {
+pub async fn get_bitcoin_block_header_on_side(host: &str, height: u64) -> Result<Response<QueryBlockHeaderByHeightResponse>, Status> {
+    let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
+        }
+    };
+
+    btc_client.query_block_header_by_height(QueryBlockHeaderByHeightRequest { height }).await
+}
+
+pub async fn get_confirmations_on_side(host: &str) -> u64 {
     let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
         Err(_) => {
