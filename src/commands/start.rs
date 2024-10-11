@@ -10,6 +10,7 @@ pub async fn execute(home: &str, relayer: bool, signer: bool) {
 
     let filter = EnvFilter::new("info").add_directive(format!("shuttler={}", conf.log_level).parse().unwrap());
     let subscriber = FmtSubscriber::builder()
+        .with_line_number(true)
         .with_env_filter(filter) // Enable log filtering through environment variable
         .finish();
     if tracing::subscriber::set_global_default(subscriber).is_err() {
