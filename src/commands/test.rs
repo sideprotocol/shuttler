@@ -39,6 +39,8 @@ pub async fn execute(bin: &'static str, n: u32) {
         let rng = rand::thread_rng();
         let sk = ed25519_consensus::SigningKey::new(rng);
         let priv_key = PrivateKey::from_ed25519_consensus(sk);
+        println!("{i}.{}", priv_key.public_key().to_hex().to_ascii_lowercase());
+
         let priv_validator_key = PrivValidatorKey {
             address: Id::from(priv_key.public_key()),
             pub_key: priv_key.public_key(),
@@ -48,17 +50,11 @@ pub async fn execute(bin: &'static str, n: u32) {
         participants.push(priv_validator_key.address.to_string());
 
         let text= serde_json::to_string_pretty(&priv_validator_key).unwrap();
-        
         fs::write(home_i.join("priv_validator_key.json"), text).unwrap();
-
-        // tokio::spawn( async move {
-        //     // sleep(Duration::from_secs(3)).await;
-        //     // sleep(Duration::from_secs((3+i) as u64));
-        // });
 
         let log = File::create(home_i.join("log.txt")).expect("failed to open log");
 
-        let _child = Command::new(executor)
+        Command::new(executor)
             .arg("--home")
             .arg(home_i.to_str().unwrap())
             .arg("start")
