@@ -22,7 +22,7 @@ use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::from_base64;
 use crate::helper::gossip::{subscribe_gossip_topics, SubscribeTopic};
 use crate::protocols::sign::{received_sign_message, SignMesage};
-use crate::tickers::tss::tss_tasks_fetcher;
+use crate::tickers::tss::{fetch_signing_requests, tss_tasks_fetcher};
 use crate::protocols::dkg::{received_dkg_response, DKGResponse};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
 
@@ -154,8 +154,9 @@ impl Signer {
                 error!("Failed to save generated keys to database: {:?}",   re.err());
             }
         }
+        
         // self.config.save().expect("Failed to save generated keys");
-        info!("Generated {:?} and vault addresses: {:?}", pubkey, addrs);
+        info!("Generated {:?} and vault addresses: {:?}", pubkey.verifying_key().serialize(), addrs);
         addrs
     }
 
@@ -240,6 +241,7 @@ pub async fn run_signer_daemon(conf: Config) {
     subscribe_gossip_topics(&mut swarm);
 
     let mut interval = tokio::time::interval(Duration::from_secs(60));
+    let mut interval2 = tokio::time::interval(Duration::from_secs(10));
 
     loop {
         select! {
@@ -265,7 +267,10 @@ pub async fn run_signer_daemon(conf: Config) {
                     // debug!("Swarm event: {:?}", swarm_event);
                 },
             },
-
+            _ = interval2.tick() => {
+                // 3. fetch signing requests
+                fetch_signing_requests(&signer).await;
+            }
             _ = interval.tick() => {
                 tss_tasks_fetcher(&mut swarm, &signer).await;
             }

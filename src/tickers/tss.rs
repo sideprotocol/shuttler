@@ -31,7 +31,7 @@ pub async fn tss_tasks_fetcher(
     // 2. collect dkg packages
     collect_dkg_packages(swarm);
     // 3. fetch signing requests
-    fetch_signing_requests(shuttler).await;
+    // fetch_signing_requests(shuttler).await;
     // 4. collect signing requests tss packages
     broadcast_tss_packages(swarm, shuttler).await;
     // 5. submit dkg address
@@ -40,7 +40,7 @@ pub async fn tss_tasks_fetcher(
 
 }
 
-async fn fetch_signing_requests(
+pub async fn fetch_signing_requests(
     shuttler: &Signer,
 ) {
     let host = shuttler.config().side_chain.grpc.as_str();
@@ -90,8 +90,9 @@ async fn fetch_dkg_requests(shuttler: &Signer) {
                 dkg::remove_task(&task.id);
             }
         });
-        
-        debug!("Fetched in-process DKGs: {:?}", requests.iter().map(|a| a.id));
+
+        let x: Vec<u64> = requests.iter().map(|a| a.id).collect::<Vec<_>>();
+        debug!("Fetched in-process DKGs: {:?}", x);
         for request in requests {
             if request
                 .participants
@@ -105,7 +106,7 @@ async fn fetch_dkg_requests(shuttler: &Signer) {
                     continue;
                 };
                 generate_round1_package(shuttler.identifier().clone(), &task);
-                info!("Start DKG {:?}", &task.id );
+                info!("Start DKG {:?}, {:?}", &task.id, task.participants);
                 dkg::save_task(&task);
             }
         }

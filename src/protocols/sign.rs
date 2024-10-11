@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{btree_map::Keys, BTreeMap};
 
 use bitcoin::{sighash::{self, SighashCache}, Address, Psbt, TapSighashType, Witness};
 use bitcoin_hashes::Hash;
@@ -18,7 +18,7 @@ use crate::{
     signer::Signer}, 
     helper::{
         client_side::send_cosmos_transaction, 
-        encoding::{self, from_base64}, 
+        encoding::{self, from_base64, hash}, 
         gossip::publish_signing_package,
     }};
 
@@ -57,6 +57,7 @@ pub struct SignMesage {
     pub task_id: String,
     pub retry: Retry,
     pub package: SignPackage,
+    pub fingerprint: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,6 +73,7 @@ pub struct SignTask {
     pub round: Round,
     pub inputs: BTreeMap<Index, TransactionInput>,
     pub is_signature_submitted: bool,
+    pub mismatch_fp: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -168,6 +170,7 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
         round: Round::Round1,
         inputs,
         is_signature_submitted: false,
+        mismatch_fp: 0,
     };
 
     save_sign_task(&task);
@@ -225,11 +228,19 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
 
     let mut nonces = BTreeMap::new();
     let mut packages = BTreeMap::new();
+    let mut commitments = get_sign_remote_commitments(&task.id);
     task.inputs.iter().for_each(|(index, input)| {
         if let Some((nonce, commitment)) = generate_nonce_and_commitment_by_address(&input.address) {
             nonces.insert(*index, nonce);
             let mut map: BTreeMap<frost_core::Identifier<frost_secp256k1_tr::Secp256K1Sha256>, frost_core::round1::SigningCommitments<frost_secp256k1_tr::Secp256K1Sha256>> = BTreeMap::new();
             map.insert(signer.identifier().clone(), commitment);
+
+            // forward received commitments
+            if let Some(tx_c) = commitments.get(&retry) {
+                if let Some(input_c) = tx_c.get(index) {
+                    map.extend(input_c);
+                };
+            }
             packages.insert(*index, map);
         }
     });
@@ -237,7 +248,6 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
     local_nonces.insert(retry, nonces);
     save_sign_local_variable(&task.id, &local_nonces);
 
-    let mut commitments = get_sign_remote_commitments(&task.id);
     commitments.insert(retry, packages.clone());
     save_sign_remote_commitments(&task.id, &commitments);
 
@@ -245,7 +255,8 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
     publish_signing_package(swarm, &SignMesage {
         task_id: task.id.clone(),
         retry,
-        package: SignPackage::Round1(packages)
+        package: SignPackage::Round1(packages),
+        fingerprint: "".to_string(),
     });
 }
 
@@ -277,7 +288,7 @@ pub fn received_sign_message(msg: SignMesage) {
                             Some(input) => {
                                 match config::get_keypair_from_db(&input.address) {
                                     Some(key) => {
-                                        debug!("{task_id}:{index} commitment lens: {}>={}?", commitments.len(), key.priv_key.min_signers());
+                                        debug!("{task_id}:{}:{index} commitment lens: {}>={}?", msg.retry, commitments.len(), key.priv_key.min_signers());
                                         commitments.len() as u16 >= key.priv_key.min_signers().clone()
                                     },
                                     None => false
@@ -292,7 +303,7 @@ pub fn received_sign_message(msg: SignMesage) {
                     }
                 },
                 None => {
-                    debug!("Not found task {} on my sided", task_id);
+                    debug!("Not found task {}:{} on my sided", task_id, msg.retry);
                 }
             };
             
@@ -309,6 +320,36 @@ pub fn received_sign_message(msg: SignMesage) {
             // Double check task's round is still in round2
             // The task could be closed in previously aggregation.
             if task.round == Round::Closed {
+                return
+            }
+
+            let mut remote_commitments = get_sign_remote_commitments(&task_id);
+            let tx_commitments = match remote_commitments.get_mut(&msg.retry) {
+                Some(c) => c,
+                None => return
+            };
+
+            let input_commitments = match tx_commitments.get(&0) {
+                Some(c) => c,
+                None => return
+            };
+            
+            let fp = participants_fingerprint(input_commitments.keys());
+            if fp != msg.fingerprint {
+                task.mismatch_fp += 1;
+                debug!("fingerprint mismatched! {}!={}, {}, {}", fp, msg.fingerprint, msg.retry, task.id);
+                // restart task
+
+                if let Some((_, input)) = task.inputs.first_key_value() {
+                    if let Some(key) = config::get_keypair_from_db(&input.address) {
+                        if task.mismatch_fp > key.pub_key.verifying_shares().len() - key.priv_key.min_signers().clone() as usize {
+                            task.round = Round::Round1;
+                            task.mismatch_fp = 0;
+                        }
+                    }
+                    error!("Restart signning task {} retry {}, too many mismatched fingerprint", task.id, msg.retry);
+                }
+                save_sign_task(&task);
                 return
             }
 
@@ -365,6 +406,7 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
     };
 
     let mut packages = BTreeMap::new();
+    let mut fingerprint = "".to_string();
     task.inputs.iter_mut().for_each(|(index, input)| {
         // filter packets from unknown parties
         match config::get_keypair_from_db(&input.address) {
@@ -380,6 +422,11 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
                 }
 
                 debug!("Commitments: {}, {:?}", signing_commitments.len(), signing_commitments.keys());
+
+                // add data fingerprint
+                if *index == 0 as usize {
+                    fingerprint = participants_fingerprint(signing_commitments.keys());
+                }
 
                 // when number of receved commitments is larger than min_signers
                 // the following code will be executed or re-executed
@@ -430,7 +477,8 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
     let msg = SignMesage {
         task_id: task.id.clone(),
         retry,
-        package: SignPackage::Round2(packages.clone())
+        package: SignPackage::Round2(packages.clone()),
+        fingerprint,
     };
 
     publish_signing_package(swarm, &msg);
@@ -712,4 +760,9 @@ pub fn remove_task(task_id: &str) {
             error!("Failed to remove task from database: {}", task_id);
         }
     };
+}
+
+fn participants_fingerprint<V>(keys: Keys<'_, Identifier, V>) -> String {
+    let x = keys.map(|c| {c.serialize()}).collect::<Vec<_>>();
+    hash(x.join(&0).as_slice())
 }
