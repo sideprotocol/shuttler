@@ -4,11 +4,43 @@ use cosmrs::Any;
 use libp2p:: Swarm;
 use tracing::{debug, error, info};
 
+use crate::{
+    app::signer::Signer, 
+    helper::client_side::{get_signing_requests, send_cosmos_transaction}, 
+    protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, list_tasks, save_task, DKGTask}, 
+    sign::{self, broadcast_tss_packages, list_sign_tasks, save_task_into_signing_queue}, Round, TSSBehaviour
+}};
 
-use crate::{app::signer::Signer, helper::client_side::{get_signing_requests, send_cosmos_transaction}, protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, list_tasks, save_task, DKGTask}, sign::{self, collect_tss_packages, generate_nonce_and_commitments, list_sign_tasks}, Round, TSSBehaviour}};
+pub async fn tss_tasks_fetcher(
+    swarm : &mut Swarm<TSSBehaviour>,
+    shuttler: &Signer,
+) {
 
-async fn fetch_signing_requests(
-    _behave: &mut TSSBehaviour,
+    if shuttler.config().get_validator_key().is_none() {
+        return;
+    }
+
+    // if swarm.connected_peers().count() == 0 {
+    //     return;
+    // }
+
+    debug!("Connected peers: {:?}", swarm.connected_peers().collect::<Vec<_>>());
+
+    // 1. fetch dkg requests
+    fetch_dkg_requests(shuttler).await;
+    // 2. collect dkg packages
+    collect_dkg_packages(swarm);
+    // 3. fetch signing requests
+    // fetch_signing_requests(shuttler).await;
+    // 4. collect signing requests tss packages
+    broadcast_tss_packages(swarm, shuttler).await;
+    // 5. submit dkg address
+    submit_dkg_address(shuttler).await;
+
+
+}
+
+pub async fn fetch_signing_requests(
     shuttler: &Signer,
 ) {
     let host = shuttler.config().side_chain.grpc.as_str();
@@ -17,25 +49,15 @@ async fn fetch_signing_requests(
         Ok(response) => {
             let requests = response.into_inner().requests;
             let tasks_in_process = requests.iter().map(|r| r.txid.clone() ).collect::<Vec<_>>();
-            debug!("Fetched signing requests: {:?}", tasks_in_process);
+            debug!("In-process signing tasks: {:?}", tasks_in_process);
             list_sign_tasks().iter().for_each(|task| {
                 if !tasks_in_process.contains(&task.id) {
                     debug!("Removing expired signing task: {:?}", task.id);
                     sign::remove_task(&task.id);
                 }
             });
-            // mock for testing
-            // if requests.len() == 0 {
-                // requests.push(SigningRequest {
-                //     address: "tb1pr8auk03a54w547e3q7w4xqu0wj57skgp3l8sfeus0skhdhltrq5qxtur6k".to_string(),
-                //     psbt: "cHNidP8BAI8CAAAAA+67aDQ4JUktcSgEunL5O7FG5T2plGO95wYDt2aIajrAAQAAAAD/////7rtoNDglSS1xKAS6cvk7sUblPamUY73nBgO3ZohqOsABAAAAAP/////uu2g0OCVJLXEoBLpy+TuxRuU9qZRjvecGA7dmiGo6wAEAAAAA/////wEAAAAAAAAAAAFqAAAAAAABASsQJwAAAAAAACJRIBn7yz49pV1K+zEHnVMDj3Sp6FkBj88E55B8LXbf6xgoAAEBKxAnAAAAAAAAIlEgGfvLPj2lXUr7MQedUwOPdKnoWQGPzwTnkHwtdt/rGCgAAQErECcAAAAAAAAiUSAZ+8s+PaVdSvsxB51TA490qehZAY/PBOeQfC123+sYKAAA".to_string(),
-                //     status: 1,
-                //     sequence: 0,
-                //     txid: "123455".to_string(),
-                // });
-            // }
             for request in requests {
-                generate_nonce_and_commitments(request, shuttler);
+                save_task_into_signing_queue(request, shuttler);
             }
         }
         Err(e) => {
@@ -60,16 +82,17 @@ async fn fetch_dkg_requests(shuttler: &Signer) {
         })
         .await
     {
-
         let requests = requests_response.into_inner().requests;
         let tasks_in_process = requests.iter().map(|r| format!("dkg-{}", r.id)).collect::<Vec<_>>();
-        debug!("Fetched DKG requests: {:?}", tasks_in_process);
         list_tasks().iter().for_each(|task| {
             if !tasks_in_process.contains(&task.id) {
                 debug!("Removing expired task: {:?}", task.id);
                 dkg::remove_task(&task.id);
             }
         });
+
+        let x: Vec<u64> = requests.iter().map(|a| a.id).collect::<Vec<_>>();
+        debug!("Fetched in-process DKGs: {:?}", x);
         for request in requests {
             if request
                 .participants
@@ -83,46 +106,11 @@ async fn fetch_dkg_requests(shuttler: &Signer) {
                     continue;
                 };
                 generate_round1_package(shuttler.identifier().clone(), &task);
-                debug!("generated round1 packages: {:?} {:?}", &task.id, request);
+                info!("Start DKG {:?}, {:?}", &task.id, task.participants);
                 dkg::save_task(&task);
             }
         }
     };
-}
-
-
-pub async fn tss_tasks_fetcher(
-    // peers: Vec<&PeerId>,
-    // behave: &mut TSSBehaviour,
-    swarm : &mut Swarm<TSSBehaviour>,
-    shuttler: &Signer,
-) {
-
-    if shuttler.config().get_validator_key().is_none() {
-        return;
-    }
-
-    if swarm.connected_peers().count() == 0 {
-        return;
-    }
-
-    debug!("Connected peers: {:?}", swarm.connected_peers().collect::<Vec<_>>());
-    // ===========================
-    // all participants tasks:
-    // ===========================
-
-    // 1. fetch dkg requests
-    fetch_dkg_requests(shuttler).await;
-    // 2. collect dkg packages
-    collect_dkg_packages(swarm);
-    // 3. fetch signing requests
-    fetch_signing_requests( swarm.behaviour_mut(), shuttler).await;
-    // 4. collect signing requests tss packages
-    collect_tss_packages(swarm, shuttler).await;
-    // 5. submit dkg address
-    submit_dkg_address(shuttler).await;
-
-
 }
 
 async fn submit_dkg_address(signer: &Signer) {

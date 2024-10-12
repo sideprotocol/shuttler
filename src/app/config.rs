@@ -195,6 +195,10 @@ pub fn save_relayer_account(account: &BaseAccount) {
     BASE_ACCOUNT.lock().unwrap().replace(account.clone());
 }
 
+pub fn remove_relayer_account() {
+    *BASE_ACCOUNT.lock().unwrap() = None;
+}
+
 impl Config {
     pub fn load_validator_key(&self) {
         let priv_key_path = if self.priv_validator_key_path.starts_with("/") {
@@ -238,7 +242,7 @@ impl Config {
             p2p_keypair ,
             port: port as u32,
             bootstrap_nodes: vec!["/ip4/192.248.180.245/tcp/5158/p2p/12D3KooWMpMtmYQKSn1sZaSRn4CAcsraWZVrZ2zdNjEgsEPSd3Pv".to_string()],
-            log_level: "info".to_string(),
+            log_level: "debug".to_string(),
             mnemonic: mnemonic.to_string(),
             priv_validator_key_path: "priv_validator_key.json".to_string(),
             // keys: BTreeMap::new(),

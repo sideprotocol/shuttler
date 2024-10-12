@@ -40,19 +40,24 @@ serde_json = "1.0"
 hex = "0.4.3"
 ed25519-compact = "2"
 chacha20poly1305 = "0.10.1"
-reqwest = { version = "0.12.5", features = ["json"] } 
+reqwest = { version = "0.12.8", features = ["json"] } 
 lazy_static = "1.4"
 chrono = "0.4"
 #cosmrs = "0.17.0"
 prost = "0.13.1"
 prost-types = "0.13.1"
-cosmrs = { git = "https://github.com/sideprotocol/cosmos-rust", branch = "main" }
-cosmos-sdk-proto  = { git = "https://github.com/sideprotocol/cosmos-rust", branch = "main" }
+tendermint = {version="0.39.1", features=["rust-crypto"]}
+cosmrs = { git = "https://github.com/sideprotocol/cosmos-rust", branch = "main", features=["grpc"]}
+cosmos-sdk-proto  = { git = "https://github.com/sideprotocol/cosmos-rust", branch = "main", features=["grpc"] }
 # Optional dependencies
 tonic = { version = "0.12.1", features = ["codegen", "prost"] }
 void = "1.0"
 ord = "0.19.1"
 ordinals = "0.0.9"
+
+tendermint-config = "0.39.1"
+ed25519-consensus = "2.1.0"
+tempfile = "3.13.0"
 
 [dev-dependencies]
 criterion = "0.5"

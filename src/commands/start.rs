@@ -10,9 +10,13 @@ pub async fn execute(home: &str, relayer: bool, signer: bool) {
 
     let filter = EnvFilter::new("info").add_directive(format!("shuttler={}", conf.log_level).parse().unwrap());
     let subscriber = FmtSubscriber::builder()
+        .with_line_number(true)
         .with_env_filter(filter) // Enable log filtering through environment variable
         .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    if tracing::subscriber::set_global_default(subscriber).is_err() {
+        println!("Unable to set global log config!");
+    }
+        
 
     if relayer && !signer {
         relayer::run_relayer_daemon(conf).await;

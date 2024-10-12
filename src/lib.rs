@@ -5,5 +5,6 @@ pub mod protocols;
 pub mod tickers;
 #[cfg(test)]
 pub mod tests;
+pub mod mock;
 // pub mod prost;
 // pub mod taproot;

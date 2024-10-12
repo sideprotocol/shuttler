@@ -4,6 +4,7 @@ use super::Cli;
 
 pub fn execute(cli: &Cli) {
     let conf = Config::from_file(&cli.home).unwrap();
+    config::update_app_home(&cli.home);
     let keypairs = config::list_keypairs();
     println!("Relayer address");
     println!("-------------------------------------------------------------");

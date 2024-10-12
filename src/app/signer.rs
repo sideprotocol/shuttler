@@ -21,8 +21,8 @@ use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::from_base64;
 use crate::helper::gossip::{subscribe_gossip_topics, SubscribeTopic};
-use crate::protocols::sign::{received_sign_response, SignResponse};
-use crate::tickers::tss::tss_tasks_fetcher;
+use crate::protocols::sign::{received_sign_message, SignMesage};
+use crate::tickers::tss::{fetch_signing_requests, tss_tasks_fetcher};
 use crate::protocols::dkg::{received_dkg_response, DKGResponse};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
 
@@ -35,7 +35,7 @@ use tokio::select;
 
 use tracing::{debug, error, info, warn};
 
-use ed25519_compact:: SecretKey;
+use ed25519_compact::SecretKey;
 
 use lazy_static::lazy_static;
 
@@ -154,8 +154,9 @@ impl Signer {
                 error!("Failed to save generated keys to database: {:?}",   re.err());
             }
         }
+        
         // self.config.save().expect("Failed to save generated keys");
-        info!("Generated {:?} and vault addresses: {:?}", pubkey, addrs);
+        info!("Generated vault addresses: {:?}", addrs);
         addrs
     }
 
@@ -239,7 +240,8 @@ pub async fn run_signer_daemon(conf: Config) {
     dail_bootstrap_nodes(&mut swarm, &conf);
     subscribe_gossip_topics(&mut swarm);
 
-    let mut interval = tokio::time::interval(Duration::from_secs(6));
+    let mut interval = tokio::time::interval(Duration::from_secs(60));
+    let mut interval2 = tokio::time::interval(Duration::from_secs(10));
 
     loop {
         select! {
@@ -265,7 +267,10 @@ pub async fn run_signer_daemon(conf: Config) {
                     // debug!("Swarm event: {:?}", swarm_event);
                 },
             },
-
+            _ = interval2.tick() => {
+                // 3. fetch signing requests
+                fetch_signing_requests(&signer).await;
+            }
             _ = interval.tick() => {
                 tss_tasks_fetcher(&mut swarm, &signer).await;
             }
@@ -279,7 +284,7 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<TSSBehaviour>, conf: &Config) {
         let address = Multiaddr::from_str(addr_text).expect("invalid bootstrap node address");
         let peer = PeerId::from_str(addr_text.split("/").last().unwrap()).expect("invalid peer id");
         swarm.behaviour_mut().kad.add_address(&peer, address);
-        debug!("Adding bootstrap node: {:?}", addr_text);
+        info!("Adding bootstrap node: {:?}", addr_text);
     }
     if conf.bootstrap_nodes.len() > 0 {
         match swarm.behaviour_mut().kad.bootstrap() {
@@ -296,35 +301,35 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<TSSBehaviour>, conf: &Config) {
 // handle sub events from the swarm
 async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
     match event {
-        TSSBehaviourEvent::Gossip(gossipsub::Event::Message { propagation_source, message_id, message }) => {
+        TSSBehaviourEvent::Gossip(gossipsub::Event::Message {message, .. }) => {
             // debug!("Received message: {:?}", message);
             if message.topic == SubscribeTopic::DKG.topic().hash() {
                 let response: DKGResponse = serde_json::from_slice(&message.data).expect("Failed to deserialize DKG message");
                 // dkg_event_handler(shuttler, swarm.behaviour_mut(), &propagation_source, dkg_message);
-                debug!("Gossip Received DKG Response from {propagation_source}: {message_id} {:?}", response);
+                // debug!("Gossip Received DKG Response from {propagation_source}: {message_id} {:?}", response);
                 received_dkg_response(response, signer);
             } else if message.topic == SubscribeTopic::SIGNING.topic().hash() {
-                let response: SignResponse = serde_json::from_slice(&message.data).expect("Failed to deserialize Sign message");
-                debug!("Gossip Received TSS Response from {propagation_source}: {message_id} {:?}", response);
-                received_sign_response(response);
+                let msg: SignMesage = serde_json::from_slice(&message.data).expect("Failed to deserialize Sign message");
+                // debug!("Gossip Received TSS Response from {propagation_source}: {message_id} {:?}", msg);
+                received_sign_message(msg);
             }
         }
-        TSSBehaviourEvent::Identify(identify::Event::Received { peer_id, connection_id, info }) => {
+        TSSBehaviourEvent::Identify(identify::Event::Received { peer_id, info, .. }) => {
             swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-            info!(" @@(Received) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
+            // info!(" @@(Received) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
             info.listen_addrs.iter().for_each(|addr| {
                 if !addr.to_string().starts_with("/ip4/127.0.0.1") {
-                    info!("Discoverd new address: {peer_id} {addr}");
+                    debug!("Discovered new address: {addr}/p2p/{peer_id} ");
                     swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
                 }
             });
         }
         TSSBehaviourEvent::Kad(libp2p::kad::Event::RoutablePeer { peer, address }) => {
-            info!("@@@ Kad @@@ discoverd a new routable peer {peer} - {:?}", address);
+            info!("@@@ Kad @@@ discovered a new routable peer {peer} - {:?}", address);
             swarm.behaviour_mut().kad.add_address(&peer, address);
         } 
         TSSBehaviourEvent::Kad(libp2p::kad::Event::RoutingUpdated { peer, is_new_peer, addresses, .. }) => {
-            info!("KAD Routing updated for {peer} {is_new_peer}: {:?}", addresses);
+            debug!("KAD Routing updated for {peer} {is_new_peer}: {:?}", addresses);
             if is_new_peer {
                 swarm.behaviour_mut().gossip.add_explicit_peer(&peer);
             }
@@ -352,7 +357,7 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Expired(list)) => {
             for (peer_id, _multiaddr) in list {
-                info!("mDNS discover peer has expired: {peer_id}");
+                info!("mDNS peer has expired: {peer_id}");
             }
         }
         _ => {}
