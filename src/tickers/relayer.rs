@@ -528,7 +528,7 @@ pub(crate) fn get_last_scanned_height(config: &Config) -> u64 {
 
 pub async fn withdraw_to_btc_loop(relayer: &Relayer) {
     loop {
-        let amount = 22000+ rand::random::<u64>() % 15000;
+        let amount = 22000+ rand::random::<u64>() % 1500;
 
         match send_withdraw_to_btc_tx(relayer, format!("{}sat",amount)).await {
             Ok(resp) => {
