@@ -393,6 +393,9 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
 
     let mut packages = BTreeMap::new();
     let mut fingerprint = "".to_string();
+
+    let received_sig_shares = get_sign_remote_signature_shares(&task.id);
+    // let received_sig_shares.get_mut(&retry);
     task.inputs.iter_mut().for_each(|(index, input)| {
         // filter packets from unknown parties
         match config::get_keypair_from_db(&input.address) {
@@ -437,17 +440,25 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
                     },
                 };
 
-                let signature_shares =
-                    match frost::round2::sign(&signing_package, signer_nonces, &keypair.priv_key) {
-                        Ok(shares) => shares,
-                        Err(e) => {
-                            error!("Error: {:?}", e);
-                            return;
-                        }
-                    };
+                let signature_shares = match frost::round2::sign(
+                    &signing_package, signer_nonces, &keypair.priv_key
+                ) {
+                    Ok(shares) => shares,
+                    Err(e) => {
+                        error!("Error: {:?}", e);
+                        return;
+                    }
+                };
                 
                 let mut map = BTreeMap::new();
                 map.insert(identifier.clone(), signature_shares);
+
+                // forward received signatures
+                if let Some(received_sig_tx) = received_sig_shares.get(&retry) {
+                    if let Some(received_sig_input) = received_sig_tx.get(&index) {
+                        map.extend(received_sig_input);
+                    }
+                }
                 packages.insert(index.clone(), map);
             }
             None => {
