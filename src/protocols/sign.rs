@@ -351,9 +351,6 @@ pub fn received_sign_message(msg: SignMesage) {
                 map.extend(sig_shares.get(index).unwrap());
             });
 
-            debug!("signature share: {:?}", remote_sig_shares);
-            
-
             save_sign_remote_signature_shares(&task_id, &remote_sig_shares);
 
             let first = 0;
@@ -515,7 +512,7 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
 
         if signing_commitments.len() != signature_shares.len() {
             error!("Aggregate error: {} != {}", signing_commitments.len(), signature_shares.len());
-            return None;
+            // return None;
         }
 
         let keypair = match config::get_keypair_from_db(&input.address) {
@@ -539,8 +536,15 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
                     },
                 }
         );
+        
+        let mut filtered = BTreeMap::new();
+        signature_shares.keys().for_each(|key| {
+            if let Some(v) = signing_commitments.get(key) {
+                filtered.insert(key.clone(), v.clone());
+            }
+        });
         let signing_package = frost::SigningPackage::new(
-            signing_commitments,
+            filtered,
             sig_target
         );
 
