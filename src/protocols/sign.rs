@@ -1,4 +1,4 @@
-use std::{collections::{btree_map::Keys, BTreeMap}, time::Instant};
+use std::collections::{btree_map::Keys, BTreeMap};
 
 use bitcoin::{sighash::{self, SighashCache}, Address, Psbt, TapSighashType, Witness};
 use bitcoin_hashes::Hash;
