@@ -1,4 +1,4 @@
-use std::collections::{btree_map::Keys, BTreeMap};
+use std::{collections::{btree_map::Keys, BTreeMap}, time::Instant};
 
 use bitcoin::{sighash::{self, SighashCache}, Address, Psbt, TapSighashType, Witness};
 use bitcoin_hashes::Hash;
@@ -14,12 +14,12 @@ use tracing::{debug, error, info};
 use frost::{Identifier, round1, round2}; 
 use frost_secp256k1_tr::{self as frost, round1::{SigningCommitments, SigningNonces}};
 use crate::{
-    app::{config::{self, get_database_with_name}, 
+    app::{config::{self, get_database_with_name, TASK_ROUND_WINDOW}, 
     signer::Signer}, 
     helper::{
         client_side::send_cosmos_transaction, 
         encoding::{self, from_base64, hash, to_base64}, 
-        gossip::publish_signing_package,
+        gossip::publish_signing_package, now,
     }};
 
 use super::{Round, TSSBehaviour};
@@ -74,6 +74,21 @@ pub struct SignTask {
     pub inputs: BTreeMap<Index, TransactionInput>,
     pub is_signature_submitted: bool,
     pub mismatch_fp: usize,
+    pub start_time: u64,
+}
+
+impl SignTask {
+    pub fn new(id: String, psbt: String, inputs: BTreeMap<Index, TransactionInput>) -> Self {
+        Self {
+            id,
+            psbt,
+            round: Round::Round1,
+            inputs,
+            is_signature_submitted: false,
+            mismatch_fp: 0,
+            start_time: now(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,7 +108,7 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
     }
 
     let psbt_bytes = from_base64(&request.psbt).unwrap();
-    let group_task_id = request.txid.clone();
+    let task_id = request.txid.clone();
 
     let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
         Ok(psbt) => psbt,
@@ -138,7 +153,7 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
         };
 
         let input = TransactionInput {
-            task_id: group_task_id.clone(),
+            task_id: task_id.clone(),
             index: i,
             sig_hash: hash.to_raw_hash().to_byte_array().to_vec(),
             address: address.to_string(),
@@ -152,14 +167,7 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
         return
     }
 
-    let task = SignTask {
-        id: group_task_id.clone(),
-        psbt: request.psbt.clone(),
-        round: Round::Round1,
-        inputs,
-        is_signature_submitted: false,
-        mismatch_fp: 0,
-    };
+    let task = SignTask::new(task_id, request.psbt, inputs);
 
     save_sign_task(&task);
 }
@@ -259,7 +267,6 @@ pub fn received_sign_message(msg: SignMesage) {
                 Some(srd) => {
                     srd.iter_mut().for_each(|(index, map)| {
                         map.extend(commitments.get(index).unwrap());
-                        // debug!("Received commitments: {}:{index} {:?}",&msg.retry, map.keys());
                     });
                 },
                 None => {
@@ -306,6 +313,15 @@ pub fn received_sign_message(msg: SignMesage) {
             // Double check task's round is still in round2
             // The task could be closed in previously aggregation.
             if task.round == Round::Closed {
+                return
+            }
+
+            // restart task by start time
+            if now() - task.start_time > 8 * TASK_ROUND_WINDOW.as_secs() {
+                task.round = Round::Round1;
+                task.start_time = now();
+                save_sign_task(&task);
+                info!("Re-start task: {} [Timeout]", task_id);
                 return
             }
 

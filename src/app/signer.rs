@@ -15,7 +15,7 @@ use libp2p::swarm::dial_opts::PeerCondition;
 use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
 use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
 
-use crate::app::config;
+use crate::app::config::{self, TASK_ROUND_WINDOW};
 use crate::app::config::Config;
 use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::cipher::random_bytes;
@@ -240,7 +240,7 @@ pub async fn run_signer_daemon(conf: Config) {
     dail_bootstrap_nodes(&mut swarm, &conf);
     subscribe_gossip_topics(&mut swarm);
 
-    let mut interval = tokio::time::interval(Duration::from_secs(60));
+    let mut interval = tokio::time::interval(TASK_ROUND_WINDOW);
     let mut interval2 = tokio::time::interval(Duration::from_secs(10));
 
     loop {
