@@ -10,40 +10,43 @@ use crate::{
     protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, list_tasks, save_task, DKGTask}, 
     sign::{self, broadcast_tss_packages, list_sign_tasks, save_task_into_signing_queue}, Round, TSSBehaviour
 }};
-
-pub async fn tss_tasks_fetcher(
-    swarm : &mut Swarm<TSSBehaviour>,
-    shuttler: &Signer,
+pub async fn time_free_tasks_executor(
+    signer: &Signer,
 ) {
-
-    if shuttler.config().get_validator_key().is_none() {
+    if signer.config().get_validator_key().is_none() {
         return;
     }
 
-    // if swarm.connected_peers().count() == 0 {
-    //     return;
-    // }
+    // 1. fetch dkg request
+    fetch_dkg_requests(signer).await;
+    fetch_signing_requests(signer).await;
+    submit_dkg_address(signer).await;
+}
+
+pub async fn time_aligned_tasks_executor(
+    swarm : &mut Swarm<TSSBehaviour>,
+    signer: &Signer,
+) {
+
+    if signer.config().get_validator_key().is_none() {
+        return;
+    }
 
     debug!("Connected peers: {:?}", swarm.connected_peers().collect::<Vec<_>>());
 
-    // 1. fetch dkg requests
-    fetch_dkg_requests(shuttler).await;
-    // 2. collect dkg packages
+    // 1. collect dkg packages
     collect_dkg_packages(swarm);
-    // 3. fetch signing requests
-    // fetch_signing_requests(shuttler).await;
-    // 4. collect signing requests tss packages
-    broadcast_tss_packages(swarm, shuttler).await;
-    // 5. submit dkg address
-    submit_dkg_address(shuttler).await;
-
+    // 2. collect signing requests tss packages
+    broadcast_tss_packages(swarm, signer).await;
 
 }
 
+
+
 pub async fn fetch_signing_requests(
-    shuttler: &Signer,
+    signer: &Signer,
 ) {
-    let host = shuttler.config().side_chain.grpc.as_str();
+    let host = signer.config().side_chain.grpc.as_str();
 
     match get_signing_requests(&host).await {
         Ok(response) => {
@@ -57,7 +60,7 @@ pub async fn fetch_signing_requests(
                 }
             });
             for request in requests {
-                save_task_into_signing_queue(request, shuttler);
+                save_task_into_signing_queue(request, signer);
             }
         }
         Err(e) => {
@@ -67,8 +70,8 @@ pub async fn fetch_signing_requests(
     };
 }
 
-async fn fetch_dkg_requests(shuttler: &Signer) {
-    let host = shuttler.config().side_chain.grpc.clone();
+async fn fetch_dkg_requests(signer: &Signer) {
+    let host = signer.config().side_chain.grpc.clone();
     let mut client = match BtcQueryClient::connect(host.to_owned()).await {
         Ok(client) => client,
         Err(e) => {
@@ -97,7 +100,7 @@ async fn fetch_dkg_requests(shuttler: &Signer) {
             if request
                 .participants
                 .iter()
-                .find(|p| p.consensus_address == shuttler.validator_address())
+                .find(|p| p.consensus_address == signer.validator_address())
                 .is_some()
             {
                 // create a dkg task
@@ -105,7 +108,7 @@ async fn fetch_dkg_requests(shuttler: &Signer) {
                 if dkg::has_task_preceeded(task.id.as_str()) {
                     continue;
                 };
-                generate_round1_package(shuttler.identifier().clone(), &task);
+                generate_round1_package(signer.identifier().clone(), &task);
                 info!("Start DKG {:?}, {:?}", &task.id, task.participants);
                 dkg::save_task(&task);
             }

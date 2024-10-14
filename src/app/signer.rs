@@ -24,7 +24,7 @@ use crate::helper::encoding::from_base64;
 use crate::helper::gossip::{subscribe_gossip_topics, SubscribeTopic};
 use crate::helper::now;
 use crate::protocols::sign::{received_sign_message, SignMesage};
-use crate::tickers::tss::{fetch_signing_requests, tss_tasks_fetcher};
+use crate::tickers::tss::{fetch_signing_requests, time_aligned_tasks_executor, time_free_tasks_executor};
 use crate::protocols::dkg::{received_dkg_response, DKGResponse};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
 
@@ -273,11 +273,10 @@ pub async fn run_signer_daemon(conf: Config) {
                 },
             },
             _ = interval2.tick() => {
-                // 3. fetch signing requests
-                fetch_signing_requests(&signer).await;
+                time_free_tasks_executor(&signer).await;
             }
             _ = interval.tick() => {
-                tss_tasks_fetcher(&mut swarm, &signer).await;
+                time_aligned_tasks_executor(&mut swarm, &signer).await;
             }
 
         }
