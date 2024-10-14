@@ -304,9 +304,9 @@ pub fn received_sign_message(msg: SignMesage) {
                     }
 
                     // Commitments are accepted only when a fingerprint does not exist. if it does, the task moves to the next round.
-                    if task.fingerprint.len() == 0 {
+                    // if task.fingerprint.len() == 0 {
                         save_sign_remote_commitments(&task_id, &remote_commitments);
-                    }
+                    // }
                 },
                 None => {
                     debug!("Not found task {}:{} on my sided", task_id, msg.retry);
