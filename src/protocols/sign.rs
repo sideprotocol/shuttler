@@ -7,6 +7,7 @@ use cosmos_sdk_proto::side::btcbridge::{MsgSubmitSignatures, SigningRequest};
 use cosmrs::Any;
 
 use libp2p::Swarm;
+use prost_types::Timestamp;
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
@@ -68,7 +69,7 @@ pub enum SignPackage {
 pub struct SignTask {
     pub id: String,
     pub psbt: String,
-    pub round: Round,
+    // pub round: Round,
     pub inputs: BTreeMap<Index, TransactionInput>,
     pub is_signature_submitted: bool,
     pub mismatch_fp: usize,
@@ -77,24 +78,45 @@ pub struct SignTask {
 }
 
 impl SignTask {
-    pub fn new(id: String, psbt: String, inputs: BTreeMap<Index, TransactionInput>) -> Self {
+    pub fn new(id: String, psbt: String, inputs: BTreeMap<Index, TransactionInput>, creation_time: Option<Timestamp>) -> Self {
+        let start_time = match creation_time {
+            Some(t) => {
+                t.seconds as u64
+            },
+            None => {
+                now()
+            },
+        };
         Self {
             id,
             psbt,
-            round: Round::Round1,
+            // round: Round::Round1,
             inputs,
             is_signature_submitted: false,
             mismatch_fp: 0,
-            start_time: now(),
+            start_time,
             fingerprint: "".to_string(),
         }
     }
     pub fn reset(&mut self) {
-        self.round = Round::Round1;
+        // self.round = Round::Round1;
         self.is_signature_submitted = false;
         self.mismatch_fp = 0;
         self.start_time = now();
         self.fingerprint = "".to_string();
+    }
+
+    pub fn round(&self) -> Round {
+        let x = (now() - self.start_time) / TASK_ROUND_WINDOW.as_secs();
+        let steps = 4u64;
+        // debug!("Current round {x} {}", x % steps);
+        match x % steps {
+            0 => Round::Round1,
+            1 => Round::Round2,
+            2 => Round::Aggregate,
+            3 => Round::Closed,
+            _ => Round::Round1,
+        }
     }
 }
 
@@ -174,7 +196,7 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
         return
     }
 
-    let task = SignTask::new(task_id, request.psbt, inputs);
+    let task = SignTask::new(task_id, request.psbt, inputs, request.creation_time);
 
     save_sign_task(&task);
 }
@@ -184,8 +206,8 @@ pub async fn broadcast_tss_packages(swarm: &mut Swarm<TSSBehaviour>, signer: &Si
     for item in DB_TASK.iter() {
         let mut task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
 
-        info!("Process: {:?}", task);
-        match task.round {
+        info!("Process: {}, {:?}", task.id, task.round());
+        match task.round() {
             Round::Round1 => {
                 generate_commitments(swarm, signer, &mut task);
             },
@@ -211,6 +233,8 @@ pub async fn broadcast_tss_packages(swarm: &mut Swarm<TSSBehaviour>, signer: &Si
                     submit_signatures(psbt, signer).await;
                     task.is_signature_submitted = true;
                     save_sign_task(&task);
+                } else {
+                    remove_task_variables(&task.id);
                 }
             }
         }
@@ -259,7 +283,7 @@ pub fn received_sign_message(msg: SignMesage) {
             });
 
             match get_sign_task(&task_id) {
-                Some(mut task) => {
+                Some(task) => {
                     let first = 0; 
                     // Move to Round2 if the commitment of all inputs received from the latest retry exceeds the minimum number of signers.
                     // Only check the first input, because all other inputs are in the same package.
@@ -268,11 +292,11 @@ pub fn received_sign_message(msg: SignMesage) {
                             if let Some(key) = config::get_keypair_from_db(&input.address) {
                                 let threshold = key.priv_key.min_signers().clone() as usize;
                                 if commitments.len() >= threshold {
-                                    info!("{task_id}:{first} is ready for Round2: {}>={}?", commitments.len(), threshold);
-                                    task.round = Round::Round2;
-                                    save_sign_task(&task);
+                                    info!("{task_id}:{first} is ready for Round2: {}>={}", commitments.len(), threshold);
+                                    // task.round = Round::Round2;
+                                    // save_sign_task(&task);
                                 } else {
-                                    debug!("{task_id}:{first} commitment lens: {}>={}?", commitments.len(), threshold);
+                                    debug!("{task_id}:{first} commitment lens: {}/{}?", commitments.len(), threshold);
                                 }
                             }
                         }
@@ -291,27 +315,11 @@ pub fn received_sign_message(msg: SignMesage) {
             
         },
         SignPackage::Round2(sig_shares) => {
-            let mut task = match get_sign_task(&task_id) {
-                Some(t) => t,
-                None => {
-                    debug!("Skip, not found the task {} from local sign queue.", &task_id);
-                    return
-                }
-            };
 
-            // Double check task's round is still in round2
-            // The task could be closed in previously aggregation.
-            if task.round == Round::Closed {
-                return
+            let nonces = get_sign_local_nonces(&task_id);
+            if nonces.len() == 0 {
+                return;
             }
-
-            // restart task by start time
-            // if now() - task.start_time > 8 * TASK_ROUND_WINDOW.as_secs() {
-            //     task.reset();
-            //     save_sign_task(&task);
-            //     info!("Re-start task: {} [Timeout]", task_id);
-            //     return
-            // }
 
             let remote_commitments = get_sign_remote_commitments(&task_id);
             let input_commitments = match remote_commitments.get(&0) {
@@ -321,19 +329,19 @@ pub fn received_sign_message(msg: SignMesage) {
             
             let fp = participants_fingerprint(input_commitments.keys());
             if fp != msg.fingerprint {
-                task.mismatch_fp += 1;
-                debug!("fingerprint mismatched! {}!={}, {}", fp, msg.fingerprint, task.id);
-                // restart task
+                // task.mismatch_fp += 1;
+                debug!("Reject, fingerprint mismatched! {}!={}, {}", fp, msg.fingerprint, task_id);
+                // // restart task
 
-                if let Some((_, input)) = task.inputs.first_key_value() {
-                    if let Some(key) = config::get_keypair_from_db(&input.address) {
-                        if task.mismatch_fp > key.pub_key.verifying_shares().len() - key.priv_key.min_signers().clone() as usize {
-                            task.reset();
-                        }
-                    }
-                    error!("Restart signning task {}, too many mismatched fingerprint", task.id);
-                }
-                save_sign_task(&task);
+                // if let Some((_, input)) = task.inputs.first_key_value() {
+                //     if let Some(key) = config::get_keypair_from_db(&input.address) {
+                //         if task.mismatch_fp > key.pub_key.verifying_shares().len() - key.priv_key.min_signers().clone() as usize {
+                //             task.reset();
+                //         }
+                //     }
+                //     error!("Restart signning task {}, too many mismatched fingerprint", task.id);
+                // }
+                // save_sign_task(&task);
                 return
             }
 
@@ -343,22 +351,33 @@ pub fn received_sign_message(msg: SignMesage) {
                 map.extend(sig_shares.get(index).unwrap());
             });
 
+            debug!("signature share: {:?}", remote_sig_shares);
             
+
             save_sign_remote_signature_shares(&task_id, &remote_sig_shares);
 
             let first = 0;
             // Move to Round2 if the commitment of all inputs received from the latest retry exceeds the minimum number of signers.
             // Only check the first input, because all other inputs are in the same package.
             if let Some(shares) = remote_sig_shares.get(&first) {
+            
+                let task = match get_sign_task(&task_id) {
+                    Some(t) => t,
+                    None => {
+                        debug!("Skip, not found the task {} from local sign queue.", &task_id);
+                        return
+                    }
+                };
+
                 if let Some(input) = task.inputs.get(&first) {
                     if let Some(key) = config::get_keypair_from_db(&input.address) {
                         let threshold = key.priv_key.min_signers().clone() as usize;
                         if shares.len() >= threshold {
                             info!("Ready for aggregration: {}:{first} {:?}>={}", &task_id, shares.len(), threshold);
-                            task.round = Round::Aggregate;
-                            save_sign_task(&task);
+                            // task.round = Round::Aggregate;
+                            // save_sign_task(&task);
                         } else {
-                            debug!("Received signature shares: {}:{first} {:?}>={}", &task_id, shares.len(), threshold);
+                            debug!("Received signature shares: {}:{first} {:?}/{}", &task_id, shares.len(), threshold);
                         }
                     }
                 }
@@ -433,6 +452,10 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
                 // forward received signatures
                 if let Some(received_sig_input) = received_sig_shares.get_mut(&index) {
                     received_sig_input.insert(identifier.clone(), signature_shares);
+                } else {
+                    let mut my_share = BTreeMap::new();
+                    my_share.insert(identifier.clone(), signature_shares);
+                    received_sig_shares.insert(index.clone(), my_share);
                 }
             }
             None => {
@@ -450,33 +473,20 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
         fingerprint,
     };
 
+    debug!("publish signature share: {:?}", received_sig_shares);
+
     publish_signing_package(swarm, &msg);
 
-
-    // save local signature share
-    let mut remote_sig_shares = get_sign_remote_signature_shares(&task.id);
-    match remote_sig_shares.get_mut(&retry) {
-        Some(srd) => {
-            srd.iter_mut().for_each(|(index, old)| {
-                if let Some(x) =  packages.get(index) {
-                    old.extend(x);
-                };
-            });
-        },
-        None => {
-            remote_sig_shares.insert(retry, packages);
-        }
-    }
-    save_sign_remote_signature_shares(&task.id, &remote_sig_shares);
+    save_sign_remote_signature_shares(&task.id, &received_sig_shares);
     // save_sign_task(task)
 
 }
 
 pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
 
-    if task.round == Round::Closed {
-        return None;
-    }
+    // if task.round == Round::Closed {
+    //     return None;
+    // }
 
     // let stored_nonces = get_sign_local_nonces(&task.id);
     let stored_remote_commitments = get_sign_remote_commitments(&task.id);
@@ -566,7 +576,7 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
 
     if psbt.inputs.iter().all(|input| input.final_script_witness.is_some() ) {
         debug!("Signing task {} completed", task.id);
-        task.round = Round::Closed;
+        // task.round = Round::Closed;
         let psbt_bytes = psbt.serialize();
         let psbt_base64 = encoding::to_base64(&psbt_bytes);
         task.psbt = psbt_base64;
@@ -713,7 +723,16 @@ pub fn delete_tasks() {
     DB_TASK.flush().unwrap();
 }
 
+pub fn remove_task_variables(task_id: &str) {
+    let _ = DB_TASK_VARIABLES.remove(task_id.as_bytes());
+    let _ = DB_TASK_VARIABLES.remove(format!("{}-commitments", task_id).as_bytes());
+    let _ = DB_TASK_VARIABLES.remove(format!("{}-sig-shares", task_id).as_bytes());
+}
+
 pub fn remove_task(task_id: &str) {
+    let _ = DB_TASK_VARIABLES.remove(task_id.as_bytes());
+    let _ = DB_TASK_VARIABLES.remove(format!("{}-commitments", task_id).as_bytes());
+    let _ = DB_TASK_VARIABLES.remove(format!("{}-sig-shares", task_id).as_bytes());
     match DB_TASK.remove(task_id) {
         Ok(_) => {
             info!("Removed task from database: {}", task_id);

@@ -430,7 +430,7 @@ pub fn save_task(task: &DKGTask) {
  
  pub fn list_tasks() -> Vec<DKGTask> {
      let mut tasks = vec![];
-     debug!("loading in-process dkg tasks from database, total: {:?}", DB_TASK.len());
+     // debug!("loading in-process dkg tasks from database, total: {:?}", DB_TASK.len());
      for task in DB_TASK.iter() {
          let (_, task) = task.unwrap();
          tasks.push(serde_json::from_slice(&task).unwrap());

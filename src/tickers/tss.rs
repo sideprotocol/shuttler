@@ -95,7 +95,7 @@ async fn fetch_dkg_requests(signer: &Signer) {
         });
 
         let x: Vec<u64> = requests.iter().map(|a| a.id).collect::<Vec<_>>();
-        debug!("Fetched in-process DKGs: {:?}", x);
+        debug!("In-process DKGs: {:?}", x);
         for request in requests {
             if request
                 .participants

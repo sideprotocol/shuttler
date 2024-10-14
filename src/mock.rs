@@ -161,7 +161,8 @@ async fn load_signing_requests(home: &str) -> Result<tonic::Response<QuerySignin
             sequence: i.sequence, 
             txid: i.txid.clone(), 
             psbt: i.psbt.clone(), 
-            status: i.status, 
+            status: i.status,
+            creation_time: Some(Timestamp::default()) 
         }
     }).collect::<Vec<_>>();
     let res: QuerySigningRequestsResponse = QuerySigningRequestsResponse { requests, pagination: None };
