@@ -256,7 +256,7 @@ pub fn received_round1_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
     local.extend(packets);
 
     let k = local.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
-    debug!("Received round1 packets length: {} {:?}", task.id, k);
+    debug!("Received round1 packets: {} {:?}", task.id, k);
 
     if DB.insert(format!("dkg-{}-round1", task.id), serde_json::to_vec(&local).unwrap()).is_err() {
         error!("Failed to store DKG Round 1 packets: {} ", task.id);
@@ -307,7 +307,7 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
 
 
     let k = local.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
-    debug!("Received round2 packets length: {} {:?}", task.id, k);
+    debug!("Received round2 packets: {} {:?}", task.id, k);
 
     // store round 2 packets
     if DB.insert(format!("dkg-{}-round2", task.id), serde_json::to_vec(&local).unwrap()).is_err() {
