@@ -75,6 +75,7 @@ pub struct SignTask {
     pub is_signature_submitted: bool,
     pub mismatch_fp: usize,
     pub start_time: u64,
+    pub fingerprint: String,
 }
 
 impl SignTask {
@@ -87,7 +88,15 @@ impl SignTask {
             is_signature_submitted: false,
             mismatch_fp: 0,
             start_time: now(),
+            fingerprint: "".to_string(),
         }
+    }
+    pub fn reset(&mut self) {
+        self.round = Round::Round1;
+        self.is_signature_submitted = false;
+        self.mismatch_fp = 0;
+        self.start_time = now();
+        self.fingerprint = "".to_string();
     }
 }
 
@@ -273,7 +282,6 @@ pub fn received_sign_message(msg: SignMesage) {
                     remote_commitments.insert(msg.retry, commitments);
                 }
             }
-            save_sign_remote_commitments(&task_id, &remote_commitments);
 
             match get_sign_task(&task_id) {
                 Some(mut task) => {
@@ -294,9 +302,15 @@ pub fn received_sign_message(msg: SignMesage) {
                             }
                         }
                     }
+
+                    // Commitments are accepted only when a fingerprint does not exist. if it does, the task moves to the next round.
+                    if task.fingerprint.len() > 0 {
+                        save_sign_remote_commitments(&task_id, &remote_commitments);
+                    }
                 },
                 None => {
                     debug!("Not found task {}:{} on my sided", task_id, msg.retry);
+                    save_sign_remote_commitments(&task_id, &remote_commitments);
                 }
             };
             
@@ -318,8 +332,7 @@ pub fn received_sign_message(msg: SignMesage) {
 
             // restart task by start time
             if now() - task.start_time > 8 * TASK_ROUND_WINDOW.as_secs() {
-                task.round = Round::Round1;
-                task.start_time = now();
+                task.reset();
                 save_sign_task(&task);
                 info!("Re-start task: {} [Timeout]", task_id);
                 return
@@ -345,8 +358,7 @@ pub fn received_sign_message(msg: SignMesage) {
                 if let Some((_, input)) = task.inputs.first_key_value() {
                     if let Some(key) = config::get_keypair_from_db(&input.address) {
                         if task.mismatch_fp > key.pub_key.verifying_shares().len() - key.priv_key.min_signers().clone() as usize {
-                            task.round = Round::Round1;
-                            task.mismatch_fp = 0;
+                            task.reset();
                         }
                     }
                     error!("Restart signning task {} retry {}, too many mismatched fingerprint", task.id, msg.retry);
@@ -488,6 +500,8 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
         return
     }
 
+    task.fingerprint = fingerprint.clone();
+
     let msg = SignMesage {
         task_id: task.id.clone(),
         retry,
@@ -496,6 +510,7 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
     };
 
     publish_signing_package(swarm, &msg);
+
 
     // save local signature share
     let mut remote_sig_shares = get_sign_remote_signature_shares(&task.id);
