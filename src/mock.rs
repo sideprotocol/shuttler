@@ -37,7 +37,7 @@ pub struct DKG {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct SR { 
+pub struct SR {
     address: String, 
     sequence: u64, 
     txid: String, 
@@ -156,9 +156,15 @@ async fn load_signing_requests(home: &str) -> Result<tonic::Response<QuerySignin
     }
 
     let requests = srs.iter().map(|i| {
+        let creation_time = Timestamp {
+            seconds:now() as i64,
+            nanos: 0
+        };
+
         SigningRequest { 
             address: i.address.clone(), 
-            sequence: i.sequence, 
+            sequence: i.sequence,
+            creation_time: Some(creation_time),
             txid: i.txid.clone(), 
             psbt: i.psbt.clone(), 
             status: i.status, 
