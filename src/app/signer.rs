@@ -244,9 +244,9 @@ pub async fn run_signer_daemon(conf: Config) {
 
 
     let mut interval2 = tokio::time::interval(tokio::time::Duration::from_secs(10));
-    let start = Instant::now() + (TASK_ROUND_WINDOW - tokio::time::Duration::from_secs(now() % TASK_ROUND_WINDOW.as_secs()));
-    let mut interval = tokio::time::interval_at(start, TASK_ROUND_WINDOW);
-    // let mut interval = tokio::time::interval(TASK_ROUND_WINDOW);
+    // let start = Instant::now() + (TASK_ROUND_WINDOW - tokio::time::Duration::from_secs(now() % TASK_ROUND_WINDOW.as_secs()));
+    // let mut interval = tokio::time::interval_at(start, TASK_ROUND_WINDOW);
+    let mut interval = tokio::time::interval(TASK_ROUND_WINDOW);
 
     loop {
         select! {

@@ -306,12 +306,12 @@ pub fn received_sign_message(msg: SignMesage) {
             }
 
             // restart task by start time
-            if now() - task.start_time > 8 * TASK_ROUND_WINDOW.as_secs() {
-                task.reset();
-                save_sign_task(&task);
-                info!("Re-start task: {} [Timeout]", task_id);
-                return
-            }
+            // if now() - task.start_time > 8 * TASK_ROUND_WINDOW.as_secs() {
+            //     task.reset();
+            //     save_sign_task(&task);
+            //     info!("Re-start task: {} [Timeout]", task_id);
+            //     return
+            // }
 
             let remote_commitments = get_sign_remote_commitments(&task_id);
             let input_commitments = match remote_commitments.get(&0) {
