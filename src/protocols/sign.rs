@@ -516,7 +516,11 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
     let mut remote_sig_shares = get_sign_remote_signature_shares(&task.id);
     match remote_sig_shares.get_mut(&retry) {
         Some(srd) => {
-            srd.extend(packages);
+            srd.iter_mut().for_each(|(index, old)| {
+                if let Some(x) =  packages.get(index) {
+                    old.extend(x);
+                };
+            });
         },
         None => {
             remote_sig_shares.insert(retry, packages);
