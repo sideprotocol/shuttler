@@ -451,7 +451,23 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
     };
 
     publish_signing_package(swarm, &msg);
-    save_sign_remote_signature_shares(&task.id, &received_sig_shares);
+
+
+    // save local signature share
+    let mut remote_sig_shares = get_sign_remote_signature_shares(&task.id);
+    match remote_sig_shares.get_mut(&retry) {
+        Some(srd) => {
+            srd.iter_mut().for_each(|(index, old)| {
+                if let Some(x) =  packages.get(index) {
+                    old.extend(x);
+                };
+            });
+        },
+        None => {
+            remote_sig_shares.insert(retry, packages);
+        }
+    }
+    save_sign_remote_signature_shares(&task.id, &remote_sig_shares);
     // save_sign_task(task)
 
 }
