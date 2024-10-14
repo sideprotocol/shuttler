@@ -24,7 +24,7 @@ use crate::helper::encoding::from_base64;
 use crate::helper::gossip::{subscribe_gossip_topics, SubscribeTopic};
 use crate::helper::now;
 use crate::protocols::sign::{received_sign_message, SignMesage};
-use crate::tickers::tss::{fetch_signing_requests, time_aligned_tasks_executor, time_free_tasks_executor};
+use crate::tickers::tss::{time_aligned_tasks_executor, time_free_tasks_executor};
 use crate::protocols::dkg::{received_dkg_response, DKGResponse};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
 
