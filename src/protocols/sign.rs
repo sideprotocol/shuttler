@@ -57,6 +57,7 @@ pub struct SignMesage {
     pub task_id: String,
     pub package: SignPackage,
     pub fingerprint: String,
+    pub nonce: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -201,7 +202,7 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
     save_sign_task(&task);
 }
 
-pub async fn broadcast_tss_packages(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
+pub async fn process_tasks(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
 
     for item in DB_TASK.iter() {
         let mut task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
@@ -251,11 +252,6 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
             nonces.insert(*index, nonce);
             let mut map: BTreeMap<frost_core::Identifier<frost_secp256k1_tr::Secp256K1Sha256>, frost_core::round1::SigningCommitments<frost_secp256k1_tr::Secp256K1Sha256>> = BTreeMap::new();
             map.insert(signer.identifier().clone(), commitment);
-
-            // forward received commitments
-            if let Some(input_c) = commitments.get(index) {
-                map.extend(input_c);
-            };
             commitments.insert(*index, map);
         }
     });
@@ -268,6 +264,28 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
         task_id: task.id.clone(),
         package: SignPackage::Round1(commitments),
         fingerprint: "".to_string(),
+        nonce: now(),
+    });
+}
+
+pub fn broadcast_packages(swarm: &mut Swarm<TSSBehaviour> ) {
+    list_sign_tasks().iter().for_each(|task| {
+        match task.round() {
+            Round::Round1 => {
+                // publish remote variable: commitment
+                let commitments = get_sign_remote_commitments(&task.id);
+                if commitments.len() > 0 {
+                    debug!("sync commitments {}, {}",task.id, commitments.len());
+                    publish_signing_package(swarm, &SignMesage {
+                        task_id: task.id.clone(),
+                        package: SignPackage::Round1(commitments),
+                        fingerprint: "".to_string(),
+                        nonce: now(),
+                    });
+                }
+            }
+            _ => {},
+        };
     });
 }
 
@@ -279,7 +297,9 @@ pub fn received_sign_message(msg: SignMesage) {
             // merge all commitments by input index
             let mut remote_commitments = get_sign_remote_commitments(&task_id);
             remote_commitments.iter_mut().for_each(|(index, map)| {
-                map.extend(commitments.get(index).unwrap());
+                if let Some(incoming) = commitments.get(index) {
+                    map.extend(incoming);
+                }
             });
 
             match get_sign_task(&task_id) {
@@ -296,7 +316,7 @@ pub fn received_sign_message(msg: SignMesage) {
                                     // task.round = Round::Round2;
                                     // save_sign_task(&task);
                                 } else {
-                                    debug!("{task_id}:{first} commitment lens: {}/{}?", commitments.len(), threshold);
+                                    debug!("{task_id}:{first} commitment lens: {}/{}", commitments.len(), threshold);
                                 }
                             }
                         }
@@ -348,7 +368,9 @@ pub fn received_sign_message(msg: SignMesage) {
             // Merge all commitments by input index
             let mut remote_sig_shares = get_sign_remote_signature_shares(&task_id);
             remote_sig_shares.iter_mut().for_each(|(index, map)| {
-                map.extend(sig_shares.get(index).unwrap());
+                if let Some(incoming) = sig_shares.get(index) {
+                    map.extend(incoming);
+                }
             });
 
             save_sign_remote_signature_shares(&task_id, &remote_sig_shares);
@@ -387,6 +409,9 @@ pub fn received_sign_message(msg: SignMesage) {
 pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut SignTask, identifier: &Identifier) {
 
     let stored_nonces = get_sign_local_nonces(&task.id);
+    if stored_nonces.len() == 0 {
+        return;
+    }
     let stored_remote_commitments = get_sign_remote_commitments(&task.id);
 
     let mut fingerprint = "".to_string();
@@ -412,6 +437,7 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
                 // add data fingerprint
                 if *index == 0 as usize {
                     fingerprint = participants_fingerprint(signing_commitments.keys());
+                    debug!("My fingerprint: {}, {}", task.id, fingerprint);
                 }
 
                 // when number of receved commitments is larger than min_signers
@@ -447,13 +473,13 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
                 };
                 
                 // forward received signatures
-                if let Some(received_sig_input) = received_sig_shares.get_mut(&index) {
-                    received_sig_input.insert(identifier.clone(), signature_shares);
-                } else {
+                // if let Some(received_sig_input) = received_sig_shares.get_mut(&index) {
+                //     received_sig_input.insert(identifier.clone(), signature_shares);
+                // } else {
                     let mut my_share = BTreeMap::new();
                     my_share.insert(identifier.clone(), signature_shares);
                     received_sig_shares.insert(index.clone(), my_share);
-                }
+                // }
             }
             None => {
                 error!("skip, I am not the signer of task: {:?}", task.id);
@@ -468,6 +494,7 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
         task_id: task.id.clone(),
         package: SignPackage::Round2(received_sig_shares.clone()),
         fingerprint,
+        nonce: now(),
     };
 
     debug!("publish signature share: {:?}", received_sig_shares);
