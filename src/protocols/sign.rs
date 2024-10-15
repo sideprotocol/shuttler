@@ -628,17 +628,16 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
     let signed_tx = psbt.clone().extract_tx().expect("failed to extract signed tx");
     match signer.bitcoin_client.send_raw_transaction(&signed_tx) {
         Ok(txid) => {
-            info!("Tx broadcasted: {}", txid);
+            info!("PSBT broadcasted to Bitcoin: {}", txid);
         }
         Err(err) => {
-            error! ("Failed to broadcast tx: {:?}, err: {:?}", signed_tx.compute_txid(), err);
-            return;
+            error! ("Failed to broadcast PSBT: {:?}, err: {:?}", signed_tx.compute_txid(), err);
+            // return;
         }
     }
 
     let psbt_bytes = psbt.serialize();
     let psbt_base64 = encoding::to_base64(&psbt_bytes);
-    info!("Signed PSBT: {:?}", psbt_base64);
 
     // submit signed psbt to side chain
     let msg = MsgSubmitSignatures {
@@ -659,7 +658,6 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
         },
         Err(e) => {
             error!("Failed to submit signatures: {:?}", e);
-            return
         },
     };
     // send message to the network
