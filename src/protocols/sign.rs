@@ -146,7 +146,7 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
         }
     };
 
-    info!("Prepare for signing: {:?} {} inputs ",request.txid, psbt.inputs.len()  );
+    info!("Prepare for signing: {:?} {} inputs ", &request.txid[..6], psbt.inputs.len()  );
     let mut inputs = BTreeMap::new();
     let preouts = psbt.inputs.iter()
         //.filter(|input| input.witness_utxo.is_some())
@@ -205,7 +205,7 @@ pub async fn process_tasks(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
     for item in DB_TASK.iter() {
         let mut task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
 
-        info!("Process: {}, {:?}", task.id, task.round());
+        info!("Process: {}, {:?}", &task.id[..6], task.round());
         match task.round() {
             Round::Round1 => {
                 generate_commitments(swarm, signer, &mut task);
@@ -399,8 +399,10 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
                     return
                 }
 
-                let k = signing_commitments.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
-                debug!("Commitments: {}, {:?}", signing_commitments.len(), k);
+                if *index == 0 {
+                    let k = signing_commitments.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
+                    debug!("Commitments: {} {}, {:?}", &task.id[..6], signing_commitments.len(), k);
+                }
 
                 // when number of receved commitments is larger than min_signers
                 // the following code will be executed or re-executed
@@ -550,7 +552,7 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
                 // println!("public key: {:?}", pub)
                 // let sighash = &hex::decode(sig_shares_message.message).unwrap();
                 match keypair.pub_key.verifying_key().verify(signing_package.sig_target().clone(), &signature) {
-                    Ok(_) => info!( "{}:{} {:?} is verified",task.id, index, signature ),
+                    Ok(_) => info!( "{}:{} {:?} is verified", &task.id[..6], index, signature ),
                     Err(e) => {
                         error!("Signature is invalid {}", e);
                         return None;
@@ -576,7 +578,7 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
     };
 
     if psbt.inputs.iter().all(|input| input.final_script_witness.is_some() ) {
-        debug!("Signing task {} completed", task.id);
+        debug!("Signing task {} completed", &task.id[..6]);
         // task.round = Round::Closed;
         let psbt_bytes = psbt.serialize();
         let psbt_base64 = encoding::to_base64(&psbt_bytes);
@@ -633,10 +635,7 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
 
 fn generate_nonce_and_commitment_by_address(address: &str) -> Option<(SigningNonces, SigningCommitments)> {
     let sign_key = match config::get_keypair_from_db(address) {
-        Some(key) => {
-            debug!("loaded key for address: {:?}", address);
-            key.priv_key
-        }
+        Some(key) => key.priv_key,
         None => {
             error!("Failed to get signing key for address: {}", address);
             return None;
