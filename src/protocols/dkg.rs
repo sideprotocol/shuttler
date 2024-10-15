@@ -14,7 +14,7 @@ use frost::{keys, Identifier, Secp256K1Sha256};
 
 use frost_core::keys::dkg::round1::Package;
 use super::{Round, TSSBehaviour};
-use crate::{app::{config:: get_database_with_name, signer::Signer}, helper::{encoding::to_base64, gossip::publish_dkg_packages, mem_store, now}};
+use crate::{app::{config:: get_database_with_name, signer::Signer}, helper::{encoding::to_base64, gossip::publish_dkg_packages, mem_store::{self, remove_dkg_round1_secret_packet, remove_dkg_round2_secret_packet}, now}};
 use crate::helper::cipher::{decrypt, encrypt};
 
 
@@ -367,24 +367,26 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
         // frost does not need its own package to compute the threshold key
         round1_packages.remove(signer.identifier()); 
 
-        let (key, pubkey) = match frost::keys::dkg::part3(
+        match frost::keys::dkg::part3(
             &round2_secret_package,
             &round1_packages,
             &round2_packages,
         ) {
-            Ok((key, pubkey)) => (key, pubkey),
+            Ok((key, pubkey)) => { 
+                // generate vault addresses and save its key share
+                let address_with_tweak = signer.generate_vault_addresses(pubkey, key, task.address_num);
+                task.round = Round::Closed;
+                task.dkg_vaults = address_with_tweak;
+                save_task(&task);
+            },
             Err(e) => {
-                error!("Failed to compute threshold key: {:?}", e);
-                return;
+                error!("Failed to compute threshold key: {} {:?}", &task.id, e);
+                // remove task to retry
+                remove_task(&task.id);
+                remove_task_variables(&task.id);
             }
         };
 
-        // generate vault addresses and save its key share
-        let address_with_tweak = signer.generate_vault_addresses(pubkey, key, task.address_num);
-
-        task.round = Round::Closed;
-        task.dkg_vaults = address_with_tweak;
-        save_task(&task);
         
     }
 }
@@ -417,6 +419,8 @@ pub fn save_task(task: &DKGTask) {
  }
 
  pub fn remove_task(task_id: &str) {
+    remove_dkg_round1_secret_packet(task_id);
+    remove_dkg_round2_secret_packet(task_id);
     match DB_TASK.remove(task_id) {
         Ok(_) => {
             info!("Removed task from database: {}", task_id);
@@ -425,7 +429,11 @@ pub fn save_task(task: &DKGTask) {
             error!("Failed to remove task from database: {}", task_id);
         }
     };
+}
 
+pub fn remove_task_variables(task_id: &str) {
+    let _ =  DB.remove(format!("dkg-{}-round1", task_id));
+    let _ =  DB.remove(format!("dkg-{}-round2", task_id));
 }
  
  pub fn list_tasks() -> Vec<DKGTask> {

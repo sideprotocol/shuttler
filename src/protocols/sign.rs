@@ -146,7 +146,7 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
         }
     };
 
-    info!("Prepare for signing: {:?} {} inputs ",request.txid, psbt.inputs.len()  );
+    info!("Prepare for signing: {:?} {} inputs ", &request.txid[..6], psbt.inputs.len()  );
     let mut inputs = BTreeMap::new();
     let preouts = psbt.inputs.iter()
         //.filter(|input| input.witness_utxo.is_some())
@@ -205,7 +205,7 @@ pub async fn process_tasks(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
     for item in DB_TASK.iter() {
         let mut task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
 
-        info!("Process: {}, {:?}", task.id, task.round());
+        info!("Process: {}, {:?}", &task.id[..6], task.round());
         match task.round() {
             Round::Round1 => {
                 generate_commitments(swarm, signer, &mut task);
@@ -330,42 +330,8 @@ pub fn received_sign_message(msg: SignMesage) {
         },
         SignPackage::Round2(sig_shares) => {
 
-            // let nonces = get_sign_local_nonces(&task_id);
-            // if nonces.len() == 0 {
-            //     return;
-            // }
-
-            // let remote_commitments = get_sign_remote_commitments(&task_id);
-            // let input_commitments = match remote_commitments.get(&0) {
-            //     Some(c) => c,
-            //     None => return
-            // };
-            
-            // let fp = participants_fingerprint(input_commitments.keys());
-            // if fp != msg.fingerprint {
-            //     // task.mismatch_fp += 1;
-            //     debug!("Reject, fingerprint mismatched! {}!={}, {}", fp, msg.fingerprint, &task_id[..6]);
-            //     // // restart task
-
-            //     // if let Some((_, input)) = task.inputs.first_key_value() {
-            //     //     if let Some(key) = config::get_keypair_from_db(&input.address) {
-            //     //         if task.mismatch_fp > key.pub_key.verifying_shares().len() - key.priv_key.min_signers().clone() as usize {
-            //     //             task.reset();
-            //     //         }
-            //     //     }
-            //     //     error!("Restart signning task {}, too many mismatched fingerprint", task.id);
-            //     // }
-            //     // save_sign_task(&task);
-            //     return
-            // }
-
             // Merge all commitments by input index
             let mut remote_sig_shares = get_sign_remote_signature_shares(&task_id);
-            // remote_sig_shares.iter_mut().for_each(|(index, map)| {
-            //     if let Some(incoming) = sig_shares.get(index) {
-            //         map.extend(incoming);
-            //     }
-            // });
             sig_shares.iter().for_each(|(index, incoming)| {
                 match remote_sig_shares.get_mut(index) {
                     Some(existing) => {
@@ -397,8 +363,6 @@ pub fn received_sign_message(msg: SignMesage) {
                         let threshold = key.priv_key.min_signers().clone() as usize;
                         if shares.len() >= threshold {
                             info!("Ready for aggregration: {}:{first} {:?}>={}", &task_id[..6], shares.len(), threshold);
-                            // task.round = Round::Aggregate;
-                            // save_sign_task(&task);
                         } else {
                             debug!("Received signature shares: {}:{first} {:?}/{}", &task_id[..6], shares.len(), threshold);
                         }
@@ -435,8 +399,10 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
                     return
                 }
 
-                let k = signing_commitments.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
-                debug!("Commitments: {}, {:?}", signing_commitments.len(), k);
+                if *index == 0 {
+                    let k = signing_commitments.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
+                    debug!("Commitments: {} {}, {:?}", &task.id[..6], signing_commitments.len(), k);
+                }
 
                 // when number of receved commitments is larger than min_signers
                 // the following code will be executed or re-executed
@@ -491,6 +457,10 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
             }
         };
     });
+
+    if broadcast_packages.len() == 0 {
+        return;
+    }
 
     let msg = SignMesage {
         task_id: task.id.clone(),
@@ -582,7 +552,7 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
                 // println!("public key: {:?}", pub)
                 // let sighash = &hex::decode(sig_shares_message.message).unwrap();
                 match keypair.pub_key.verifying_key().verify(signing_package.sig_target().clone(), &signature) {
-                    Ok(_) => info!( "{}:{} {:?} is verified",task.id, index, signature ),
+                    Ok(_) => info!( "{}:{} {:?} is verified", &task.id[..6], index, signature ),
                     Err(e) => {
                         error!("Signature is invalid {}", e);
                         return None;
@@ -608,7 +578,7 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
     };
 
     if psbt.inputs.iter().all(|input| input.final_script_witness.is_some() ) {
-        debug!("Signing task {} completed", task.id);
+        debug!("Signing task {} completed", &task.id[..6]);
         // task.round = Round::Closed;
         let psbt_bytes = psbt.serialize();
         let psbt_base64 = encoding::to_base64(&psbt_bytes);
@@ -628,17 +598,16 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
     let signed_tx = psbt.clone().extract_tx().expect("failed to extract signed tx");
     match signer.bitcoin_client.send_raw_transaction(&signed_tx) {
         Ok(txid) => {
-            info!("Tx broadcasted: {}", txid);
+            info!("PSBT broadcasted to Bitcoin: {}", txid);
         }
         Err(err) => {
-            error! ("Failed to broadcast tx: {:?}, err: {:?}", signed_tx.compute_txid(), err);
-            return;
+            error! ("Failed to broadcast PSBT: {:?}, err: {:?}", signed_tx.compute_txid(), err);
+            // return;
         }
     }
 
     let psbt_bytes = psbt.serialize();
     let psbt_base64 = encoding::to_base64(&psbt_bytes);
-    info!("Signed PSBT: {:?}", psbt_base64);
 
     // submit signed psbt to side chain
     let msg = MsgSubmitSignatures {
@@ -659,7 +628,6 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
         },
         Err(e) => {
             error!("Failed to submit signatures: {:?}", e);
-            return
         },
     };
     // send message to the network
@@ -667,10 +635,7 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
 
 fn generate_nonce_and_commitment_by_address(address: &str) -> Option<(SigningNonces, SigningCommitments)> {
     let sign_key = match config::get_keypair_from_db(address) {
-        Some(key) => {
-            debug!("loaded key for address: {:?}", address);
-            key.priv_key
-        }
+        Some(key) => key.priv_key,
         None => {
             error!("Failed to get signing key for address: {}", address);
             return None;

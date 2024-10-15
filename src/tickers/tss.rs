@@ -90,8 +90,9 @@ async fn fetch_dkg_requests(signer: &Signer) {
         let tasks_in_process = requests.iter().map(|r| format!("dkg-{}", r.id)).collect::<Vec<_>>();
         list_tasks().iter().for_each(|task| {
             if !tasks_in_process.contains(&task.id) {
-                debug!("Removing expired task: {:?}", task.id);
+                debug!("Removing completed task: {:?}", task.id);
                 dkg::remove_task(&task.id);
+                dkg::remove_task_variables(&task.id);
             }
         });
 
