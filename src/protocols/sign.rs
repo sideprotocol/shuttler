@@ -777,7 +777,7 @@ pub fn remove_task(task_id: &str) {
     };
 }
 
-fn participants_fingerprint<V>(keys: Keys<'_, Identifier, V>) -> String {
+pub fn participants_fingerprint<V>(keys: Keys<'_, Identifier, V>) -> String {
     let x = keys.map(|c| {c.serialize()}).collect::<Vec<_>>();
     hash(x.join(&0).as_slice())[..6].to_string()
 }
