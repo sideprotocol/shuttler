@@ -499,13 +499,16 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
                 };
                 
                 // forward received signatures
-                // if let Some(received_sig_input) = received_sig_shares.get_mut(&index) {
-                //     received_sig_input.insert(identifier.clone(), signature_shares);
-                // } else {
-                    let mut my_share = BTreeMap::new();
-                    my_share.insert(identifier.clone(), signature_shares);
-                    received_sig_shares.insert(index.clone(), my_share);
-                // }
+                let mut my_share = BTreeMap::new();
+                my_share.insert(identifier.clone(), signature_shares);
+                match received_sig_shares.get_mut(index) {
+                    Some(existing) => {
+                        existing.extend(my_share);
+                    },
+                    None => {
+                        received_sig_shares.insert(index.clone(), my_share);
+                    }
+                }
             }
             None => {
                 error!("skip, I am not the signer of task: {:?}", task.id);
