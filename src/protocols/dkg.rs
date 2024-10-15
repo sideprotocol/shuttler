@@ -14,7 +14,7 @@ use frost::{keys, Identifier, Secp256K1Sha256};
 
 use frost_core::keys::dkg::round1::Package;
 use super::{Round, TSSBehaviour};
-use crate::{app::{config:: get_database_with_name, signer::Signer}, helper::{encoding::to_base64, gossip::publish_dkg_packages, mem_store, now}};
+use crate::{app::{config:: get_database_with_name, signer::Signer}, helper::{encoding::to_base64, gossip::publish_dkg_packages, mem_store::{self, remove_dkg_round1_secret_packet, remove_dkg_round2_secret_packet}, now}};
 use crate::helper::cipher::{decrypt, encrypt};
 
 
@@ -419,6 +419,8 @@ pub fn save_task(task: &DKGTask) {
  }
 
  pub fn remove_task(task_id: &str) {
+    remove_dkg_round1_secret_packet(task_id);
+    remove_dkg_round2_secret_packet(task_id);
     match DB_TASK.remove(task_id) {
         Ok(_) => {
             info!("Removed task from database: {}", task_id);

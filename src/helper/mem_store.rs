@@ -29,6 +29,11 @@ pub fn set_dkg_round1_secret_packet(task_id: &str, secret_packet: dkg::round1::S
     map.insert(task_id.to_string(), secret_packet);
 }
 
+pub fn remove_dkg_round1_secret_packet(task_id: &str) {
+    let mut map = DkgRound1SecretPacket.lock().unwrap();
+    map.remove(task_id);
+}
+
 pub fn get_dkg_round2_secret_packet(task_id: &str) -> Option<dkg::round2::SecretPackage> {
     let map = DkgRound2SecretPacket.lock().unwrap();
     map.get(task_id).cloned()
@@ -37,4 +42,9 @@ pub fn get_dkg_round2_secret_packet(task_id: &str) -> Option<dkg::round2::Secret
 pub fn set_dkg_round2_secret_packet(task_id: &str, secret_packet: dkg::round2::SecretPackage) {
     let mut map = DkgRound2SecretPacket.lock().unwrap();
     map.insert(task_id.to_string(), secret_packet);
+}
+
+pub fn remove_dkg_round2_secret_packet(task_id: &str) {
+    let mut map = DkgRound2SecretPacket.lock().unwrap();
+    map.remove(task_id);
 }
