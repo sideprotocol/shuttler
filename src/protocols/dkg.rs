@@ -168,7 +168,7 @@ pub fn generate_round2_packages(identifier: &Identifier, enc_key: &SecretKey, ta
     Ok(())
 }
 
-pub fn collect_dkg_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>) {
+pub fn broadcast_dkg_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>) {
     let tasks = list_tasks();
     for t in tasks.iter() {
         if t.timestamp as u64 >= now() {
@@ -256,7 +256,7 @@ pub fn received_round1_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
     local.extend(packets);
 
     let k = local.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
-    debug!("Received round1 packets length: {} {:?}", task.id, k);
+    debug!("Received round1 packets: {} {:?}", task.id, k);
 
     if DB.insert(format!("dkg-{}-round1", task.id), serde_json::to_vec(&local).unwrap()).is_err() {
         error!("Failed to store DKG Round 1 packets: {} ", task.id);
@@ -307,7 +307,7 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
 
 
     let k = local.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
-    debug!("Received round2 packets length: {} {:?}", task.id, k);
+    debug!("Received round2 packets: {} {:?}", task.id, k);
 
     // store round 2 packets
     if DB.insert(format!("dkg-{}-round2", task.id), serde_json::to_vec(&local).unwrap()).is_err() {
@@ -430,7 +430,7 @@ pub fn save_task(task: &DKGTask) {
  
  pub fn list_tasks() -> Vec<DKGTask> {
      let mut tasks = vec![];
-     debug!("loading in-process dkg tasks from database, total: {:?}", DB_TASK.len());
+     // debug!("loading in-process dkg tasks from database, total: {:?}", DB_TASK.len());
      for task in DB_TASK.iter() {
          let (_, task) = task.unwrap();
          tasks.push(serde_json::from_slice(&task).unwrap());

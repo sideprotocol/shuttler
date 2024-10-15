@@ -14,15 +14,17 @@ use libp2p::kad::store::MemoryStore;
 use libp2p::swarm::dial_opts::PeerCondition;
 use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
 use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
+use tokio::time::Instant;
 
-use crate::app::config;
+use crate::app::config::{self, TASK_ROUND_WINDOW};
 use crate::app::config::Config;
 use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::from_base64;
 use crate::helper::gossip::{subscribe_gossip_topics, SubscribeTopic};
+use crate::helper::now;
 use crate::protocols::sign::{received_sign_message, SignMesage};
-use crate::tickers::tss::{fetch_signing_requests, tss_tasks_fetcher};
+use crate::tickers::tss::{time_aligned_tasks_executor, time_free_tasks_executor};
 use crate::protocols::dkg::{received_dkg_response, DKGResponse};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
 
@@ -240,8 +242,11 @@ pub async fn run_signer_daemon(conf: Config) {
     dail_bootstrap_nodes(&mut swarm, &conf);
     subscribe_gossip_topics(&mut swarm);
 
-    let mut interval = tokio::time::interval(Duration::from_secs(60));
-    let mut interval2 = tokio::time::interval(Duration::from_secs(10));
+
+    let mut interval2 = tokio::time::interval(tokio::time::Duration::from_secs(27));
+    let start = Instant::now() + (TASK_ROUND_WINDOW - tokio::time::Duration::from_secs(now() % TASK_ROUND_WINDOW.as_secs()));
+    let mut interval = tokio::time::interval_at(start, TASK_ROUND_WINDOW);
+    // let mut interval = tokio::time::interval(TASK_ROUND_WINDOW);
 
     loop {
         select! {
@@ -268,11 +273,10 @@ pub async fn run_signer_daemon(conf: Config) {
                 },
             },
             _ = interval2.tick() => {
-                // 3. fetch signing requests
-                fetch_signing_requests(&signer).await;
+                time_free_tasks_executor(&signer).await;
             }
             _ = interval.tick() => {
-                tss_tasks_fetcher(&mut swarm, &signer).await;
+                time_aligned_tasks_executor(&mut swarm, &signer).await;
             }
 
         }
@@ -302,7 +306,7 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<TSSBehaviour>, conf: &Config) {
 async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
     match event {
         TSSBehaviourEvent::Gossip(gossipsub::Event::Message {message, .. }) => {
-            // debug!("Received message: {:?}", message);
+            // debug!("Received {:?}", message);
             if message.topic == SubscribeTopic::DKG.topic().hash() {
                 let response: DKGResponse = serde_json::from_slice(&message.data).expect("Failed to deserialize DKG message");
                 // dkg_event_handler(shuttler, swarm.behaviour_mut(), &propagation_source, dkg_message);
