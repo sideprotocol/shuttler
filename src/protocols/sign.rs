@@ -330,42 +330,8 @@ pub fn received_sign_message(msg: SignMesage) {
         },
         SignPackage::Round2(sig_shares) => {
 
-            // let nonces = get_sign_local_nonces(&task_id);
-            // if nonces.len() == 0 {
-            //     return;
-            // }
-
-            // let remote_commitments = get_sign_remote_commitments(&task_id);
-            // let input_commitments = match remote_commitments.get(&0) {
-            //     Some(c) => c,
-            //     None => return
-            // };
-            
-            // let fp = participants_fingerprint(input_commitments.keys());
-            // if fp != msg.fingerprint {
-            //     // task.mismatch_fp += 1;
-            //     debug!("Reject, fingerprint mismatched! {}!={}, {}", fp, msg.fingerprint, &task_id[..6]);
-            //     // // restart task
-
-            //     // if let Some((_, input)) = task.inputs.first_key_value() {
-            //     //     if let Some(key) = config::get_keypair_from_db(&input.address) {
-            //     //         if task.mismatch_fp > key.pub_key.verifying_shares().len() - key.priv_key.min_signers().clone() as usize {
-            //     //             task.reset();
-            //     //         }
-            //     //     }
-            //     //     error!("Restart signning task {}, too many mismatched fingerprint", task.id);
-            //     // }
-            //     // save_sign_task(&task);
-            //     return
-            // }
-
             // Merge all commitments by input index
             let mut remote_sig_shares = get_sign_remote_signature_shares(&task_id);
-            // remote_sig_shares.iter_mut().for_each(|(index, map)| {
-            //     if let Some(incoming) = sig_shares.get(index) {
-            //         map.extend(incoming);
-            //     }
-            // });
             sig_shares.iter().for_each(|(index, incoming)| {
                 match remote_sig_shares.get_mut(index) {
                     Some(existing) => {
@@ -397,8 +363,6 @@ pub fn received_sign_message(msg: SignMesage) {
                         let threshold = key.priv_key.min_signers().clone() as usize;
                         if shares.len() >= threshold {
                             info!("Ready for aggregration: {}:{first} {:?}>={}", &task_id[..6], shares.len(), threshold);
-                            // task.round = Round::Aggregate;
-                            // save_sign_task(&task);
                         } else {
                             debug!("Received signature shares: {}:{first} {:?}/{}", &task_id[..6], shares.len(), threshold);
                         }
@@ -491,6 +455,10 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
             }
         };
     });
+
+    if broadcast_packages.len() == 0 {
+        return;
+    }
 
     let msg = SignMesage {
         task_id: task.id.clone(),
