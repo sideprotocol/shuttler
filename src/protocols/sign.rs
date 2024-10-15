@@ -234,7 +234,7 @@ pub async fn process_tasks(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
                     submit_signatures(psbt, signer).await;
                     task.is_signature_submitted = true;
                     save_sign_task(&task);
-                    remove_task_variables(&task.id);
+                    // remove_task_variables(&task.id);
                 } else {
                     remove_task_variables(&task.id);
                 }
