@@ -168,7 +168,7 @@ pub fn generate_round2_packages(identifier: &Identifier, enc_key: &SecretKey, ta
     Ok(())
 }
 
-pub fn collect_dkg_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>) {
+pub fn broadcast_dkg_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>) {
     let tasks = list_tasks();
     for t in tasks.iter() {
         if t.timestamp as u64 >= now() {

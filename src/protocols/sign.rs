@@ -252,7 +252,11 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
             nonces.insert(*index, nonce);
             let mut map: BTreeMap<frost_core::Identifier<frost_secp256k1_tr::Secp256K1Sha256>, frost_core::round1::SigningCommitments<frost_secp256k1_tr::Secp256K1Sha256>> = BTreeMap::new();
             map.insert(signer.identifier().clone(), commitment);
-            commitments.insert(*index, map);
+            if let Some(x) = commitments.get_mut(index) {
+                x.extend(map);
+            } else {
+                commitments.insert(*index, map);
+            };
         }
     });
     // save local variable: nonces
@@ -275,7 +279,7 @@ pub fn broadcast_packages(swarm: &mut Swarm<TSSBehaviour> ) {
                 // publish remote variable: commitment
                 let commitments = get_sign_remote_commitments(&task.id);
                 if commitments.len() > 0 {
-                    debug!("sync commitments {}, {}",task.id, commitments.len());
+                    debug!("sync commitments {}, {}", &task.id[..6], commitments.len());
                     publish_signing_package(swarm, &SignMesage {
                         task_id: task.id.clone(),
                         package: SignPackage::Round1(commitments),
@@ -312,11 +316,11 @@ pub fn received_sign_message(msg: SignMesage) {
                             if let Some(key) = config::get_keypair_from_db(&input.address) {
                                 let threshold = key.priv_key.min_signers().clone() as usize;
                                 if commitments.len() >= threshold {
-                                    info!("{task_id}:{first} is ready for Round2: {}>={}", commitments.len(), threshold);
+                                    info!("{}:{first} is ready for Round2: {}>={}", &task_id[..6], commitments.len(), threshold);
                                     // task.round = Round::Round2;
                                     // save_sign_task(&task);
                                 } else {
-                                    debug!("{task_id}:{first} commitment lens: {}/{}", commitments.len(), threshold);
+                                    debug!("{}:{first} commitment lens: {}/{}", &task_id[..6], commitments.len(), threshold);
                                 }
                             }
                         }
@@ -324,14 +328,15 @@ pub fn received_sign_message(msg: SignMesage) {
 
                     // Commitments are accepted only when a fingerprint does not exist. if it does, the task moves to the next round.
                     if task.fingerprint.len() == 0 {
-                        save_sign_remote_commitments(&task_id, &remote_commitments);
                     }
                 },
                 None => {
-                    debug!("Not found task {} on my sided", task_id);
-                    save_sign_remote_commitments(&task_id, &remote_commitments);
+                    debug!("Not found task {} on my sided", &task_id[..6]);
+                    // save_sign_remote_commitments(&task_id, &remote_commitments);
                 }
             };
+
+            save_sign_remote_commitments(&task_id, &remote_commitments);
             
         },
         SignPackage::Round2(sig_shares) => {
@@ -350,7 +355,7 @@ pub fn received_sign_message(msg: SignMesage) {
             let fp = participants_fingerprint(input_commitments.keys());
             if fp != msg.fingerprint {
                 // task.mismatch_fp += 1;
-                debug!("Reject, fingerprint mismatched! {}!={}, {}", fp, msg.fingerprint, task_id);
+                debug!("Reject, fingerprint mismatched! {}!={}, {}", fp, msg.fingerprint, &task_id[..6]);
                 // // restart task
 
                 // if let Some((_, input)) = task.inputs.first_key_value() {
@@ -776,5 +781,5 @@ pub fn remove_task(task_id: &str) {
 
 fn participants_fingerprint<V>(keys: Keys<'_, Identifier, V>) -> String {
     let x = keys.map(|c| {c.serialize()}).collect::<Vec<_>>();
-    hash(x.join(&0).as_slice())
+    hash(x.join(&0).as_slice())[..6].to_string()
 }

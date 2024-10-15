@@ -7,7 +7,7 @@ use tracing::{debug, error, info};
 use crate::{
     app::signer::Signer, 
     helper::client_side::{get_signing_requests, send_cosmos_transaction}, 
-    protocols::{dkg::{self, collect_dkg_packages, generate_round1_package, list_tasks, save_task, DKGTask}, 
+    protocols::{dkg::{self, broadcast_dkg_packages, generate_round1_package, list_tasks, save_task, DKGTask}, 
     sign::{self, broadcast_packages, list_sign_tasks, process_tasks, save_task_into_signing_queue}, Round, TSSBehaviour
 }};
 pub async fn time_free_tasks_executor(
@@ -37,7 +37,7 @@ pub async fn time_aligned_tasks_executor(
     debug!("Connected peers: {:?}", swarm.connected_peers().collect::<Vec<_>>());
 
     // 1. collect dkg packages
-    collect_dkg_packages(swarm);
+    broadcast_dkg_packages(swarm);
     // 2. collect signing requests tss packages
     process_tasks(swarm, signer).await;
 

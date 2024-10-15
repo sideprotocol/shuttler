@@ -241,7 +241,7 @@ pub async fn run_signer_daemon(conf: Config) {
     subscribe_gossip_topics(&mut swarm);
 
 
-    let mut interval2 = tokio::time::interval(tokio::time::Duration::from_secs(20));
+    let mut interval2 = tokio::time::interval(tokio::time::Duration::from_secs(27));
     // let start = Instant::now() + (TASK_ROUND_WINDOW - tokio::time::Duration::from_secs(now() % TASK_ROUND_WINDOW.as_secs()));
     // let mut interval = tokio::time::interval_at(start, TASK_ROUND_WINDOW);
     let mut interval = tokio::time::interval(TASK_ROUND_WINDOW);
@@ -304,7 +304,7 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<TSSBehaviour>, conf: &Config) {
 async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
     match event {
         TSSBehaviourEvent::Gossip(gossipsub::Event::Message {message, .. }) => {
-            // debug!("Received message: {:?}", message);
+            // debug!("Received {:?}", message);
             if message.topic == SubscribeTopic::DKG.topic().hash() {
                 let response: DKGResponse = serde_json::from_slice(&message.data).expect("Failed to deserialize DKG message");
                 // dkg_event_handler(shuttler, swarm.behaviour_mut(), &propagation_source, dkg_message);
