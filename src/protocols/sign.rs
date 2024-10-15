@@ -245,53 +245,31 @@ pub async fn process_tasks(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
 fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: &mut SignTask) {
 
     let mut nonces = BTreeMap::new();
-    let mut commitments = get_sign_remote_commitments(&task.id);
+    let mut stored_commitments = get_sign_remote_commitments(&task.id);
+    let mut broadcast_package = BTreeMap::new();
 
     task.inputs.iter().for_each(|(index, input)| {
         if let Some((nonce, commitment)) = generate_nonce_and_commitment_by_address(&input.address) {
             nonces.insert(*index, nonce);
-            let mut map: BTreeMap<frost_core::Identifier<frost_secp256k1_tr::Secp256K1Sha256>, frost_core::round1::SigningCommitments<frost_secp256k1_tr::Secp256K1Sha256>> = BTreeMap::new();
-            map.insert(signer.identifier().clone(), commitment);
-            if let Some(x) = commitments.get_mut(index) {
-                x.extend(map);
+            let mut my_commits: BTreeMap<frost_core::Identifier<frost_secp256k1_tr::Secp256K1Sha256>, frost_core::round1::SigningCommitments<frost_secp256k1_tr::Secp256K1Sha256>> = BTreeMap::new();
+            my_commits.insert(signer.identifier().clone(), commitment);
+            broadcast_package.insert(*index, my_commits.clone());
+            if let Some(existing) = stored_commitments.get_mut(index) {
+                existing.extend(my_commits);
             } else {
-                commitments.insert(*index, map);
+                stored_commitments.insert(*index, my_commits);
             };
         }
     });
     // save local variable: nonces
     save_sign_local_variable(&task.id, &nonces);
-    save_sign_remote_commitments(&task.id, &commitments);
+    save_sign_remote_commitments(&task.id, &stored_commitments);
 
     // publish remote variable: commitment
     publish_signing_package(swarm, &SignMesage {
         task_id: task.id.clone(),
-        package: SignPackage::Round1(commitments),
+        package: SignPackage::Round1(broadcast_package),
         nonce: now(),
-    });
-}
-
-pub fn broadcast_sign_packages(swarm: &mut Swarm<TSSBehaviour> ) {
-    list_sign_tasks().iter().for_each(|task| {
-        match task.round() {
-            Round::Round1 => {
-                // publish remote variable: commitment
-                let commitments = get_sign_remote_commitments(&task.id);
-                if commitments.len() > 0 {
-                    let received = match commitments.get(&0) {
-                        Some(x) => x.len(),
-                        None => 0,
-                    };
-                    debug!("sync commitments {}, {}", &task.id[..6], received);
-                    publish_signing_package(swarm, &SignMesage {
-                        task_id: task.id.clone(),
-                        package: SignPackage::Round1(commitments),
-                        nonce: now(),
-                    });
-                }
-            }
-            _ => {},
-        };
     });
 }
 
@@ -443,6 +421,7 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
 
     let mut received_sig_shares = get_sign_remote_signature_shares(&task.id);
     // let received_sig_shares.get_mut(&retry);
+    let mut broadcast_packages = BTreeMap::new();
     task.inputs.iter_mut().for_each(|(index, input)| {
         // filter packets from unknown parties
         match config::get_keypair_from_db(&input.address) {
@@ -459,12 +438,6 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
 
                 let k = signing_commitments.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
                 debug!("Commitments: {}, {:?}", signing_commitments.len(), k);
-
-                // add data fingerprint
-                // if *index == 0 as usize {
-                //     fingerprint = participants_fingerprint(signing_commitments.keys());
-                //     debug!("My fingerprint: {}, {}", task.id, fingerprint);
-                // }
 
                 // when number of receved commitments is larger than min_signers
                 // the following code will be executed or re-executed
@@ -498,9 +471,12 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
                     }
                 };
                 
-                // forward received signatures
                 let mut my_share = BTreeMap::new();
                 my_share.insert(identifier.clone(), signature_shares);
+                
+                // broadcast my share
+                broadcast_packages.insert(index.clone(), my_share.clone());
+                // save my share to local
                 match received_sig_shares.get_mut(index) {
                     Some(existing) => {
                         existing.extend(my_share);
@@ -519,14 +495,13 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
 
     let msg = SignMesage {
         task_id: task.id.clone(),
-        package: SignPackage::Round2(received_sig_shares.clone()),
+        package: SignPackage::Round2(broadcast_packages),
         nonce: now(),
     };
 
-    debug!("publish signature share: {:?}", received_sig_shares);
+    debug!("publish signature share: {:?}", msg);
 
     publish_signing_package(swarm, &msg);
-
     save_sign_remote_signature_shares(&task.id, &received_sig_shares);
     // save_sign_task(task)
 

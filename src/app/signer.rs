@@ -273,7 +273,7 @@ pub async fn run_signer_daemon(conf: Config) {
                 },
             },
             _ = interval2.tick() => {
-                time_free_tasks_executor(&mut swarm, &signer).await;
+                time_free_tasks_executor(&signer).await;
             }
             _ = interval.tick() => {
                 time_aligned_tasks_executor(&mut swarm, &signer).await;

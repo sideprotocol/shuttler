@@ -8,10 +8,9 @@ use crate::{
     app::signer::Signer, 
     helper::client_side::{get_signing_requests, send_cosmos_transaction}, 
     protocols::{dkg::{self, broadcast_dkg_packages, generate_round1_package, list_tasks, save_task, DKGTask}, 
-    sign::{self, broadcast_sign_packages, list_sign_tasks, process_tasks, save_task_into_signing_queue}, Round, TSSBehaviour
+    sign::{self, list_sign_tasks, process_tasks, save_task_into_signing_queue}, Round, TSSBehaviour
 }};
 pub async fn time_free_tasks_executor(
-    swarm : &mut Swarm<TSSBehaviour>,
     signer: &Signer,
 ) {
     if signer.config().get_validator_key().is_none() {
