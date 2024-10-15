@@ -56,7 +56,6 @@ pub struct SignResponse {
 pub struct SignMesage {
     pub task_id: String,
     pub package: SignPackage,
-    pub fingerprint: String,
     pub nonce: u64,
 }
 
@@ -268,7 +267,6 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
     publish_signing_package(swarm, &SignMesage {
         task_id: task.id.clone(),
         package: SignPackage::Round1(commitments),
-        fingerprint: "".to_string(),
         nonce: now(),
     });
 }
@@ -288,7 +286,6 @@ pub fn broadcast_sign_packages(swarm: &mut Swarm<TSSBehaviour> ) {
                     publish_signing_package(swarm, &SignMesage {
                         task_id: task.id.clone(),
                         package: SignPackage::Round1(commitments),
-                        fingerprint: "".to_string(),
                         nonce: now(),
                     });
                 }
@@ -444,7 +441,6 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
     }
     let stored_remote_commitments = get_sign_remote_commitments(&task.id);
 
-    let mut fingerprint = "".to_string();
     let mut received_sig_shares = get_sign_remote_signature_shares(&task.id);
     // let received_sig_shares.get_mut(&retry);
     task.inputs.iter_mut().for_each(|(index, input)| {
@@ -465,10 +461,10 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
                 debug!("Commitments: {}, {:?}", signing_commitments.len(), k);
 
                 // add data fingerprint
-                if *index == 0 as usize {
-                    fingerprint = participants_fingerprint(signing_commitments.keys());
-                    debug!("My fingerprint: {}, {}", task.id, fingerprint);
-                }
+                // if *index == 0 as usize {
+                //     fingerprint = participants_fingerprint(signing_commitments.keys());
+                //     debug!("My fingerprint: {}, {}", task.id, fingerprint);
+                // }
 
                 // when number of receved commitments is larger than min_signers
                 // the following code will be executed or re-executed
@@ -518,12 +514,9 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
         };
     });
 
-    task.fingerprint = fingerprint.clone();
-
     let msg = SignMesage {
         task_id: task.id.clone(),
         package: SignPackage::Round2(received_sig_shares.clone()),
-        fingerprint,
         nonce: now(),
     };
 
@@ -568,8 +561,10 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
         };
 
         if signing_commitments.len() != signature_shares.len() {
-            error!("Aggregate error: {} != {}", signing_commitments.len(), signature_shares.len());
-            // return None;
+            let s_keys = signature_shares.keys();
+            let c_keys = signing_commitments.keys();
+            error!("Aggregate error: {} != {} {:?} {:?}", signing_commitments.len(), signature_shares.len(), c_keys, s_keys);
+            return None;
         }
 
         let keypair = match config::get_keypair_from_db(&input.address) {
