@@ -314,7 +314,7 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 received_dkg_response(response, signer);
             } else if message.topic == SubscribeTopic::SIGNING.topic().hash() {
                 let msg: SignMesage = serde_json::from_slice(&message.data).expect("Failed to deserialize Sign message");
-                // debug!("Gossip Received TSS Response from {propagation_source}: {message_id} {:?}", msg);
+                // debug!("Gossip Received {:?}", msg);
                 received_sign_message(msg);
             }
         }
