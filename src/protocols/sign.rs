@@ -356,34 +356,34 @@ pub fn received_sign_message(msg: SignMesage) {
         },
         SignPackage::Round2(sig_shares) => {
 
-            let nonces = get_sign_local_nonces(&task_id);
-            if nonces.len() == 0 {
-                return;
-            }
+            // let nonces = get_sign_local_nonces(&task_id);
+            // if nonces.len() == 0 {
+            //     return;
+            // }
 
-            let remote_commitments = get_sign_remote_commitments(&task_id);
-            let input_commitments = match remote_commitments.get(&0) {
-                Some(c) => c,
-                None => return
-            };
+            // let remote_commitments = get_sign_remote_commitments(&task_id);
+            // let input_commitments = match remote_commitments.get(&0) {
+            //     Some(c) => c,
+            //     None => return
+            // };
             
-            let fp = participants_fingerprint(input_commitments.keys());
-            if fp != msg.fingerprint {
-                // task.mismatch_fp += 1;
-                debug!("Reject, fingerprint mismatched! {}!={}, {}", fp, msg.fingerprint, &task_id[..6]);
-                // // restart task
+            // let fp = participants_fingerprint(input_commitments.keys());
+            // if fp != msg.fingerprint {
+            //     // task.mismatch_fp += 1;
+            //     debug!("Reject, fingerprint mismatched! {}!={}, {}", fp, msg.fingerprint, &task_id[..6]);
+            //     // // restart task
 
-                // if let Some((_, input)) = task.inputs.first_key_value() {
-                //     if let Some(key) = config::get_keypair_from_db(&input.address) {
-                //         if task.mismatch_fp > key.pub_key.verifying_shares().len() - key.priv_key.min_signers().clone() as usize {
-                //             task.reset();
-                //         }
-                //     }
-                //     error!("Restart signning task {}, too many mismatched fingerprint", task.id);
-                // }
-                // save_sign_task(&task);
-                return
-            }
+            //     // if let Some((_, input)) = task.inputs.first_key_value() {
+            //     //     if let Some(key) = config::get_keypair_from_db(&input.address) {
+            //     //         if task.mismatch_fp > key.pub_key.verifying_shares().len() - key.priv_key.min_signers().clone() as usize {
+            //     //             task.reset();
+            //     //         }
+            //     //     }
+            //     //     error!("Restart signning task {}, too many mismatched fingerprint", task.id);
+            //     // }
+            //     // save_sign_task(&task);
+            //     return
+            // }
 
             // Merge all commitments by input index
             let mut remote_sig_shares = get_sign_remote_signature_shares(&task_id);
