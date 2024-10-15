@@ -8,7 +8,7 @@ use crate::{
     app::signer::Signer, 
     helper::client_side::{get_signing_requests, send_cosmos_transaction}, 
     protocols::{dkg::{self, broadcast_dkg_packages, generate_round1_package, list_tasks, save_task, DKGTask}, 
-    sign::{self, broadcast_packages, list_sign_tasks, process_tasks, save_task_into_signing_queue}, Round, TSSBehaviour
+    sign::{self, broadcast_sign_packages, list_sign_tasks, process_tasks, save_task_into_signing_queue}, Round, TSSBehaviour
 }};
 pub async fn time_free_tasks_executor(
     swarm : &mut Swarm<TSSBehaviour>,
@@ -21,7 +21,7 @@ pub async fn time_free_tasks_executor(
     // 1. fetch dkg request
     fetch_dkg_requests(signer).await;
     fetch_signing_requests(signer).await;
-    broadcast_packages(swarm);
+    // broadcast_sign_packages(swarm);
     submit_dkg_address(signer).await;
 }
 

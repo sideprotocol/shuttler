@@ -234,6 +234,7 @@ pub async fn process_tasks(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
                     submit_signatures(psbt, signer).await;
                     task.is_signature_submitted = true;
                     save_sign_task(&task);
+                    remove_task_variables(&task.id);
                 } else {
                     remove_task_variables(&task.id);
                 }
@@ -272,14 +273,18 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
     });
 }
 
-pub fn broadcast_packages(swarm: &mut Swarm<TSSBehaviour> ) {
+pub fn broadcast_sign_packages(swarm: &mut Swarm<TSSBehaviour> ) {
     list_sign_tasks().iter().for_each(|task| {
         match task.round() {
             Round::Round1 => {
                 // publish remote variable: commitment
                 let commitments = get_sign_remote_commitments(&task.id);
                 if commitments.len() > 0 {
-                    debug!("sync commitments {}, {}", &task.id[..6], commitments.len());
+                    let received = match commitments.get(&0) {
+                        Some(x) => x.len(),
+                        None => 0,
+                    };
+                    debug!("sync commitments {}, {}", &task.id[..6], received);
                     publish_signing_package(swarm, &SignMesage {
                         task_id: task.id.clone(),
                         package: SignPackage::Round1(commitments),
@@ -300,9 +305,19 @@ pub fn received_sign_message(msg: SignMesage) {
         SignPackage::Round1(commitments) => {
             // merge all commitments by input index
             let mut remote_commitments = get_sign_remote_commitments(&task_id);
-            remote_commitments.iter_mut().for_each(|(index, map)| {
-                if let Some(incoming) = commitments.get(index) {
-                    map.extend(incoming);
+            // remote_commitments.iter_mut().for_each(|(index, map)| {
+            //     if let Some(incoming) = commitments.get(index) {
+            //         map.extend(incoming);
+            //     }
+            // });
+            commitments.iter().for_each(|(index, coming)| {
+                match remote_commitments.get_mut(index) {
+                    Some(existing) => {
+                        existing.extend(coming);
+                    },
+                    None => {
+                        remote_commitments.insert(*index, coming.clone());
+                    },
                 }
             });
 
@@ -372,9 +387,19 @@ pub fn received_sign_message(msg: SignMesage) {
 
             // Merge all commitments by input index
             let mut remote_sig_shares = get_sign_remote_signature_shares(&task_id);
-            remote_sig_shares.iter_mut().for_each(|(index, map)| {
-                if let Some(incoming) = sig_shares.get(index) {
-                    map.extend(incoming);
+            // remote_sig_shares.iter_mut().for_each(|(index, map)| {
+            //     if let Some(incoming) = sig_shares.get(index) {
+            //         map.extend(incoming);
+            //     }
+            // });
+            sig_shares.iter().for_each(|(index, incoming)| {
+                match remote_sig_shares.get_mut(index) {
+                    Some(existing) => {
+                        existing.extend(incoming);
+                    },
+                    None => {
+                        remote_sig_shares.insert(*index, incoming.clone());
+                    }
                 }
             });
 
@@ -397,11 +422,11 @@ pub fn received_sign_message(msg: SignMesage) {
                     if let Some(key) = config::get_keypair_from_db(&input.address) {
                         let threshold = key.priv_key.min_signers().clone() as usize;
                         if shares.len() >= threshold {
-                            info!("Ready for aggregration: {}:{first} {:?}>={}", &task_id, shares.len(), threshold);
+                            info!("Ready for aggregration: {}:{first} {:?}>={}", &task_id[..6], shares.len(), threshold);
                             // task.round = Round::Aggregate;
                             // save_sign_task(&task);
                         } else {
-                            debug!("Received signature shares: {}:{first} {:?}/{}", &task_id, shares.len(), threshold);
+                            debug!("Received signature shares: {}:{first} {:?}/{}", &task_id[..6], shares.len(), threshold);
                         }
                     }
                 }
