@@ -108,9 +108,8 @@ impl SignTask {
 
     pub fn round(&self) -> Round {
         let x = (now() - self.start_time) / TASK_ROUND_WINDOW.as_secs();
-        let steps = 4u64;
-        // debug!("Current round {x} {}", x % steps);
-        match x % steps {
+        let windows = 4u64;
+        match x % windows {
             0 => Round::Round1,
             1 => Round::Round2,
             2 => Round::Aggregate,
