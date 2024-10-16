@@ -308,12 +308,26 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
         TSSBehaviourEvent::Gossip(gossipsub::Event::Message {message, .. }) => {
             // debug!("Received {:?}", message);
             if message.topic == SubscribeTopic::DKG.topic().hash() {
-                let response: DKGResponse = serde_json::from_slice(&message.data).expect("Failed to deserialize DKG message");
+                let response: DKGResponse = match serde_json::from_slice(&message.data) {
+                    Ok(resp) => resp,
+                    Err(_e) => {
+                        // debug!("Failed to deserialize the DKG message: {}", e);
+                        return;
+                    }
+                };
+
                 // dkg_event_handler(shuttler, swarm.behaviour_mut(), &propagation_source, dkg_message);
                 // debug!("Gossip Received DKG Response from {propagation_source}: {message_id} {:?}", response);
                 received_dkg_response(response, signer);
             } else if message.topic == SubscribeTopic::SIGNING.topic().hash() {
-                let msg: SignMesage = serde_json::from_slice(&message.data).expect("Failed to deserialize Sign message");
+                let msg: SignMesage = match serde_json::from_slice(&message.data) {
+                    Ok(msg) => msg,
+                    Err(_e) => {
+                        // debug!("Failed to deserialize the Sign message: {}", e);
+                        return;
+                    }
+                };
+
                 // debug!("Gossip Received {:?}", msg);
                 received_sign_message(msg);
             }

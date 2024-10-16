@@ -203,7 +203,10 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
 pub async fn process_tasks(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
 
     for item in DB_TASK.iter() {
-        let mut task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
+        let mut task: SignTask = match serde_json::from_slice(&item.unwrap().1) {
+            Ok(task) => task,
+            _ => continue
+        };
 
         info!("Process: {}, {:?}", &task.id[..6], task.round());
         match task.round() {
@@ -650,7 +653,9 @@ pub fn list_sign_tasks() -> Vec<SignTask> {
     let mut tasks = vec![];
     for task in DB_TASK.iter() {
         let (_, task) = task.unwrap();
-        tasks.push(serde_json::from_slice(&task).unwrap());
+        if let Ok(sign_task) = serde_json::from_slice(&task) {
+            tasks.push(sign_task);
+        }
     }
     tasks
 }
@@ -658,8 +663,10 @@ pub fn list_sign_tasks() -> Vec<SignTask> {
 pub fn get_sign_task(id: &str) -> Option<SignTask> {
     match DB_TASK.get(id) {
         Ok(Some(task)) => {
-            let task: SignTask = serde_json::from_slice(&task).unwrap();
-            Some(task)
+            match serde_json::from_slice(&task) {
+                Ok(task) => Some(task),
+                _ => None
+            }
         },
         _ => None,
     }
