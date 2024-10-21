@@ -2,7 +2,7 @@ use bitcoin::Network;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "shuttler", version = "0.2.1", author = "Side Labs")]
+#[command(name = "shuttler", version = "0.2.2", author = "Side Labs")]
 #[command(about = "A threshold vault signer of Side Bitcoin Bridge", long_about = None)]
 pub struct Cli {
     #[clap(long, default_value = ".tssigner")]
