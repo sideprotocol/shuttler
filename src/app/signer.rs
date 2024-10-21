@@ -16,13 +16,13 @@ use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
 use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
 use tokio::time::Instant;
 
-use crate::app::config::{self, TASK_ROUND_WINDOW};
+use crate::app::config::{self};
 use crate::app::config::Config;
 use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::from_base64;
 use crate::helper::gossip::{subscribe_gossip_topics, SubscribeTopic};
-use crate::helper::now;
+use crate::helper::{client_side, now};
 use crate::protocols::sign::{received_sign_message, SignMesage};
 use crate::tickers::tss::{time_aligned_tasks_executor, time_free_tasks_executor};
 use crate::protocols::dkg::{received_dkg_response, DKGResponse};
@@ -242,11 +242,12 @@ pub async fn run_signer_daemon(conf: Config) {
     dail_bootstrap_nodes(&mut swarm, &conf);
     subscribe_gossip_topics(&mut swarm);
 
-
-    let mut interval2 = tokio::time::interval(tokio::time::Duration::from_secs(27));
-    let start = Instant::now() + (TASK_ROUND_WINDOW - tokio::time::Duration::from_secs(now() % TASK_ROUND_WINDOW.as_secs()));
-    let mut interval = tokio::time::interval_at(start, TASK_ROUND_WINDOW);
-    // let mut interval = tokio::time::interval(TASK_ROUND_WINDOW);
+    let mut interval_free = tokio::time::interval(tokio::time::Duration::from_secs(30));
+    let host = signer.config().side_chain.grpc.as_str();
+    let seconds = client_side::get_cached_task_round_window(host).await;
+    let task_round_window = Duration::from_secs(seconds);
+    let start = Instant::now() + (task_round_window - tokio::time::Duration::from_secs(now() % seconds));
+    let mut interval_aligned = tokio::time::interval_at(start, task_round_window);
 
     loop {
         select! {
@@ -272,10 +273,10 @@ pub async fn run_signer_daemon(conf: Config) {
                     // debug!("Swarm event: {:?}", swarm_event);
                 },
             },
-            _ = interval2.tick() => {
+            _ = interval_free.tick() => {
                 time_free_tasks_executor(&signer).await;
             }
-            _ = interval.tick() => {
+            _ = interval_aligned.tick() => {
                 time_aligned_tasks_executor(&mut swarm, &signer).await;
             }
 
