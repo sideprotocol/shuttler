@@ -299,6 +299,8 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<TSSBehaviour>, conf: &Config) {
                 warn!("Failed to start KAD bootstrap: {:?}", e);
             }
         }
+    } else {
+        swarm.behaviour_mut().kad.set_mode(Some(libp2p::kad::Mode::Server));
     }
 }
 
