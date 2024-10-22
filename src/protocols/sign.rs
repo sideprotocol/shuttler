@@ -15,10 +15,9 @@ use tracing::{debug, error, info};
 use frost::{Identifier, round1, round2}; 
 use frost_secp256k1_tr::{self as frost, round1::{SigningCommitments, SigningNonces}};
 use crate::{
-    app::{config::{self, get_database_with_name, TASK_ROUND_WINDOW}, 
-    signer::Signer}, 
+    app::{config::{self, get_database_with_name}, signer::Signer}, 
     helper::{
-        client_side::send_cosmos_transaction, 
+        client_side::{self, send_cosmos_transaction}, 
         encoding::{self, from_base64, hash, to_base64}, 
         gossip::publish_signing_package, now,
     }};
@@ -106,8 +105,8 @@ impl SignTask {
         self.fingerprint = "".to_string();
     }
 
-    pub fn round(&self) -> Round {
-        let x = (now() - self.start_time) / TASK_ROUND_WINDOW.as_secs();
+    pub fn round(&self, seconds: u64) -> Round {
+        let x = (now() - self.start_time) / seconds;
         let windows = 4u64;
         match x % windows {
             0 => Round::Round1,
@@ -202,11 +201,17 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
 
 pub async fn process_tasks(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
 
-    for item in DB_TASK.iter() {
-        let mut task: SignTask = serde_json::from_slice(&item.unwrap().1).unwrap();
+    let host = signer.config().side_chain.grpc.as_str();
+    let seconds = client_side::get_cached_task_round_window(host).await;
 
-        info!("Process: {}, {:?}", &task.id[..6], task.round());
-        match task.round() {
+    for item in DB_TASK.iter() {
+        let mut task: SignTask = match serde_json::from_slice(&item.unwrap().1) {
+            Ok(task) => task,
+            _ => continue
+        };
+
+        info!("Process: {}, {:?}", &task.id[..6], task.round(seconds));
+        match task.round(seconds) {
             Round::Round1 => {
                 generate_commitments(swarm, signer, &mut task);
             },
@@ -650,7 +655,9 @@ pub fn list_sign_tasks() -> Vec<SignTask> {
     let mut tasks = vec![];
     for task in DB_TASK.iter() {
         let (_, task) = task.unwrap();
-        tasks.push(serde_json::from_slice(&task).unwrap());
+        if let Ok(sign_task) = serde_json::from_slice(&task) {
+            tasks.push(sign_task);
+        }
     }
     tasks
 }
@@ -658,8 +665,10 @@ pub fn list_sign_tasks() -> Vec<SignTask> {
 pub fn get_sign_task(id: &str) -> Option<SignTask> {
     match DB_TASK.get(id) {
         Ok(Some(task)) => {
-            let task: SignTask = serde_json::from_slice(&task).unwrap();
-            Some(task)
+            match serde_json::from_slice(&task) {
+                Ok(task) => Some(task),
+                _ => None
+            }
         },
         _ => None,
     }

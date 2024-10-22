@@ -29,6 +29,7 @@ pub async fn time_aligned_tasks_executor(
     signer: &Signer,
 ) {
 
+    debug!("Start time aligned task!");
     if signer.config().get_validator_key().is_none() {
         return;
     }

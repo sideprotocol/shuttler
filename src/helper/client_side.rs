@@ -1,4 +1,3 @@
-
 use bitcoin::{ consensus::Encodable, key::Secp256k1, secp256k1::Message, sign_message::BITCOIN_SIGNED_MSG_PREFIX, PrivateKey};
 use bitcoin_hashes::{sha256d, Hash, HashEngine};
 use cosmrs::{ crypto::secp256k1::SigningKey, tx::{self, Fee, ModeInfo, Raw, SignDoc, SignerInfo, SignerPublicKey}, Coin};
@@ -20,10 +19,17 @@ use cosmos_sdk_proto::side::btcbridge::{
 use prost_types::Any;
 use lazy_static::lazy_static;
 
-use crate::app::config;
+use crate::app::config::{self, get_database_with_name};
+
+const DB_KEY_TASK_ROUND_WINDOW_LAST_UPDATE: &str = "task_round_window_last_update";
+const DB_KEY_TASK_ROUND_WINDOW: &str = "task_round_window";
 
 lazy_static! {
     static ref lock: Mutex<()> = Mutex::new(());
+    static ref DB_SIDE_PARAMS: sled::Db = {
+        let path = get_database_with_name("side-params");
+        sled::open(path).unwrap()
+    };
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -86,6 +92,44 @@ pub async fn get_confirmations_on_side(host: &str) -> u64 {
     };
     let x = btc_client.query_params(QueryParamsRequest{}).await.unwrap().into_inner();
     x.params.unwrap().confirmations as u64
+}
+
+pub async fn get_task_round_window_on_side(host: &str) -> u64 {
+    let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(_) => {
+            return 300 as u64;
+        }
+    };
+    let x = btc_client.query_params(QueryParamsRequest{}).await.unwrap().into_inner();
+    match x.params.unwrap().tss_params.unwrap().signing_epoch_duration {
+        Some(duration) => {
+            return duration.seconds as u64;
+        }
+        None => {
+            return 300;
+        }
+    }
+}
+
+pub async fn get_cached_task_round_window(host: &str) -> u64 {
+    if let Ok(Some(last_update)) = DB_SIDE_PARAMS.get(DB_KEY_TASK_ROUND_WINDOW_LAST_UPDATE) {
+        let last_update: u64 = serde_json::from_slice(&last_update).unwrap_or(0);
+        let now = chrono::Utc::now().timestamp() as u64;
+        if now - last_update < 60 * 60 * 1 { // 1 hours
+            if let Ok(Some(seconds)) =  DB_SIDE_PARAMS.get(DB_KEY_TASK_ROUND_WINDOW) {
+                return serde_json::from_slice(&seconds).unwrap_or(300);
+            };
+        }
+    }
+    let task_round_window = get_task_round_window_on_side(host).await;
+    let _ = DB_SIDE_PARAMS.insert(DB_KEY_TASK_ROUND_WINDOW, 
+        serde_json::to_vec(&task_round_window).unwrap()
+    );
+    let _ = DB_SIDE_PARAMS.insert(DB_KEY_TASK_ROUND_WINDOW_LAST_UPDATE, 
+        serde_json::to_vec(&chrono::Utc::now().timestamp()).unwrap()
+    );
+    return task_round_window;
 }
 
 pub async fn get_signing_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {
