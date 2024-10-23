@@ -230,7 +230,7 @@ pub fn received_dkg_response(response: DKGResponse, signer: &Signer) {
     } else if task.round == Round::Round2 {
         received_round2_packages(&mut task, response.round2_packages, signer)
     } else {
-        debug!("DKG has already completed on my side: {}", task_id);
+        // debug!("DKG has already completed on my side: {}", task_id);
     }
 }
 
@@ -256,7 +256,7 @@ pub fn received_round1_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
     local.extend(packets);
 
     let k = local.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
-    debug!("Received round1 packets: {} {:?}", task.id, k);
+    // debug!("Received round1 packets: {} {:?}", task.id, k);
 
     if DB.insert(format!("dkg-{}-round1", task.id), serde_json::to_vec(&local).unwrap()).is_err() {
         error!("Failed to store DKG Round 1 packets: {} ", task.id);
