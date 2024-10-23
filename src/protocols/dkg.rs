@@ -208,7 +208,7 @@ pub fn prepare_response_for_task(task_id: String) -> DKGResponse {
             }
         },
         _ => {
-            debug!("No DKG Round 2 packets found: {task_id}");
+            // debug!("No DKG Round 2 packets found: {task_id}");
             BTreeMap::new()
         },
     };
@@ -220,7 +220,7 @@ pub fn received_dkg_response(response: DKGResponse, signer: &Signer) {
     let mut task = match get_task(&task_id) {
         Some(task) => task,
         None => {
-            error!("No task found for DKG: {}", task_id);
+            // error!("No task found for DKG: {}", task_id);
             return;
         }
     };
