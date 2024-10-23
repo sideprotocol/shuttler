@@ -279,9 +279,16 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
 
 pub fn received_sign_message(msg: SignMesage) {
 
+    // let s_keys = signature_shares.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
+    // let c_keys = signing_commitments.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
+    let first = 0;
+
     let task_id = msg.task_id.clone();
     match msg.package {
         SignPackage::Round1(commitments) => {
+            let c_keys = commitments.get(&first).unwrap().keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
+            debug!("Received round1 message: {:?}", c_keys);
+
             // merge all commitments by input index
             let mut remote_commitments = get_sign_remote_commitments(&task_id);
             // remote_commitments.iter_mut().for_each(|(index, map)| {
@@ -334,6 +341,8 @@ pub fn received_sign_message(msg: SignMesage) {
             
         },
         SignPackage::Round2(sig_shares) => {
+            let c_keys = sig_shares.get(&first).unwrap().keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
+            debug!("Received round2 message: {:?}", c_keys);
 
             // Merge all commitments by input index
             let mut remote_sig_shares = get_sign_remote_signature_shares(&task_id);
