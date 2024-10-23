@@ -256,7 +256,7 @@ pub async fn run_signer_daemon(conf: Config) {
                     event_handler(evt, &mut swarm, &signer).await;
                 },
                 SwarmEvent::NewListenAddr { address, .. } => {
-                    info!("Local node is listening on {address}/p2p/{}", swarm.local_peer_id());
+                    // info!("Local node is listening on {address}/p2p/{}", swarm.local_peer_id());
                 },
                 SwarmEvent::ConnectionEstablished { peer_id, num_established, endpoint, ..} => {
                     swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
@@ -264,10 +264,10 @@ pub async fn run_signer_daemon(conf: Config) {
                     if connected.len() > 0 {
                         swarm.behaviour_mut().identify.push(connected);
                     }
-                    info!("Connected to {peer_id}, Swarm Connection Established, {num_established} {:?} ", endpoint);                  
+                    // info!("Connected to {peer_id}, Swarm Connection Established, {num_established} {:?} ", endpoint);                  
                 },
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
-                    info!("Connection {peer_id} closed.{:?}", cause);
+                    // info!("Connection {peer_id} closed.{:?}", cause);
                 },
                 _ => {
                     // debug!("Swarm event: {:?}", swarm_event);
@@ -289,7 +289,7 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<TSSBehaviour>, conf: &Config) {
         let address = Multiaddr::from_str(addr_text).expect("invalid bootstrap node address");
         let peer = PeerId::from_str(addr_text.split("/").last().unwrap()).expect("invalid peer id");
         swarm.behaviour_mut().kad.add_address(&peer, address);
-        info!("Adding bootstrap node: {:?}", addr_text);
+        // info!("Adding bootstrap node: {:?}", addr_text);
     }
     if conf.bootstrap_nodes.len() > 0 {
         match swarm.behaviour_mut().kad.bootstrap() {
@@ -340,24 +340,24 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
             // info!(" @@(Received) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
             info.listen_addrs.iter().for_each(|addr| {
                 if !addr.to_string().starts_with("/ip4/127.0.0.1") {
-                    debug!("Discovered new address: {addr}/p2p/{peer_id} ");
+                    // debug!("Discovered new address: {addr}/p2p/{peer_id} ");
                     swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
                 }
             });
         }
         TSSBehaviourEvent::Kad(libp2p::kad::Event::RoutablePeer { peer, address }) => {
-            info!("@@@ Kad @@@ discovered a new routable peer {peer} - {:?}", address);
+            // info!("@@@ Kad @@@ discovered a new routable peer {peer} - {:?}", address);
             swarm.behaviour_mut().kad.add_address(&peer, address);
         } 
         TSSBehaviourEvent::Kad(libp2p::kad::Event::RoutingUpdated { peer, is_new_peer, addresses, .. }) => {
-            debug!("KAD Routing updated for {peer} {is_new_peer}: {:?}", addresses);
+            // debug!("KAD Routing updated for {peer} {is_new_peer}: {:?}", addresses);
             if is_new_peer {
                 swarm.behaviour_mut().gossip.add_explicit_peer(&peer);
             }
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, multiaddr) in list {
-                info!("mDNS discovered a new peer: {peer_id}");
+                // info!("mDNS discovered a new peer: {peer_id}");
                 swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
                 if swarm.is_connected(&peer_id) {
                     return;
@@ -368,17 +368,17 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                     .build();
                 match swarm.dial(opt) {
                     Ok(_) => {
-                        info!("Connected to {peer_id}, {multiaddr}");
+                        // info!("Connected to {peer_id}, {multiaddr}");
                     }
                     Err(e) => {
-                        error!("Unable to connect to {peer_id}: {e}");
+                        // error!("Unable to connect to {peer_id}: {e}");
                     }
                 };  
             }
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Expired(list)) => {
             for (peer_id, _multiaddr) in list {
-                info!("mDNS peer has expired: {peer_id}");
+                // info!("mDNS peer has expired: {peer_id}");
             }
         }
         _ => {}

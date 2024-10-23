@@ -18,10 +18,10 @@ pub async fn time_free_tasks_executor(
     }
 
     // 1. fetch dkg request
-    fetch_dkg_requests(signer).await;
+    // fetch_dkg_requests(signer).await;
     fetch_signing_requests(signer).await;
     // broadcast_sign_packages(swarm);
-    submit_dkg_address(signer).await;
+    // submit_dkg_address(signer).await;
 }
 
 pub async fn time_aligned_tasks_executor(
@@ -37,7 +37,7 @@ pub async fn time_aligned_tasks_executor(
     debug!("Connected peers: {:?}", swarm.connected_peers().collect::<Vec<_>>());
 
     // 1. collect dkg packages
-    broadcast_dkg_packages(swarm);
+    // broadcast_dkg_packages(swarm);
     // 2. collect signing requests tss packages
     process_tasks(swarm, signer).await;
 
