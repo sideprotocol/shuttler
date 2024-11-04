@@ -323,6 +323,9 @@ pub fn received_sign_message(msg: SignMesage) {
                     // Commitments are accepted only when a fingerprint does not exist. if it does, the task moves to the next round.
                     if task.fingerprint.len() == 0 {
                     }
+
+                    // remove unkwown commitments
+                    sanitize_commitments(&task, &mut remote_commitments);
                 },
                 None => {
                     debug!("Not found task {} on my sided", &task_id[..6]);
@@ -348,6 +351,7 @@ pub fn received_sign_message(msg: SignMesage) {
                 }
             });
 
+            sanitize_signature_shares(&task_id, &mut remote_sig_shares);
             save_sign_remote_signature_shares(&task_id, &remote_sig_shares);
 
             let first = 0;
@@ -377,6 +381,44 @@ pub fn received_sign_message(msg: SignMesage) {
         }
     }
 
+}
+
+pub fn sanitize_commitments(task: &SignTask, remote_commitments: &mut BTreeMap<Index, BTreeMap<Identifier, round1::SigningCommitments>>) {
+    let first = 0;
+    if let Some(input) = task.inputs.get(&first) {
+        if let Some(key) = config::get_keypair_from_db(&input.address) {
+            let keys = key.pub_key.verifying_shares();
+
+            remote_commitments.iter_mut().for_each(|(_, commitments)| {
+                commitments.clone().iter_mut().for_each(|(identifier, _)| {
+                    if keys.get(identifier).is_none() {
+                        commitments.remove(identifier);
+                        debug!("remove unknown commitment from {:?}", identifier);
+                    }
+                });
+            });
+        }
+    }
+}
+
+pub fn sanitize_signature_shares(task_id: &str, remote_sig_shares: &mut BTreeMap<Index, BTreeMap<Identifier, round2::SignatureShare>>) {
+    if let Some(task) = get_sign_task(&task_id) {
+        let first = 0;
+        if let Some(input) = task.inputs.get(&first) {
+            if let Some(key) = config::get_keypair_from_db(&input.address) {
+                let keys = key.pub_key.verifying_shares();
+    
+                remote_sig_shares.iter_mut().for_each(|(_, sig_shares)| {
+                    sig_shares.clone().iter_mut().for_each(|(identifier, _)| {
+                        if keys.get(identifier).is_none() {
+                            sig_shares.remove(identifier);
+                            debug!("remove unknown signature shares from {:?}", identifier);
+                        }
+                    });
+                });
+            }
+        }
+    }
 }
 
 pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut SignTask, identifier: &Identifier) {
