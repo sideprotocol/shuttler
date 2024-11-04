@@ -333,9 +333,9 @@ pub fn received_sign_message(msg: SignMesage) {
                 }
             };
 
-            let first = 0;
-            let c_keys = remote_commitments.get(&first).unwrap().keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
-            debug!("Received round1 message: {:?} {:?}", c_keys.len(), c_keys);
+            // let first = 0;
+            // let c_keys = remote_commitments.get(&first).unwrap().keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
+            // debug!("Received round1 message: {:?} {:?}", c_keys.len(), c_keys);
             save_sign_remote_commitments(&task_id, &remote_commitments);
             
         },
@@ -355,9 +355,9 @@ pub fn received_sign_message(msg: SignMesage) {
             });
 
             sanitize_signature_shares(&task_id, &mut remote_sig_shares);
-            let first = 0;
-            let c_keys = remote_sig_shares.get(&first).unwrap().keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
-            debug!("Received round2 message: {:?} {:?}", c_keys.len(), c_keys);
+            // let first = 0;
+            // let c_keys = remote_sig_shares.get(&first).unwrap().keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
+            // debug!("Received round2 message: {:?} {:?}", c_keys.len(), c_keys);
             save_sign_remote_signature_shares(&task_id, &remote_sig_shares);
 
             let first = 0;
