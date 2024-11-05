@@ -37,7 +37,7 @@ pub async fn time_aligned_tasks_executor(
     debug!("Connected peers: {:?}", swarm.connected_peers().collect::<Vec<_>>());
 
     // 1. collect dkg packages
-    broadcast_dkg_packages(swarm);
+    broadcast_dkg_packages(swarm, signer);
     // 2. collect signing requests tss packages
     process_tasks(swarm, signer).await;
 

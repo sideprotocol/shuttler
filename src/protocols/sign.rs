@@ -216,7 +216,7 @@ pub async fn process_tasks(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
                 generate_commitments(swarm, signer, &mut task);
             },
             Round::Round2 => {
-                generate_signature_shares(swarm, &mut task, signer.identifier());
+                generate_signature_shares(swarm, signer, &mut task, signer.identifier());
             },
             Round::Aggregate => {
                 aggregate_signature_shares(&mut task);
@@ -270,7 +270,7 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
     save_sign_remote_commitments(&task.id, &stored_commitments);
 
     // publish remote variable: commitment
-    publish_signing_package(swarm, &SignMesage {
+    publish_signing_package(swarm, signer, &SignMesage {
         task_id: task.id.clone(),
         package: SignPackage::Round1(broadcast_package),
         nonce: now(),
@@ -426,7 +426,7 @@ pub fn sanitize_signature_shares(task_id: &str, remote_sig_shares: &mut BTreeMap
     }
 }
 
-pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut SignTask, identifier: &Identifier) {
+pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: &mut SignTask, identifier: &Identifier) {
 
     let stored_nonces = get_sign_local_nonces(&task.id);
     if stored_nonces.len() == 0 {
@@ -522,7 +522,7 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, task: &mut Sig
 
     debug!("publish signature share: {:?}", msg);
 
-    publish_signing_package(swarm, &msg);
+    publish_signing_package(swarm, signer, &msg);
     save_sign_remote_signature_shares(&task.id, &received_sig_shares);
     // save_sign_task(task)
 

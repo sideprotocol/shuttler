@@ -168,12 +168,12 @@ pub fn generate_round2_packages(identifier: &Identifier, enc_key: &SecretKey, ta
     Ok(())
 }
 
-pub fn broadcast_dkg_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>) {
+pub fn broadcast_dkg_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signer: &Signer) {
     let tasks = list_tasks();
     for t in tasks.iter() {
         if t.timestamp as u64 >= now() {
             // publish its packages to other peers
-            publish_dkg_packages(swarm, &t);
+            publish_dkg_packages(swarm, signer, &t);
         } else {
             // remove the task
             remove_task(t.id.as_str());
