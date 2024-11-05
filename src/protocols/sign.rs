@@ -282,13 +282,7 @@ pub fn received_sign_message(msg: SignMesage) {
     let task_id = msg.task_id.clone();
     match msg.package {
         SignPackage::Round1(commitments) => {
-            // merge all commitments by input index
             let mut remote_commitments = get_sign_remote_commitments(&task_id);
-            // remote_commitments.iter_mut().for_each(|(index, map)| {
-            //     if let Some(incoming) = commitments.get(index) {
-            //         map.extend(incoming);
-            //     }
-            // });
             commitments.iter().for_each(|(index, coming)| {
                 match remote_commitments.get_mut(index) {
                     Some(existing) => {
@@ -309,10 +303,11 @@ pub fn received_sign_message(msg: SignMesage) {
                         if let Some(input) = task.inputs.get(&first) {
                             if let Some(key) = config::get_keypair_from_db(&input.address) {
                                 let threshold = key.priv_key.min_signers().clone() as usize;
+
+                                let c_keys = commitments.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
+                                debug!("Received round1 message: {:?} {:?}", c_keys.len(), c_keys);
                                 if commitments.len() >= threshold {
                                     info!("{}:{first} is ready for Round2: {}>={}", &task_id[..6], commitments.len(), threshold);
-                                    // task.round = Round::Round2;
-                                    // save_sign_task(&task);
                                 } else {
                                     debug!("{}:{first} commitment lens: {}/{}", &task_id[..6], commitments.len(), threshold);
                                 }
