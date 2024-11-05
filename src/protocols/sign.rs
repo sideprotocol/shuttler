@@ -15,7 +15,7 @@ use tracing::{debug, error, info};
 use frost::{Identifier, round1, round2}; 
 use frost_secp256k1_tr::{self as frost, round1::{SigningCommitments, SigningNonces}};
 use crate::{
-    app::{config::{self, get_database_with_name}, signer::Signer}, 
+    app::{config::{self, get_database_with_name, TASK_ROUND_WINDOW}, signer::Signer}, 
     helper::{
         client_side::{self, send_cosmos_transaction}, 
         encoding::{self, from_base64, hash, to_base64}, 
@@ -106,7 +106,7 @@ impl SignTask {
     }
 
     pub fn round(&self) -> Round {
-        let x = (now() - self.start_time) / 300;
+        let x = (now() - self.start_time) / TASK_ROUND_WINDOW.as_secs();
         let windows = 4u64;
         match x % windows {
             0 => Round::Round1,
@@ -386,7 +386,7 @@ pub fn received_sign_message(msg: SignMesage) {
 pub fn sanitize<T>(address: &str, storages: &mut BTreeMap<Identifier, T>) {
     if let Some(key) = config::get_keypair_from_db(address) {
         let keys = key.pub_key.verifying_shares();
-        storages.retain(|k, _| { !keys.contains_key(k)});
+        storages.retain(|k, _| { keys.contains_key(k)});
     }
 }
 

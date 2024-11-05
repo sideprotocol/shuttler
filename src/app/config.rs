@@ -6,12 +6,13 @@ use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
 use serde::{Deserialize, Serialize};
 use sled::IVec;
 use tracing::error;
-use std::{fs, path::PathBuf, str::FromStr, sync::Mutex};
+use std::{fs, path::PathBuf, str::FromStr, sync::Mutex, time::Duration};
 
 use crate::helper::{cipher::random_bytes, encoding::to_base64};
 
 const CONFIG_FILE: &str = "config.toml";
 
+pub const TASK_ROUND_WINDOW: Duration = Duration::from_secs(300);
 use lazy_static::lazy_static;
 
 lazy_static! {
