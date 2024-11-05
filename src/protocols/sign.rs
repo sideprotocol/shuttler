@@ -105,8 +105,8 @@ impl SignTask {
         self.fingerprint = "".to_string();
     }
 
-    pub fn round(&self, seconds: u64) -> Round {
-        let x = (now() - self.start_time) / seconds;
+    pub fn round(&self) -> Round {
+        let x = (now() - self.start_time) / 300;
         let windows = 4u64;
         match x % windows {
             0 => Round::Round1,
@@ -197,12 +197,10 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
     let task = SignTask::new(task_id, request.psbt, inputs, request.creation_time);
 
     save_sign_task(&task);
+
 }
 
 pub async fn process_tasks(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
-
-    let host = signer.config().side_chain.grpc.as_str();
-    let seconds = client_side::get_cached_task_round_window(host).await;
 
     for item in DB_TASK.iter() {
         let mut task: SignTask = match serde_json::from_slice(&item.unwrap().1) {
@@ -210,8 +208,7 @@ pub async fn process_tasks(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
             _ => continue
         };
 
-        info!("Process: {}, {:?}", &task.id[..6], task.round(seconds));
-        match task.round(seconds) {
+        match task.round() {
             Round::Round1 => {
                 generate_commitments(swarm, signer, &mut task);
             },
@@ -253,7 +250,7 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
     let mut broadcast_package = BTreeMap::new();
 
     task.inputs.iter().for_each(|(index, input)| {
-        if let Some((nonce, commitment)) = generate_nonce_and_commitment_by_address(&input.address) {
+        if let Some((nonce, commitment)) = generate_nonce_and_commitment_by_address(&input.address, signer.identifier()) {
             nonces.insert(*index, nonce);
             let mut my_commits: BTreeMap<frost_core::Identifier<frost_secp256k1_tr::Secp256K1Sha256>, frost_core::round1::SigningCommitments<frost_secp256k1_tr::Secp256K1Sha256>> = BTreeMap::new();
             my_commits.insert(signer.identifier().clone(), commitment);
@@ -320,8 +317,6 @@ pub fn received_sign_message(msg: SignMesage) {
                     if task.fingerprint.len() == 0 {
                     }
 
-                    // remove unkwown commitments
-                    sanitize_commitments(&task, &mut remote_commitments);
                 },
                 None => {
                     debug!("Not found task {} on my sided", &task_id[..6]);
@@ -353,7 +348,7 @@ pub fn received_sign_message(msg: SignMesage) {
                 }
             });
 
-            sanitize_signature_shares(&task_id, &mut remote_sig_shares);
+            // sanitize(&task, &mut remote_sig_shares);
             // let first = 0;
             // let c_keys = remote_sig_shares.get(&first).unwrap().keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
             // debug!("Received round2 message: {:?} {:?}", c_keys.len(), c_keys);
@@ -388,41 +383,10 @@ pub fn received_sign_message(msg: SignMesage) {
 
 }
 
-pub fn sanitize_commitments(task: &SignTask, remote_commitments: &mut BTreeMap<Index, BTreeMap<Identifier, round1::SigningCommitments>>) {
-    let first = 0;
-    if let Some(input) = task.inputs.get(&first) {
-        if let Some(key) = config::get_keypair_from_db(&input.address) {
-            let keys = key.pub_key.verifying_shares();
-
-            remote_commitments.iter_mut().for_each(|(_, commitments)| {
-                commitments.clone().iter_mut().for_each(|(identifier, _)| {
-                    if keys.get(identifier).is_none() {
-                        commitments.remove(identifier);
-                        debug!("remove unknown commitment from {:?}", identifier);
-                    }
-                });
-            });
-        }
-    }
-}
-
-pub fn sanitize_signature_shares(task_id: &str, remote_sig_shares: &mut BTreeMap<Index, BTreeMap<Identifier, round2::SignatureShare>>) {
-    if let Some(task) = get_sign_task(&task_id) {
-        let first = 0;
-        if let Some(input) = task.inputs.get(&first) {
-            if let Some(key) = config::get_keypair_from_db(&input.address) {
-                let keys = key.pub_key.verifying_shares();
-    
-                remote_sig_shares.iter_mut().for_each(|(_, sig_shares)| {
-                    sig_shares.clone().iter_mut().for_each(|(identifier, _)| {
-                        if keys.get(identifier).is_none() {
-                            sig_shares.remove(identifier);
-                            debug!("remove unknown signature shares from {:?}", identifier);
-                        }
-                    });
-                });
-            }
-        }
+pub fn sanitize<T>(address: &str, storages: &mut BTreeMap<Identifier, T>) {
+    if let Some(key) = config::get_keypair_from_db(address) {
+        let keys = key.pub_key.verifying_shares();
+        storages.retain(|k, _| { !keys.contains_key(k)});
     }
 }
 
@@ -442,10 +406,12 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
         match config::get_keypair_from_db(&input.address) {
             Some(keypair) => {
 
-                let signing_commitments = match stored_remote_commitments.get(index) {
+                let mut signing_commitments = match stored_remote_commitments.get(index) {
                     Some(e) => e.clone(),
                     None => return
                 };
+
+                sanitize(&input.address, &mut signing_commitments);
 
                 if signing_commitments.len() < keypair.priv_key.min_signers().clone() as usize {
                     return
@@ -549,15 +515,17 @@ pub fn aggregate_signature_shares(task: &mut SignTask) -> Option<Psbt> {
 
     for (index, input) in task.inputs.iter() {
 
-        let signing_commitments = match stored_remote_commitments.get(index) {
+        let mut signing_commitments = match stored_remote_commitments.get(index) {
             Some(e) => e.clone(),
             None => return None
         };
+        sanitize(&input.address, &mut signing_commitments);
 
-        let signature_shares = match stored_remote_signature_shares.get(index) {
+        let mut signature_shares = match stored_remote_signature_shares.get(index) {
             Some(e) => e.clone(),
             None => return None
         };
+        sanitize(&input.address, &mut signature_shares);
 
         if signing_commitments.len() != signature_shares.len() {
             let s_keys = signature_shares.keys();
@@ -685,17 +653,14 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
     // send message to the network
 }
 
-fn generate_nonce_and_commitment_by_address(address: &str) -> Option<(SigningNonces, SigningCommitments)> {
-    let sign_key = match config::get_keypair_from_db(address) {
-        Some(key) => key.priv_key,
-        None => {
-            error!("Failed to get signing key for address: {}", address);
-            return None;
+fn generate_nonce_and_commitment_by_address(address: &str, identifier: &Identifier) -> Option<(SigningNonces, SigningCommitments)> {
+    if let Some(key) = config::get_keypair_from_db(address) {
+        if key.pub_key.verifying_shares().contains_key(identifier) {
+            let mut rng = thread_rng();
+            return Some(frost::round1::commit(key.priv_key.signing_share(), &mut rng));
         }
     };
-
-    let mut rng = thread_rng();
-    Some(frost::round1::commit(sign_key.signing_share(), &mut rng))
+    None
 }
 
 pub fn list_sign_tasks() -> Vec<SignTask> {

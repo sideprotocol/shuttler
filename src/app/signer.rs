@@ -2,7 +2,6 @@
 use bitcoincore_rpc::{Auth, Client};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_client::QueryClient as AuthQueryClient;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountRequest};
-use cosmos_sdk_proto::tendermint::crypto::public_key;
 use frost_core::Field;
 use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
 use frost_secp256k1_tr::{self as frost};
@@ -16,7 +15,6 @@ use libp2p::swarm::dial_opts::PeerCondition;
 use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
 use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
 use tokio::time::Instant;
-use tracing_subscriber::field::debug;
 
 use crate::app::config::{self};
 use crate::app::config::Config;
