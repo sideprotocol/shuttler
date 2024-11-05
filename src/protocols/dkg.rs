@@ -3,7 +3,7 @@
 use core::fmt;
 use std::{collections::BTreeMap, fmt::Debug};
 use cosmos_sdk_proto::side::btcbridge::DkgRequest;
-use ed25519_compact::{x25519, SecretKey};
+use ed25519_compact::{x25519, PublicKey, SecretKey, Signature};
 use rand::thread_rng;
 use tracing::{debug, error, info};
 use serde::{Deserialize, Serialize};
@@ -72,11 +72,17 @@ pub struct DKGRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct  DKGResponse {
+    pub payload: DKGPayload,
+    pub nonce: u64,
+    pub sender: Identifier,
+    pub signature: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DKGPayload {
     pub task_id: String,
     pub round1_packages: BTreeMap<Identifier, keys::dkg::round1::Package>,
-    // <sender, <receiver, package>>
     pub round2_packages: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>,
-    pub nonce: u64,
 }
 
 pub fn has_task_preceeded(task_id: &str) -> bool {
@@ -181,7 +187,7 @@ pub fn broadcast_dkg_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signer: &
     }
 }
 
-pub fn prepare_response_for_task(task_id: String) -> DKGResponse {
+pub fn prepare_response_for_task(signer: &Signer, task_id: String) -> DKGResponse {
     let round1_packages = match DB.get(format!("dkg-{}-round1", task_id)) {
         Ok(Some(packets)) => {
             match serde_json::from_slice(&packets) {
@@ -212,11 +218,38 @@ pub fn prepare_response_for_task(task_id: String) -> DKGResponse {
             BTreeMap::new()
         },
     };
-    DKGResponse{ task_id, round1_packages, round2_packages, nonce: now() }
+
+    
+    let payload = DKGPayload {
+        task_id,
+        round1_packages,
+        round2_packages,
+    };
+    
+    let raw = serde_json::to_vec(&payload).unwrap();
+    let signature = signer.identity_key.sign(raw, None).to_vec();
+    
+    DKGResponse{ payload, nonce: now(), sender: signer.identifier().clone(), signature }
 }
 
 pub fn received_dkg_response(response: DKGResponse, signer: &Signer) {
-    let task_id = response.task_id.clone();
+
+    match PublicKey::from_slice(&response.sender.serialize()) {
+        Ok(public_key) => {
+            let raw = serde_json::to_vec(&response.payload).unwrap();
+            let sig = Signature::from_slice(&response.signature).unwrap();
+            if public_key.verify(&raw, &sig).is_err() {
+                debug!("Verify signature failed");
+                return;
+            }
+        }
+        Err(_) => {
+            debug!("Invalid public key");
+            return;
+        }
+    }
+
+    let task_id = response.payload.task_id.clone();
     let mut task = match get_task(&task_id) {
         Some(task) => task,
         None => {
@@ -225,10 +258,16 @@ pub fn received_dkg_response(response: DKGResponse, signer: &Signer) {
         }
     };
 
+    let addr = sha256::digest(&response.sender.serialize())[0..40].to_uppercase();
+    if !task.participants.contains(&addr) {
+        debug!("Invalid DKG participant {:?}, {:?}", response.sender, addr);
+        return;
+    }
+
     if task.round == Round::Round1 {
-        received_round1_packages(&mut task, response.round1_packages, signer.identifier(), &signer.identity_key)
+        received_round1_packages(&mut task, response.payload.round1_packages, signer.identifier(), &signer.identity_key)
     } else if task.round == Round::Round2 {
-        received_round2_packages(&mut task, response.round2_packages, signer)
+        received_round2_packages(&mut task, response.payload.round2_packages, signer)
     } else {
         debug!("DKG has already completed on my side: {}", task_id);
     }

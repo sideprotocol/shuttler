@@ -37,7 +37,7 @@ use tokio::select;
 
 use tracing::{debug, error, info, warn};
 
-use ed25519_compact::{PublicKey, SecretKey, Signature};
+use ed25519_compact::SecretKey;
 
 use lazy_static::lazy_static;
 
@@ -307,55 +307,8 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
     match event {
         TSSBehaviourEvent::Gossip(gossipsub::Event::Message {message, .. }) => {
             // debug!("Received {:?}", message);
-
-            let len = message.data.len();
-            if len <= 64 {
-                debug!("Message length error");
-                return;
-            }
-            let msg_payload = message.data[64..len].to_vec();
-            let signature = match Signature::from_slice(&message.data[0..64]) {
-                Ok(sig) => sig,
-                Err(_) => {
-                    debug!("Cannot find signature");
-                    return;
-                }
-            };
-            let msg_hash = match hex::decode(sha256::digest(&msg_payload)) {
-                Ok(m) => m,
-                Err(_) => {
-                    debug!("Cannot find message");
-                    return;
-                }
-            };
-            let key = match message.source {
-                Some(src) => src.to_bytes(),
-                None => {
-                    debug!("Cannot find public key");
-                    return;
-                }
-            };
-
-            match PublicKey::from_slice(&key) {
-                Ok(public_key) => {
-                    match public_key.verify(&msg_hash, &signature) {
-                        Ok(_) => {
-                            // todo
-                        }
-                        Err(_) => {
-                            debug!("Verify signature failed");
-                            return;
-                        }
-                    }
-                }
-                Err(_) => {
-                    debug!("Invalid public key");
-                    return;
-                }
-            }
-
             if message.topic == SubscribeTopic::DKG.topic().hash() {
-                let response: DKGResponse = match serde_json::from_slice(&msg_payload) {
+                let response: DKGResponse = match serde_json::from_slice(&message.data) {
                     Ok(resp) => resp,
                     Err(_e) => {
                         // debug!("Failed to deserialize the DKG message: {}", e);
@@ -367,7 +320,7 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 // debug!("Gossip Received DKG Response from {propagation_source}: {message_id} {:?}", response);
                 received_dkg_response(response, signer);
             } else if message.topic == SubscribeTopic::SIGNING.topic().hash() {
-                let msg: SignMesage = match serde_json::from_slice(&msg_payload) {
+                let msg: SignMesage = match serde_json::from_slice(&message.data) {
                     Ok(msg) => msg,
                     Err(_e) => {
                         // debug!("Failed to deserialize the Sign message: {}", e);

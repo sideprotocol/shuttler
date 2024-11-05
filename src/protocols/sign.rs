@@ -6,6 +6,7 @@ use bitcoincore_rpc::RpcApi;
 use cosmos_sdk_proto::side::btcbridge::{MsgSubmitSignatures, SigningRequest};
 use cosmrs::Any;
 
+use ed25519_compact::{PublicKey, Signature};
 use libp2p::Swarm;
 use prost_types::Timestamp;
 use rand::thread_rng;
@@ -17,7 +18,7 @@ use frost_secp256k1_tr::{self as frost, round1::{SigningCommitments, SigningNonc
 use crate::{
     app::{config::{self, get_database_with_name, TASK_ROUND_WINDOW}, signer::Signer}, 
     helper::{
-        client_side::{self, send_cosmos_transaction}, 
+        client_side::send_cosmos_transaction, 
         encoding::{self, from_base64, hash, to_base64}, 
         gossip::publish_signing_package, now,
     }};
@@ -56,6 +57,8 @@ pub struct SignMesage {
     pub task_id: String,
     pub package: SignPackage,
     pub nonce: u64,
+    pub sender: Identifier,
+    pub signature: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -267,14 +270,31 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
     save_sign_remote_commitments(&task.id, &stored_commitments);
 
     // publish remote variable: commitment
-    publish_signing_package(swarm, signer, &SignMesage {
+    publish_signing_package(swarm, signer, &mut SignMesage {
         task_id: task.id.clone(),
         package: SignPackage::Round1(broadcast_package),
         nonce: now(),
+        sender: signer.identifier().clone(),
+        signature: vec![], 
     });
 }
 
 pub fn received_sign_message(msg: SignMesage) {
+
+    match PublicKey::from_slice(&msg.sender.serialize()) {
+        Ok(public_key) => {
+            let raw = serde_json::to_vec(&msg.package).unwrap();
+            let sig = Signature::from_slice(&msg.signature).unwrap();
+            if public_key.verify(&raw, &sig).is_err() {
+                debug!("Verify signature failed");
+                return;
+            }
+        }
+        Err(_) => {
+            debug!("Invalid public key");
+            return;
+        }
+    }
 
     let task_id = msg.task_id.clone();
     match msg.package {
@@ -480,15 +500,17 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
         return;
     }
 
-    let msg = SignMesage {
+    let mut msg = SignMesage {
         task_id: task.id.clone(),
         package: SignPackage::Round2(broadcast_packages),
         nonce: now(),
+        sender: signer.identifier().clone(),
+        signature: vec![],
     };
 
     debug!("publish signature share: {:?}", msg);
 
-    publish_signing_package(swarm, signer, &msg);
+    publish_signing_package(swarm, signer, &mut msg);
     save_sign_remote_signature_shares(&task.id, &received_sig_shares);
     // save_sign_task(task)
 
@@ -660,6 +682,7 @@ fn generate_nonce_and_commitment_by_address(address: &str, identifier: &Identifi
             return Some(frost::round1::commit(key.priv_key.signing_share(), &mut rng));
         }
     };
+    debug!("Keypair not found");
     None
 }
 
