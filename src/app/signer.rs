@@ -2,11 +2,12 @@
 use bitcoincore_rpc::{Auth, Client};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_client::QueryClient as AuthQueryClient;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountRequest};
-use frost_core::keys::dkg::round1::Package;
 use frost_core::Field;
+use frost_secp256k1_tr::keys::dkg::round1::Package;
 use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
 use frost_secp256k1_tr::round1::{SigningCommitments, SigningNonces};
-use frost_secp256k1_tr::{self as frost, Secp256K1Sha256};
+use frost_secp256k1_tr::round2::SignatureShare;
+use frost_secp256k1_tr as frost;
 use frost::Identifier;
 use futures::StreamExt;
 
@@ -19,14 +20,14 @@ use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, S
 use serde::Serialize;
 use tokio::time::Instant;
 
-use crate::app::config::{self};
+use crate::app::config::{self, TASK_ROUND_WINDOW};
 use crate::app::config::Config;
 use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::from_base64;
 use crate::helper::gossip::{subscribe_gossip_topics, SubscribeTopic};
-use crate::helper::{client_side, now};
-use crate::protocols::sign::{received_sign_message, SignMesage};
+use crate::helper::now;
+use crate::protocols::sign::{received_sign_message, SignMesage, SignTask};
 use crate::tickers::tss::{time_aligned_tasks_executor, time_free_tasks_executor};
 use crate::protocols::dkg::{received_dkg_response, DKGResponse, DKGTask};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
@@ -41,7 +42,7 @@ use tokio::select;
 use usize as Index;
 use tracing::{debug, error, info, warn};
 
-use ed25519_compact::{PublicKey, SecretKey, Signature};
+use ed25519_compact::SecretKey;
 
 use lazy_static::lazy_static;
 
@@ -66,6 +67,7 @@ pub struct Signer {
     db_sign: sled::Db,
     db_dkg: sled::Db,
     db_dkg_variables: sled::Db,
+    db_keypair: sled::Db,
 }
 
 impl Signer {
@@ -94,6 +96,7 @@ impl Signer {
         let db_sign_variables = sled::open(conf.get_database_with_name("sign-task-variables")).expect("Counld not create database!");
         let db_dkg_variables = sled::open(conf.get_database_with_name("dkg-variables")).expect("Counld not create database!");
         let db_dkg = sled::open(conf.get_database_with_name("dkg-task")).expect("Counld not create database!");
+        let db_keypair = sled::open(conf.get_database_with_name("keypair")).expect("Counld not create database!");
 
         Self {
             identity_key: local_key,
@@ -104,6 +107,7 @@ impl Signer {
             db_dkg_variables,
             db_sign,
             db_sign_variables,
+            db_keypair
         }
     }
 
@@ -165,14 +169,11 @@ impl Signer {
             let address_with_tweak = get_group_address_by_tweak(&pubkey.verifying_key(), tweak.clone(), self.config.bitcoin.network);
 
             addrs.push(address_with_tweak.to_string());
-            let re = config::save_keypair_to_db(address_with_tweak.to_string(), &config::Keypair{
+            self.save_keypair_to_db(address_with_tweak.to_string(), &config::Keypair{
                 priv_key: key.clone(),
                 pub_key: pubkey.clone(),
                 tweak: tweak,
             });
-            if re.is_err() {
-                error!("Failed to save generated keys to database: {:?}",   re.err());
-            }
         }
         
         // self.config.save().expect("Failed to save generated keys");
@@ -192,21 +193,24 @@ impl Signer {
         hex::encode(self.identity_key.sign(sig_msg, None))
     }
 
-
     fn save_dkg_package<T: Serialize>(&self, key: String, package: &BTreeMap<Identifier, T>) {
         let value = serde_json::to_vec(package).unwrap();
-        if let Err(e) = self.db_dkg_variables.insert(key, value) {
+        debug!("save {}:{:?}", key, value);
+        if let Err(e) = self.db_dkg_variables.insert(key.as_bytes(), value) {
             error!("unable to save dkg variable: {e}");
         };
     }
-    pub fn save_dkg_round1_package<T: Serialize>(&self, task_id: &str, package: &BTreeMap<Identifier, T>) {
-        self.save_dkg_package(format!("dkg-{}-round1", task_id), package);
+
+    pub fn save_dkg_round1_package(&self, task_id: &str, package: &BTreeMap<Identifier, Package>) {
+        self.save_dkg_package(format!("{}-round1", task_id), package);
     }
-    pub fn save_dkg_round2_package<T: Serialize>(&self, task_id: &str, package: &BTreeMap<Identifier, T>) {
-        self.save_dkg_package(format!("dkg-{}-round2", task_id), package);
+
+    pub fn save_dkg_round2_package(&self, task_id: &str, package: &BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>) {
+        self.save_dkg_package(format!("{}-round2", task_id), package);
     }
-    pub fn get_dkg_round1_package(&self, task_id: &str) -> Option<BTreeMap<Identifier, Package<Secp256K1Sha256>>> {
-        match self.db_dkg_variables.get(format!("dkg-{}-round1", task_id)) {
+
+    pub fn get_dkg_round1_package(&self, task_id: &str) -> Option<BTreeMap<Identifier, Package>> {
+        match self.db_dkg_variables.get(format!("{}-round1", task_id).as_bytes()) {
             Ok(Some(v)) => {
                 Some(serde_json::from_slice(&v).unwrap())
             },
@@ -214,8 +218,9 @@ impl Signer {
         }
     }
     pub fn get_dkg_round2_package(&self, task_id: &str) -> Option<BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>>{
-        match self.db_dkg_variables.get(format!("dkg-{}-round2", task_id)) {
+        match self.db_dkg_variables.get(format!("{}-round2", task_id).as_bytes()) {
             Ok(Some(v)) => {
+                debug!("loading package2: {}:{:?}", task_id, v);
                 Some(serde_json::from_slice(&v).unwrap())
             },
             _ => None
@@ -244,8 +249,8 @@ impl Signer {
 
     pub fn remove_dkg_task(&self, task_id: &str) {
         self.db_dkg.remove(task_id).expect("Unable to remove task");
-        let _ = self.db_dkg_variables.remove(format!("dkg-{}-round1", task_id));
-        let _ = self.db_dkg_variables.remove(format!("dkg-{}-round2", task_id));
+        let _ = self.db_dkg_variables.remove(format!("{}-round1", task_id));
+        let _ = self.db_dkg_variables.remove(format!("{}-round2", task_id));
     }
 
     pub fn has_task_preceeded(&self, task_id: &str) -> bool {
@@ -263,46 +268,38 @@ impl Signer {
     pub fn save_signing_local_variable(&self, task_id: &str, package: &BTreeMap<usize, SigningNonces>) {
         self.save_signing_package(task_id.as_bytes(), package);
     }
-    pub fn save_signing_commitments<T: Serialize>(&self, task_id: &str, package: &BTreeMap<Identifier, T>) {
+    pub fn save_signing_commitments<T: Serialize>(&self, task_id: &str, package: &BTreeMap<Index, T>) {
         self.save_signing_package(format!("{}-commitments", task_id).as_bytes(), package);
     }
-    pub fn save_signing_signature_shares<T: Serialize>(&self, task_id: &str, package: &BTreeMap<Identifier, T>) {
+    pub fn save_signing_signature_shares<T: Serialize>(&self, task_id: &str, package: &BTreeMap<Index, T>) {
         self.save_signing_package(format!("{}-sig-shares", task_id).as_bytes(), package);
     }
-    pub fn get_signing_local_variable(&self, task_id: &str) -> Option<BTreeMap<usize, SigningNonces>> {
+    pub fn get_signing_local_variable(&self, task_id: &str) -> BTreeMap<usize, SigningNonces> {
         match self.db_sign_variables.get( task_id.as_bytes()) {
             Ok(Some(v)) => {
-                Some(serde_json::from_slice(&v).unwrap())
+                serde_json::from_slice(&v).unwrap()
             },
-            _ => None
+            _ => BTreeMap::new()
         }
     }
-    pub fn get_signing_commitments(&self, task_id: &str) -> Option<BTreeMap<Index, BTreeMap<Identifier, SigningCommitments>>> {
-        match self.db_sign_variables.get( task_id) {
+    pub fn get_signing_commitments(&self, task_id: &str) -> BTreeMap<Index, BTreeMap<Identifier, SigningCommitments>> {
+        match self.db_sign_variables.get( format!("{}-commitments", task_id).as_bytes()) {
             Ok(Some(v)) => {
-                Some(serde_json::from_slice(&v).unwrap())
+                serde_json::from_slice(&v).unwrap()
             },
-            _ => None
+            _ => BTreeMap::new()
         }
     }
-    pub fn get_signing_signature_shares(&self, task_id: &str) -> Option<BTreeMap<usize, SigningNonces>> {
-        match self.db_sign_variables.get( task_id) {
+    pub fn get_signing_signature_shares(&self, task_id: &str) -> BTreeMap<Index, BTreeMap<Identifier, SignatureShare>> {
+        match self.db_sign_variables.get( format!("{}-sig-shares", task_id).as_bytes()) {
             Ok(Some(v)) => {
-                Some(serde_json::from_slice(&v).unwrap())
+                serde_json::from_slice(&v).unwrap()
             },
-            _ => None
+            _ => BTreeMap::new()
         }
     }
-    pub fn get_dkg_round2_package(&self, task_id: &str) -> Option<BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>>{
-        match self.db_dkg_variables.get(format!("dkg-{}-round2", task_id)) {
-            Ok(Some(v)) => {
-                Some(serde_json::from_slice(&v).unwrap())
-            },
-            _ => None
-        }
-    }
-    pub fn get_dkg_task(&self, task_id: &str) -> Option<DKGTask>{
-        match self.db_dkg.get( task_id) {
+    pub fn get_signing_task(&self, task_id: &str) -> Option<SignTask>{
+        match self.db_sign.get( task_id) {
             Ok(Some(v)) => {
                 Some(serde_json::from_slice(&v).unwrap())
             },
@@ -310,28 +307,56 @@ impl Signer {
         }
     }
 
-    pub fn save_dkg_task(&self, task: &DKGTask) {    
+    pub fn save_sign_task(&self, task: &SignTask) {    
         let value =  serde_json::to_vec(&task).unwrap();
-        self.db_dkg.insert(task.id.as_str(), value).expect("Failed to save task to database");
+        self.db_sign.insert(task.id.as_str(), value).expect("Failed to save task to database");
     }
 
-    pub fn list_dkg_tasks(&self) -> Vec<DKGTask>{
-        self.db_dkg.iter().map(|r| { 
+    pub fn list_signing_tasks(&self) -> Vec<SignTask>{
+        self.db_sign.iter().map(|r| { 
             let (_k, v) = r.unwrap();
             serde_json::from_slice(&v).unwrap()
         }).collect()
     }
 
-    pub fn remove_dkg_task(&self, task_id: &str) {
-        self.db_dkg.remove(task_id).expect("Unable to remove task");
-        let _ = self.db_dkg_variables.remove(format!("dkg-{}-round1", task_id));
-        let _ = self.db_dkg_variables.remove(format!("dkg-{}-round2", task_id));
+    pub fn remove_signing_task(&self, task_id: &str) {
+        self.db_sign.remove(task_id).expect("Unable to remove task");
+        self.remove_signing_task_variables(task_id);
     }
 
-    pub fn has_task_preceeded(&self, task_id: &str) -> bool {
-        self.db_dkg.contains_key(task_id).map_or(false, |v|v)
+    pub fn remove_signing_task_variables(&self, task_id: &str) {
+        let _ = self.db_dkg_variables.remove( task_id.as_bytes());
+        let _ = self.db_dkg_variables.remove(format!("{}-commitments", task_id).as_bytes());
+        let _ = self.db_dkg_variables.remove(format!("{}-sig-shares", task_id).as_bytes());
     }
 
+    pub fn is_signing_task_exists(&self, task_id: &str) -> bool {
+        self.db_sign.contains_key(task_id).map_or(false, |v|v)
+    }
+
+    pub fn list_keypairs(&self) -> Vec<String> {
+        self.db_keypair.iter().map(|v| {
+            let (k, _value) = v.unwrap();
+            // keys.push(String::from_utf8(key.unwrap().0.to_vec()).unwrap());
+            String::from_utf8(k.to_vec()).unwrap()
+        }).collect::<Vec<_>>()
+    }
+
+    pub fn get_keypair_from_db(&self, address: &str) -> Option<config::Keypair> {
+        match self.db_keypair.get(address) {
+            Ok(Some(value)) => {
+                Some(serde_json::from_slice(&value).unwrap())
+            },
+            _ => {
+                error!("Not found keypair for address: {}", address);
+                None
+            }
+        }
+    }
+    pub fn save_keypair_to_db(&self, address: String, keypair: &config::Keypair) {
+        let value = serde_json::to_vec(keypair).unwrap();
+        let _ = self.db_keypair.insert(address, value);
+    }
 
 }
 
@@ -403,11 +428,8 @@ pub async fn run_signer_daemon(conf: Config) {
     subscribe_gossip_topics(&mut swarm);
 
     let mut interval_free = tokio::time::interval(tokio::time::Duration::from_secs(30));
-    let host = signer.config().side_chain.grpc.as_str();
-    let seconds = client_side::get_cached_task_round_window(host).await;
-    let task_round_window = Duration::from_secs(seconds);
-    let start = Instant::now() + (task_round_window - tokio::time::Duration::from_secs(now() % seconds));
-    let mut interval_aligned = tokio::time::interval_at(start, task_round_window);
+    let start = Instant::now() + (TASK_ROUND_WINDOW - tokio::time::Duration::from_secs(now() % TASK_ROUND_WINDOW.as_secs()));
+    let mut interval_aligned = tokio::time::interval_at(start, TASK_ROUND_WINDOW);
 
     loop {
         select! {
@@ -470,55 +492,8 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
     match event {
         TSSBehaviourEvent::Gossip(gossipsub::Event::Message {message, .. }) => {
             // debug!("Received {:?}", message);
-
-            let len = message.data.len();
-            if len <= 64 {
-                debug!("Message length error");
-                return;
-            }
-            let msg_payload = message.data[64..len].to_vec();
-            let signature = match Signature::from_slice(&message.data[0..64]) {
-                Ok(sig) => sig,
-                Err(_) => {
-                    debug!("Cannot find signature");
-                    return;
-                }
-            };
-            let msg_hash = match hex::decode(sha256::digest(&msg_payload)) {
-                Ok(m) => m,
-                Err(_) => {
-                    debug!("Cannot find message");
-                    return;
-                }
-            };
-            let key = match message.source {
-                Some(src) => src.to_bytes(),
-                None => {
-                    debug!("Cannot find public key");
-                    return;
-                }
-            };
-
-            match PublicKey::from_slice(&key) {
-                Ok(public_key) => {
-                    match public_key.verify(&msg_hash, &signature) {
-                        Ok(_) => {
-                            // todo
-                        }
-                        Err(_) => {
-                            debug!("Verify signature failed");
-                            return;
-                        }
-                    }
-                }
-                Err(_) => {
-                    debug!("Invalid public key");
-                    return;
-                }
-            }
-
             if message.topic == SubscribeTopic::DKG.topic().hash() {
-                let response: DKGResponse = match serde_json::from_slice(&msg_payload) {
+                let response: DKGResponse = match serde_json::from_slice(&message.data) {
                     Ok(resp) => resp,
                     Err(_e) => {
                         // debug!("Failed to deserialize the DKG message: {}", e);
@@ -530,7 +505,7 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 // debug!("Gossip Received DKG Response from {propagation_source}: {message_id} {:?}", response);
                 received_dkg_response(response, signer);
             } else if message.topic == SubscribeTopic::SIGNING.topic().hash() {
-                let msg: SignMesage = match serde_json::from_slice(&msg_payload) {
+                let msg: SignMesage = match serde_json::from_slice(&message.data) {
                     Ok(msg) => msg,
                     Err(_e) => {
                         // debug!("Failed to deserialize the Sign message: {}", e);
@@ -539,7 +514,7 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 };
 
                 // debug!("Gossip Received {:?}", msg);
-                received_sign_message(msg);
+                received_sign_message(signer, msg);
             }
         }
         TSSBehaviourEvent::Identify(identify::Event::Received { peer_id, info, .. }) => {

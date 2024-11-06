@@ -11,6 +11,7 @@ pub struct Relayer {
     pub bitcoin_client: Client,
     pub ordinals_client: OrdinalsClient,
     pub oracle_client: OracleClient,
+    pub db_relayer: sled::Db,
 }
 
 impl Relayer {
@@ -31,12 +32,16 @@ impl Relayer {
         let ordinals_client = OrdinalsClient::new(&conf.ordinals.endpoint);
         let oracle_client = OracleClient::new(&conf.oracle);
 
+
+        let db_relayer = sled::open(conf.get_database_with_name("relayer")).expect("Counld not create database!");
+
         Self {
             // priv_validator_key: validator_key,
             bitcoin_client,
             ordinals_client,
             oracle_client,
             config: conf,
+            db_relayer,
         }
     }
 

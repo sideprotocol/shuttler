@@ -19,17 +19,10 @@ use cosmos_sdk_proto::side::btcbridge::{
 use prost_types::Any;
 use lazy_static::lazy_static;
 
-use crate::app::config::{self, get_database_with_name};
-
-const DB_KEY_TASK_ROUND_WINDOW_LAST_UPDATE: &str = "task_round_window_last_update";
-const DB_KEY_TASK_ROUND_WINDOW: &str = "task_round_window";
+use crate::app::config::{self};
 
 lazy_static! {
     static ref lock: Mutex<()> = Mutex::new(());
-    static ref DB_SIDE_PARAMS: sled::Db = {
-        let path = get_database_with_name("side-params");
-        sled::open(path).unwrap()
-    };
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -110,26 +103,6 @@ pub async fn get_task_round_window_on_side(host: &str) -> u64 {
             return 300;
         }
     }
-}
-
-pub async fn get_cached_task_round_window(host: &str) -> u64 {
-    if let Ok(Some(last_update)) = DB_SIDE_PARAMS.get(DB_KEY_TASK_ROUND_WINDOW_LAST_UPDATE) {
-        let last_update: u64 = serde_json::from_slice(&last_update).unwrap_or(0);
-        let now = chrono::Utc::now().timestamp() as u64;
-        if now - last_update < 60 * 60 * 1 { // 1 hours
-            if let Ok(Some(seconds)) =  DB_SIDE_PARAMS.get(DB_KEY_TASK_ROUND_WINDOW) {
-                return serde_json::from_slice(&seconds).unwrap_or(300);
-            };
-        }
-    }
-    let task_round_window = get_task_round_window_on_side(host).await;
-    let _ = DB_SIDE_PARAMS.insert(DB_KEY_TASK_ROUND_WINDOW, 
-        serde_json::to_vec(&task_round_window).unwrap()
-    );
-    let _ = DB_SIDE_PARAMS.insert(DB_KEY_TASK_ROUND_WINDOW_LAST_UPDATE, 
-        serde_json::to_vec(&chrono::Utc::now().timestamp()).unwrap()
-    );
-    return task_round_window;
 }
 
 pub async fn get_signing_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {

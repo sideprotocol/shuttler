@@ -8,14 +8,17 @@ use crate::{
     app::signer::Signer, 
     helper::client_side::{get_signing_requests, send_cosmos_transaction}, 
     protocols::{dkg::{broadcast_dkg_packages, generate_round1_package, DKGTask}, 
-    sign::{self, list_sign_tasks, process_tasks, save_task_into_signing_queue}, Round, TSSBehaviour
+    sign::{process_tasks, save_task_into_signing_queue}, Round, TSSBehaviour
 }};
 pub async fn time_free_tasks_executor(
     signer: &Signer,
 ) {
+    debug!("start");
     if signer.config().get_validator_key().is_none() {
         return;
     }
+
+    debug!("querying...");
 
     // 1. fetch dkg request
     fetch_dkg_requests(signer).await;
@@ -43,8 +46,6 @@ pub async fn time_aligned_tasks_executor(
 
 }
 
-
-
 pub async fn fetch_signing_requests(
     signer: &Signer,
 ) {
@@ -55,10 +56,10 @@ pub async fn fetch_signing_requests(
             let requests = response.into_inner().requests;
             let tasks_in_process = requests.iter().map(|r| r.txid.clone() ).collect::<Vec<_>>();
             debug!("In-process signing tasks: {:?} {:?}", tasks_in_process.len(), tasks_in_process);
-            list_sign_tasks().iter().for_each(|task| {
+            signer.list_signing_tasks().iter().for_each(|task| {
                 if !tasks_in_process.contains(&task.id) {
                     debug!("Removing expired signing task: {:?}", task.id);
-                    sign::remove_task(&task.id);
+                    signer.remove_signing_task(&task.id);
                 }
             });
             for request in requests {
@@ -88,6 +89,7 @@ async fn fetch_dkg_requests(signer: &Signer) {
         .await
     {
         let requests = requests_response.into_inner().requests;
+        debug!("DKG Requests, {:?}", requests);
         let tasks_in_process = requests.iter().map(|r| format!("dkg-{}", r.id)).collect::<Vec<_>>();
         signer.list_dkg_tasks().iter().for_each(|task| {
             if !tasks_in_process.contains(&task.id) {

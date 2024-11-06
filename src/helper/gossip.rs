@@ -30,21 +30,21 @@ pub fn publish_dkg_packages(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, ta
     let response = prepare_response_for_task(signer, task.id.clone());
     // debug!("Broadcasting: {:?}", response.);
     let message = serde_json::to_vec(&response).expect("Failed to serialize DKG package");
-    publish_message(swarm, signer, SubscribeTopic::DKG, message);
+    publish_message(swarm, SubscribeTopic::DKG, message);
 }
 
-pub fn publish_signing_package(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, package: &SignMesage) {
+pub fn publish_signing_package(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, message: &mut SignMesage) {
+    let raw = serde_json::to_vec(&message.package).unwrap();
+    let signaure = signer.identity_key.sign(raw, None).to_vec();
+    message.signature = signaure;
+
     // debug!("Broadcasting: {:?}", package);
-    let message = serde_json::to_vec(&package).expect("Failed to serialize Sign package");
-    publish_message(swarm, signer, SubscribeTopic::SIGNING, message);
+    let message = serde_json::to_vec(&message).expect("Failed to serialize Sign package");
+    publish_message(swarm, SubscribeTopic::SIGNING, message);
 }
 
-fn publish_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, topic: SubscribeTopic, message: Vec<u8>) {
-    let hash = hex::decode(sha256::digest(message.clone())).unwrap();
-    let mut signaure = signer.identity_key.sign(hash, None).to_vec();
-    signaure.extend(message);
-
-    match swarm.behaviour_mut().gossip.publish(topic.topic(), signaure) {
+fn publish_message(swarm: &mut Swarm<TSSBehaviour>, topic: SubscribeTopic, message: Vec<u8>) {
+    match swarm.behaviour_mut().gossip.publish(topic.topic(), message) {
         Ok(_) => (),
         Err(e) => {
             tracing::error!("Failed to publish message to topic {:?}: {:?}", topic, e);

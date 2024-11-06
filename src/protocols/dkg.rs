@@ -3,22 +3,18 @@
 use core::fmt;
 use std::{collections::BTreeMap, fmt::Debug};
 use cosmos_sdk_proto::side::btcbridge::DkgRequest;
-use ed25519_compact::{x25519, SecretKey};
+use ed25519_compact::x25519;
 use rand::thread_rng;
 use tracing::{debug, error, info};
 use serde::{Deserialize, Serialize};
-
 
 use frost_secp256k1_tr::{self as frost};
 use frost::{keys, Identifier, Secp256K1Sha256};
 
 use frost_core::keys::dkg::round1::Package;
 use super::{Round, TSSBehaviour};
-use crate::{app::{config:: get_database_with_name, signer::Signer}, helper::{encoding::to_base64, gossip::publish_dkg_packages, mem_store::{self, remove_dkg_round1_secret_packet, remove_dkg_round2_secret_packet}, now}};
+use crate::{app::signer::Signer, helper::{encoding::to_base64, gossip::publish_dkg_packages, mem_store, now}};
 use crate::helper::cipher::{decrypt, encrypt};
-
-
-use lazy_static::lazy_static;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DKGTask {
@@ -61,11 +57,17 @@ pub struct DKGRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct  DKGResponse {
+    pub payload: DKGPayload,
+    pub nonce: u64,
+    pub sender: Identifier,
+    pub signature: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DKGPayload {
     pub task_id: String,
     pub round1_packages: BTreeMap<Identifier, keys::dkg::round1::Package>,
-    // <sender, <receiver, package>>
     pub round2_packages: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>,
-    pub nonce: u64,
 }
 
 pub fn generate_round1_package(signer: &Signer, task: &DKGTask) {
@@ -171,11 +173,22 @@ pub fn prepare_response_for_task(signer: &Signer, task_id: String) -> DKGRespons
             BTreeMap::new()
         },
     };
-    DKGResponse{ task_id, round1_packages, round2_packages, nonce: now() }
+
+    
+    let payload = DKGPayload {
+        task_id,
+        round1_packages,
+        round2_packages,
+    };
+    
+    let raw = serde_json::to_vec(&payload).unwrap();
+    let signature = signer.identity_key.sign(raw, None).to_vec();
+    
+    DKGResponse{ payload, nonce: now(), sender: signer.identifier().clone(), signature }
 }
 
 pub fn received_dkg_response(response: DKGResponse, signer: &Signer) {
-    let task_id = response.task_id.clone();
+    let task_id = response.payload.task_id.clone();
     let mut task = match signer.get_dkg_task(&task_id) {
         Some(task) => task,
         None => {
@@ -184,10 +197,16 @@ pub fn received_dkg_response(response: DKGResponse, signer: &Signer) {
         }
     };
 
+    let addr = sha256::digest(&response.sender.serialize())[0..40].to_uppercase();
+    if !task.participants.contains(&addr) {
+        debug!("Invalid DKG participant {:?}, {:?}", response.sender, addr);
+        return;
+    }
+
     if task.round == Round::Round1 {
-        received_round1_packages(&mut task, response.round1_packages, signer)
+        received_round1_packages(&mut task, response.payload.round1_packages, signer)
     } else if task.round == Round::Round2 {
-        received_round2_packages(&mut task, response.round2_packages, signer)
+        received_round2_packages(&mut task, response.payload.round2_packages, signer)
     } else {
         debug!("DKG has already completed on my side: {}", task_id);
     }
@@ -200,7 +219,7 @@ pub fn received_round1_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
     
     // merge packets with local
     local.extend(packets);
-    signer.save_dkg_round2_package(&task.id, &local);
+    signer.save_dkg_round1_package(&task.id, &local);
 
     let k = local.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
     debug!("Received round1 packets: {} {:?}", task.id, k);

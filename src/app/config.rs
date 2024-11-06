@@ -4,21 +4,17 @@ use cosmos_sdk_proto::cosmos::auth::v1beta1::{query_client::QueryClient as AuthQ
 
 use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
 use serde::{Deserialize, Serialize};
-use sled::IVec;
 use tracing::error;
-use std::{fs, path::PathBuf, str::FromStr, sync::Mutex};
+use std::{fs, path::PathBuf, str::FromStr, sync::Mutex, time::Duration};
 
 use crate::helper::{cipher::random_bytes, encoding::to_base64};
 
 const CONFIG_FILE: &str = "config.toml";
 
+pub const TASK_ROUND_WINDOW: Duration = Duration::from_secs(60);
 use lazy_static::lazy_static;
 
 lazy_static! {
-    static ref DB_KEYPAIRS: sled::Db = {
-        let path = get_database_with_name("keypairs");
-        sled::open(path).unwrap()
-    };
     static ref PRIV_VALIDATOR_KEY: Mutex<Option<PrivValidatorKey>> = Mutex::new(None);
     static ref BASE_ACCOUNT: Mutex<Option<BaseAccount>> = {
         Mutex::new(None)
@@ -28,7 +24,7 @@ lazy_static! {
 /// Threshold Signature Configuration
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
-    #[serde(skip_serializing)]
+    #[serde(skip_serializing, skip_deserializing)]
     pub home: PathBuf,
     pub p2p_keypair: String,
     pub port: u32,
@@ -115,50 +111,6 @@ pub struct PrivValidatorKey {
     pub priv_key: AnyKey,
 }
 
-lazy_static! {
-    static ref APPLICATION_PATH: Mutex<String> = Mutex::new(String::from(".shuttler"));
-}
-
-pub fn update_app_home(app_home: &str) {
-    let mut string: std::sync::MutexGuard<String> = APPLICATION_PATH.lock().unwrap();
-    *string = String::from(app_home);
-}
-
-pub fn get_app_home() -> String {
-    APPLICATION_PATH.lock().unwrap().clone()
-}
-
-pub fn get_database_with_name(db_name: &str) -> String {
-    let mut home = APPLICATION_PATH.lock().unwrap().clone();
-    home.push_str("/data/");
-    home.push_str(db_name);
-    home
-}
-
-pub fn list_keypairs() -> Vec<String> {
-    let mut keys = vec![];
-    for key in DB_KEYPAIRS.iter() {
-        keys.push(String::from_utf8(key.unwrap().0.to_vec()).unwrap());
-    }
-    keys
-}
-
-pub fn get_keypair_from_db(address: &str) -> Option<Keypair> {
-    match DB_KEYPAIRS.get(address) {
-        Ok(Some(value)) => {
-            Some(serde_json::from_slice(value.as_ref()).unwrap())
-        },
-        _ => {
-            error!("Not found keypair for address: {}", address);
-            None
-        }
-    }
-}
-pub fn save_keypair_to_db(address: String, keypair: &Keypair) -> sled::Result<Option<IVec>>{
-    let value = serde_json::to_vec(keypair).unwrap();
-    DB_KEYPAIRS.insert(address, value)
-}
-
 /// relayer account will be used to sign transactions on the side chain,
 /// such as sending block headers, depositing and withdrawing transactions
 pub async fn get_relayer_account(conf: &Config) -> BaseAccount {
@@ -204,9 +156,9 @@ pub fn remove_relayer_account() {
 impl Config {
     pub fn load_validator_key(&self) {
         let priv_key_path = if self.priv_validator_key_path.starts_with("/") {
-            self.priv_validator_key_path.clone()
+            PathBuf::from(self.priv_validator_key_path.clone())
         } else {
-            format!("{}/{}", get_app_home(), self.priv_validator_key_path)
+            self.home.join(self.priv_validator_key_path.clone())
         };
         match fs::read_to_string(priv_key_path.clone()) {
             Ok(text) => {
@@ -331,6 +283,7 @@ impl Config {
         home.push(db_name);
         home.display().to_string()
     }
+
 }
 
 pub fn home_dir(app_home: &str) -> PathBuf {
