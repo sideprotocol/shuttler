@@ -28,6 +28,8 @@ lazy_static! {
 /// Threshold Signature Configuration
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
+    #[serde(skip_serializing)]
+    pub home: PathBuf,
     pub p2p_keypair: String,
     pub port: u32,
     pub bootstrap_nodes: Vec<String>,
@@ -220,25 +222,36 @@ impl Config {
     }
 
     pub fn from_file(app_home: &str) -> Result<Self, std::io::Error> {
-        update_app_home(app_home);
-
-        if !home_dir(app_home).join(CONFIG_FILE).exists() {
+        
+        let home = if app_home.starts_with("/") {
+            PathBuf::from(app_home)
+        } else {
+            home_dir(app_home)
+        };
+        if !home.join(CONFIG_FILE).exists() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "Config file not found",
             ));
         }
-        let contents = fs::read_to_string(home_dir(app_home).join(CONFIG_FILE))?;
-        let config: Config = toml::from_str(&contents).expect("Failed to parse config file");
+        let contents = fs::read_to_string(home.join(CONFIG_FILE))?;
+        let mut config: Config = toml::from_str(&contents).expect("Failed to parse config file");
+        config.home = home;
 
         Ok(config)
     }
 
-    pub fn default(port: u32, network: Network) -> Self {
+    pub fn default(home_str: &str, port: u32, network: Network) -> Self {
         let entropy = random_bytes(32);
         let mnemonic = bip39::Mnemonic::from_entropy(entropy.as_slice()).expect("failed to create mnemonic");
         let p2p_keypair = to_base64(libp2p::identity::Keypair::generate_ed25519().to_protobuf_encoding().unwrap().as_slice());
+        let home =  if home_str.starts_with("/") {
+            PathBuf::from_str(home_str).unwrap()
+        } else {
+            home_dir(home_str)
+        };
         Self {
+            home,
             p2p_keypair ,
             port: port as u32,
             bootstrap_nodes: vec!["/ip4/192.248.180.245/tcp/5158/p2p/12D3KooWMpMtmYQKSn1sZaSRn4CAcsraWZVrZ2zdNjEgsEPSd3Pv".to_string()],
@@ -282,13 +295,11 @@ impl Config {
     }
 
     pub fn save(&self) -> Result<(), std::io::Error> {
-        let app_home = APPLICATION_PATH.lock().unwrap();
-        let path = home_dir(app_home.as_str());
-        if !path.exists() {
-            fs::create_dir_all(&path)?;
+        if !self.home.exists() {
+            fs::create_dir_all(&self.home)?;
         }
         let contents = self.to_string();
-        fs::write(path.join(CONFIG_FILE), contents)
+        fs::write(self.home.join(CONFIG_FILE), contents)
     }
 
     pub fn relayer_bitcoin_privkey(&self) -> PrivateKey {
@@ -314,26 +325,12 @@ impl Config {
         Address::p2wpkh(&pubkey, self.bitcoin.network).to_string()
     }
 
-    // pub fn signer_priv_key(&self) -> SigningKey {
-    //     // let hdpath = cosmrs::bip32::DerivationPath::from_str("m/44'/118'/0'/0/0").unwrap();
-    //     let hdpath = cosmrs::bip32::DerivationPath::from_str("m/84'/0'/0'/0/0").unwrap();
-    //     let mnemonic = Mnemonic::parse(self.mnemonic.as_str()).expect("Invalid mnemonic");
-    //     SigningKey::derive_from_path(mnemonic.to_seed(""), &hdpath).expect("failded to create signer key")
-    // }
-
-    // pub fn signer_cosmos_address(&self) -> AccountId {
-    //     self.signer_priv_key().public_key().account_id(&self.side_chain.address_prefix).expect("failed to derive relayer address")
-    // }
-
-    // pub fn signer_bitcoin_address(&self) -> String {
-    //     let pubkey = self.signer_bitcoin_pubkey();
-    //     Address::p2wpkh(&pubkey, self.bitcoin.network).to_string()
-    // }
-
-    // pub fn signer_bitcoin_pubkey(&self) -> CompressedPublicKey {
-    //     let pk_bytes = self.signer_priv_key().public_key().to_bytes();
-    //     CompressedPublicKey::from_slice(pk_bytes.as_slice()).expect("failed to derive relayer address")
-    // }
+    pub fn get_database_with_name(&self, db_name: &str) -> String {
+        let mut home = self.home.clone();
+        home.push("data");
+        home.push(db_name);
+        home.display().to_string()
+    }
 }
 
 pub fn home_dir(app_home: &str) -> PathBuf {

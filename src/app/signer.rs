@@ -2,10 +2,11 @@
 use bitcoincore_rpc::{Auth, Client};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_client::QueryClient as AuthQueryClient;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountRequest};
-use cosmos_sdk_proto::tendermint::crypto::public_key;
+use frost_core::keys::dkg::round1::Package;
 use frost_core::Field;
 use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
-use frost_secp256k1_tr::{self as frost};
+use frost_secp256k1_tr::round1::{SigningCommitments, SigningNonces};
+use frost_secp256k1_tr::{self as frost, Secp256K1Sha256};
 use frost::Identifier;
 use futures::StreamExt;
 
@@ -15,8 +16,8 @@ use libp2p::kad::store::MemoryStore;
 use libp2p::swarm::dial_opts::PeerCondition;
 use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
 use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
+use serde::Serialize;
 use tokio::time::Instant;
-use tracing_subscriber::field::debug;
 
 use crate::app::config::{self};
 use crate::app::config::Config;
@@ -27,16 +28,17 @@ use crate::helper::gossip::{subscribe_gossip_topics, SubscribeTopic};
 use crate::helper::{client_side, now};
 use crate::protocols::sign::{received_sign_message, SignMesage};
 use crate::tickers::tss::{time_aligned_tasks_executor, time_free_tasks_executor};
-use crate::protocols::dkg::{received_dkg_response, DKGResponse};
+use crate::protocols::dkg::{received_dkg_response, DKGResponse, DKGTask};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
 
+use std::collections::BTreeMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::str::FromStr;
 use std::sync::Mutex;
 use std::io;
 use std::time::Duration;
 use tokio::select;
-
+use usize as Index;
 use tracing::{debug, error, info, warn};
 
 use ed25519_compact::{PublicKey, SecretKey, Signature};
@@ -60,6 +62,10 @@ pub struct Signer {
     /// used to identify the signer in the threshold signature scheme
     identifier: Identifier,
     pub bitcoin_client: Client,
+    db_sign_variables: sled::Db,
+    db_sign: sled::Db,
+    db_dkg: sled::Db,
+    db_dkg_variables: sled::Db,
 }
 
 impl Signer {
@@ -83,11 +89,21 @@ impl Signer {
             &conf.bitcoin.rpc, 
             Auth::UserPass(conf.bitcoin.user.clone(), conf.bitcoin.password.clone()))
             .expect("Could not initial bitcoin RPC client");
+
+        let db_sign = sled::open(conf.get_database_with_name("sign-task")).expect("Counld not create database!");
+        let db_sign_variables = sled::open(conf.get_database_with_name("sign-task-variables")).expect("Counld not create database!");
+        let db_dkg_variables = sled::open(conf.get_database_with_name("dkg-variables")).expect("Counld not create database!");
+        let db_dkg = sled::open(conf.get_database_with_name("dkg-task")).expect("Counld not create database!");
+
         Self {
             identity_key: local_key,
             identifier,
             bitcoin_client,
             config: conf,
+            db_dkg,
+            db_dkg_variables,
+            db_sign,
+            db_sign_variables,
         }
     }
 
@@ -175,6 +191,148 @@ impl Signer {
 
         hex::encode(self.identity_key.sign(sig_msg, None))
     }
+
+
+    fn save_dkg_package<T: Serialize>(&self, key: String, package: &BTreeMap<Identifier, T>) {
+        let value = serde_json::to_vec(package).unwrap();
+        if let Err(e) = self.db_dkg_variables.insert(key, value) {
+            error!("unable to save dkg variable: {e}");
+        };
+    }
+    pub fn save_dkg_round1_package<T: Serialize>(&self, task_id: &str, package: &BTreeMap<Identifier, T>) {
+        self.save_dkg_package(format!("dkg-{}-round1", task_id), package);
+    }
+    pub fn save_dkg_round2_package<T: Serialize>(&self, task_id: &str, package: &BTreeMap<Identifier, T>) {
+        self.save_dkg_package(format!("dkg-{}-round2", task_id), package);
+    }
+    pub fn get_dkg_round1_package(&self, task_id: &str) -> Option<BTreeMap<Identifier, Package<Secp256K1Sha256>>> {
+        match self.db_dkg_variables.get(format!("dkg-{}-round1", task_id)) {
+            Ok(Some(v)) => {
+                Some(serde_json::from_slice(&v).unwrap())
+            },
+            _ => None
+        }
+    }
+    pub fn get_dkg_round2_package(&self, task_id: &str) -> Option<BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>>{
+        match self.db_dkg_variables.get(format!("dkg-{}-round2", task_id)) {
+            Ok(Some(v)) => {
+                Some(serde_json::from_slice(&v).unwrap())
+            },
+            _ => None
+        }
+    }
+    pub fn get_dkg_task(&self, task_id: &str) -> Option<DKGTask>{
+        match self.db_dkg.get( task_id) {
+            Ok(Some(v)) => {
+                Some(serde_json::from_slice(&v).unwrap())
+            },
+            _ => None
+        }
+    }
+
+    pub fn save_dkg_task(&self, task: &DKGTask) {    
+        let value =  serde_json::to_vec(&task).unwrap();
+        self.db_dkg.insert(task.id.as_str(), value).expect("Failed to save task to database");
+    }
+
+    pub fn list_dkg_tasks(&self) -> Vec<DKGTask>{
+        self.db_dkg.iter().map(|r| { 
+            let (_k, v) = r.unwrap();
+            serde_json::from_slice(&v).unwrap()
+        }).collect()
+    }
+
+    pub fn remove_dkg_task(&self, task_id: &str) {
+        self.db_dkg.remove(task_id).expect("Unable to remove task");
+        let _ = self.db_dkg_variables.remove(format!("dkg-{}-round1", task_id));
+        let _ = self.db_dkg_variables.remove(format!("dkg-{}-round2", task_id));
+    }
+
+    pub fn has_task_preceeded(&self, task_id: &str) -> bool {
+        self.db_dkg.contains_key(task_id).map_or(false, |v|v)
+    }
+
+    // sign
+
+    fn save_signing_package<K: Serialize, T: Serialize>(&self, key: &[u8], package: &BTreeMap<K, T>) {
+        let value = serde_json::to_vec(package).unwrap();
+        if let Err(e) = self.db_sign_variables.insert(key, value) {
+            error!("unable to save dkg variable: {e}");
+        };
+    }
+    pub fn save_signing_local_variable(&self, task_id: &str, package: &BTreeMap<usize, SigningNonces>) {
+        self.save_signing_package(task_id.as_bytes(), package);
+    }
+    pub fn save_signing_commitments<T: Serialize>(&self, task_id: &str, package: &BTreeMap<Identifier, T>) {
+        self.save_signing_package(format!("{}-commitments", task_id).as_bytes(), package);
+    }
+    pub fn save_signing_signature_shares<T: Serialize>(&self, task_id: &str, package: &BTreeMap<Identifier, T>) {
+        self.save_signing_package(format!("{}-sig-shares", task_id).as_bytes(), package);
+    }
+    pub fn get_signing_local_variable(&self, task_id: &str) -> Option<BTreeMap<usize, SigningNonces>> {
+        match self.db_sign_variables.get( task_id.as_bytes()) {
+            Ok(Some(v)) => {
+                Some(serde_json::from_slice(&v).unwrap())
+            },
+            _ => None
+        }
+    }
+    pub fn get_signing_commitments(&self, task_id: &str) -> Option<BTreeMap<Index, BTreeMap<Identifier, SigningCommitments>>> {
+        match self.db_sign_variables.get( task_id) {
+            Ok(Some(v)) => {
+                Some(serde_json::from_slice(&v).unwrap())
+            },
+            _ => None
+        }
+    }
+    pub fn get_signing_signature_shares(&self, task_id: &str) -> Option<BTreeMap<usize, SigningNonces>> {
+        match self.db_sign_variables.get( task_id) {
+            Ok(Some(v)) => {
+                Some(serde_json::from_slice(&v).unwrap())
+            },
+            _ => None
+        }
+    }
+    pub fn get_dkg_round2_package(&self, task_id: &str) -> Option<BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>>{
+        match self.db_dkg_variables.get(format!("dkg-{}-round2", task_id)) {
+            Ok(Some(v)) => {
+                Some(serde_json::from_slice(&v).unwrap())
+            },
+            _ => None
+        }
+    }
+    pub fn get_dkg_task(&self, task_id: &str) -> Option<DKGTask>{
+        match self.db_dkg.get( task_id) {
+            Ok(Some(v)) => {
+                Some(serde_json::from_slice(&v).unwrap())
+            },
+            _ => None
+        }
+    }
+
+    pub fn save_dkg_task(&self, task: &DKGTask) {    
+        let value =  serde_json::to_vec(&task).unwrap();
+        self.db_dkg.insert(task.id.as_str(), value).expect("Failed to save task to database");
+    }
+
+    pub fn list_dkg_tasks(&self) -> Vec<DKGTask>{
+        self.db_dkg.iter().map(|r| { 
+            let (_k, v) = r.unwrap();
+            serde_json::from_slice(&v).unwrap()
+        }).collect()
+    }
+
+    pub fn remove_dkg_task(&self, task_id: &str) {
+        self.db_dkg.remove(task_id).expect("Unable to remove task");
+        let _ = self.db_dkg_variables.remove(format!("dkg-{}-round1", task_id));
+        let _ = self.db_dkg_variables.remove(format!("dkg-{}-round2", task_id));
+    }
+
+    pub fn has_task_preceeded(&self, task_id: &str) -> bool {
+        self.db_dkg.contains_key(task_id).map_or(false, |v|v)
+    }
+
+
 }
 
 

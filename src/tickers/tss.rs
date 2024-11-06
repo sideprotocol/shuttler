@@ -7,7 +7,7 @@ use tracing::{debug, error, info};
 use crate::{
     app::signer::Signer, 
     helper::client_side::{get_signing_requests, send_cosmos_transaction}, 
-    protocols::{dkg::{self, broadcast_dkg_packages, generate_round1_package, list_tasks, save_task, DKGTask}, 
+    protocols::{dkg::{broadcast_dkg_packages, generate_round1_package, DKGTask}, 
     sign::{self, list_sign_tasks, process_tasks, save_task_into_signing_queue}, Round, TSSBehaviour
 }};
 pub async fn time_free_tasks_executor(
@@ -89,11 +89,10 @@ async fn fetch_dkg_requests(signer: &Signer) {
     {
         let requests = requests_response.into_inner().requests;
         let tasks_in_process = requests.iter().map(|r| format!("dkg-{}", r.id)).collect::<Vec<_>>();
-        list_tasks().iter().for_each(|task| {
+        signer.list_dkg_tasks().iter().for_each(|task| {
             if !tasks_in_process.contains(&task.id) {
                 debug!("Removing completed task: {:?}", task.id);
-                dkg::remove_task(&task.id);
-                dkg::remove_task_variables(&task.id);
+                signer.remove_dkg_task(&task.id);
             }
         });
 
@@ -108,19 +107,19 @@ async fn fetch_dkg_requests(signer: &Signer) {
             {
                 // create a dkg task
                 let task = DKGTask::from_request(&request);
-                if dkg::has_task_preceeded(task.id.as_str()) {
+                if signer.has_task_preceeded(&task.id) {
                     continue;
                 };
-                generate_round1_package(signer.identifier().clone(), &task);
+                generate_round1_package(signer, &task);
                 info!("Start DKG {:?}, {:?}", &task.id, task.participants);
-                dkg::save_task(&task);
+                signer.save_dkg_task(&task);
             }
         }
     };
 }
 
 async fn submit_dkg_address(signer: &Signer) {
-    for task in list_tasks().iter_mut() {
+    for task in signer.list_dkg_tasks().iter_mut() {
         if task.round != Round::Closed {
             continue;
         }
@@ -145,7 +144,7 @@ async fn submit_dkg_address(signer: &Signer) {
                 let tx_response = resp.into_inner().tx_response.unwrap();
                 if tx_response.code == 0 {
                     task.submitted = true;
-                    save_task(task);
+                    signer.save_dkg_task(task);
                 
                     info!("Sent dkg vault: {:?}", tx_response);
                     continue;

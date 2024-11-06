@@ -5,6 +5,6 @@ use bitcoin::Network;
 
 pub fn execute(cli: &Cli, port : u32, network: Network) {
     println!("Initialize Shuttler Home: {}", &cli.home);
-    config::update_app_home(&cli.home);
-    config::Config::default(port, network).save().unwrap();
+    // config::update_app_home(&cli.home);
+    config::Config::default(&cli.home, port, network).save().unwrap();
 }

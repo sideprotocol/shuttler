@@ -27,7 +27,7 @@ pub fn subscribe_gossip_topics(swarm: &mut Swarm<TSSBehaviour>) {
 }
 
 pub fn publish_dkg_packages(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: &dkg::DKGTask) {
-    let response = prepare_response_for_task(task.id.clone());
+    let response = prepare_response_for_task(signer, task.id.clone());
     // debug!("Broadcasting: {:?}", response.);
     let message = serde_json::to_vec(&response).expect("Failed to serialize DKG package");
     publish_message(swarm, signer, SubscribeTopic::DKG, message);
