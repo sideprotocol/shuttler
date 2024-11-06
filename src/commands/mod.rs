@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 #[command(name = "shuttler", version = "0.2.4", author = "Side Labs")]
 #[command(about = "A threshold vault signer of Side Bitcoin Bridge", long_about = None)]
 pub struct Cli {
-    #[clap(long, default_value = ".tssigner")]
+    #[clap(long, default_value = ".shuttler")]
     pub home: String,
     #[clap(long, default_value = "false")]
     pub mock: bool,
