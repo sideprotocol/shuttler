@@ -95,7 +95,7 @@ impl Signer {
         let db_sign_variables = sled::open(conf.get_database_with_name("sign-task-variables")).expect("Counld not create database!");
         let db_dkg_variables = sled::open(conf.get_database_with_name("dkg-variables")).expect("Counld not create database!");
         let db_dkg = sled::open(conf.get_database_with_name("dkg-task")).expect("Counld not create database!");
-        let db_keypair = sled::open(conf.get_database_with_name("keypair")).expect("Counld not create database!");
+        let db_keypair = sled::open(conf.get_database_with_name("keypairs")).expect("Counld not create database!");
 
         Self {
             identity_key: local_key,
