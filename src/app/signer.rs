@@ -373,6 +373,10 @@ pub async fn run_signer_daemon(conf: Config) {
     conf.load_validator_key();
     let signer = Signer::new(conf.clone());
 
+    for (i, key ) in signer.list_keypairs().iter().enumerate() {
+        info!("address {i}. {key}");
+    }
+
     let libp2p_keypair = Keypair::from_protobuf_encoding(from_base64(&conf.p2p_keypair).unwrap().as_slice()).unwrap();
     let mut swarm: libp2p::Swarm<TSSBehaviour> = libp2p::SwarmBuilder::with_existing_identity(libp2p_keypair)
         .with_tokio()
