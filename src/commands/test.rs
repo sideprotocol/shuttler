@@ -12,7 +12,7 @@ use std::process::Command;
 
 use crate::{app::config, mock::{MockBlockService, MockQuery, MockTxService, DKG, DKG_FILE_NAME}};
 
-pub async fn execute(bin: &'static str, n: u32) {
+pub async fn execute(bin: &'static str, n: u32, tx: u32) {
     // parameters
     //let n: u32 = 3;
     let executor = bin;
@@ -32,9 +32,8 @@ pub async fn execute(bin: &'static str, n: u32) {
         home_i.push(format!("home{}", i));
         
         fs::create_dir_all(home_i.clone()).expect("initial home i");
-
-        config::update_app_home(home_i.to_str().unwrap());
-        config::Config::default(port+i, network).save().unwrap();
+        // config::update_app_home(home_i.to_str().unwrap());
+        config::Config::default(home_i.to_str().unwrap(), port+i, network).save().unwrap();
 
         let rng = rand::thread_rng();
         let sk = ed25519_consensus::SigningKey::new(rng);
@@ -89,7 +88,7 @@ pub async fn execute(bin: &'static str, n: u32) {
         // .add_service(Service::new(greeter))
         .add_service(QueryServer::new(s.clone()))
         .add_service(AuthServer::new(s))
-        .add_service(TxServer::new(MockTxService{home: home.clone()}))
+        .add_service(TxServer::new(MockTxService{home: home.clone(), tx}))
         .add_service(BlockServer::new(MockBlockService{}))
         .serve(addr)
         .await.unwrap();

@@ -5,10 +5,14 @@
 
 use std::collections::BTreeMap;
 
-use frost_secp256k1_tr::keys::dkg;
+use frost_secp256k1_tr::{keys::dkg, Identifier};
+use tracing::debug;
 use std::sync::Mutex;
 use lazy_static::lazy_static;
 
+use crate::app::config::TASK_ROUND_WINDOW;
+
+use super::{gossip::HeartBeatMessage, now};
 
 lazy_static! {
     static ref DkgRound1SecretPacket: Mutex<BTreeMap<String, dkg::round1::SecretPackage>> = {
@@ -17,6 +21,31 @@ lazy_static! {
     static ref DkgRound2SecretPacket: Mutex<BTreeMap<String, dkg::round2::SecretPackage>> = {
         Mutex::new(BTreeMap::new())
     };
+    pub static ref AliveTable: Mutex<BTreeMap<Identifier, u64>> = {
+        Mutex::new(BTreeMap::new())
+    };
+}
+
+pub fn update_alive_table(alive: HeartBeatMessage) {
+    let mut x= AliveTable.lock().unwrap();
+    x.insert(alive.identifier, alive.last_seen);
+}
+
+pub fn get_alive_participants(keys: &Vec<&Identifier>) -> usize {
+    let table= AliveTable.lock().unwrap();
+    
+    let alive = keys.iter().filter(|key| {
+        let last_seen = table.get(key).unwrap_or(&0u64);
+        // debug!("is alive {:?} {}", key, now() - last_seen);
+        now() - last_seen < TASK_ROUND_WINDOW.as_secs() * 2
+    }).count() + 1;
+    debug!("alive table: {alive}, {:?}", table);
+    alive
+}
+
+pub fn is_alive(identifier: &Identifier) -> bool {
+    let table= AliveTable.lock().unwrap();
+    table.contains_key(identifier)
 }
 
 pub fn get_dkg_round1_secret_packet(task_id: &str) -> Option<dkg::round1::SecretPackage> {

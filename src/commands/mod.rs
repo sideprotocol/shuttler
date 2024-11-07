@@ -2,10 +2,10 @@ use bitcoin::Network;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "shuttler", version = "0.2.3", author = "Side Labs")]
+#[command(name = "shuttler", version = "0.2.4", author = "Side Labs")]
 #[command(about = "A threshold vault signer of Side Bitcoin Bridge", long_about = None)]
 pub struct Cli {
-    #[clap(long, default_value = ".tssigner")]
+    #[clap(long, default_value = ".shuttler")]
     pub home: String,
     #[clap(long, default_value = "false")]
     pub mock: bool,
@@ -21,16 +21,6 @@ pub enum Commands {
         #[clap(long, default_value = "bitcoin")]
         network: Network    
     },
-    /// Remove an item
-    // DKG {
-    //     #[clap(long, default_value = "2")]
-    //     min_signers: u16,
-    //     #[clap(long, default_value = "3")]
-    //     max_signers: u16,
-    // },
-    // Sign {
-    //     pbst: String,
-    // },
     /// Start a libp2p node
     Start {
         #[clap(long, default_value = "false")]
@@ -60,6 +50,8 @@ pub enum Commands {
         bin: String,
         #[clap(long, default_value = "3")]
         n: u32,
+        #[clap(long, default_value = "1")]
+        tx: u32,
     },
 }
 
