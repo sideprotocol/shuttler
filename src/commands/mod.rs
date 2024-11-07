@@ -50,6 +50,8 @@ pub enum Commands {
         bin: String,
         #[clap(long, default_value = "3")]
         n: u32,
+        #[clap(long, default_value = "1")]
+        tx: u32,
     },
 }
 

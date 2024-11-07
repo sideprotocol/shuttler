@@ -10,7 +10,9 @@ use tracing::debug;
 use std::sync::Mutex;
 use lazy_static::lazy_static;
 
-use super::{gossip::{HeartBeatMessage, HEART_BEAT_DURATION}, now};
+use crate::app::config::TASK_ROUND_WINDOW;
+
+use super::{gossip::HeartBeatMessage, now};
 
 lazy_static! {
     static ref DkgRound1SecretPacket: Mutex<BTreeMap<String, dkg::round1::SecretPackage>> = {
@@ -22,14 +24,6 @@ lazy_static! {
     pub static ref AliveTable: Mutex<BTreeMap<Identifier, u64>> = {
         Mutex::new(BTreeMap::new())
     };
-    pub static ref LastSendingTime: Mutex<u64> = {
-        Mutex::new(0)
-    };
-}
-
-pub fn update_last_sending_time() {
-    let mut x= LastSendingTime.lock().unwrap();
-    *x = now();
 }
 
 pub fn update_alive_table(alive: HeartBeatMessage) {
@@ -38,13 +32,20 @@ pub fn update_alive_table(alive: HeartBeatMessage) {
 }
 
 pub fn get_alive_participants(keys: &Vec<&Identifier>) -> usize {
-    let x= AliveTable.lock().unwrap();
-    debug!("alive table: {:?}", x);
-    keys.iter().filter(|key| {
-        let last_seen = x.get(key).unwrap_or(&0u64);
+    let table= AliveTable.lock().unwrap();
+    
+    let alive = keys.iter().filter(|key| {
+        let last_seen = table.get(key).unwrap_or(&0u64);
         // debug!("is alive {:?} {}", key, now() - last_seen);
-        now() - last_seen < HEART_BEAT_DURATION.as_secs() * 2
-    }).count() + 1
+        now() - last_seen < TASK_ROUND_WINDOW.as_secs() * 2
+    }).count() + 1;
+    debug!("alive table: {alive}, {:?}", table);
+    alive
+}
+
+pub fn is_alive(identifier: &Identifier) -> bool {
+    let table= AliveTable.lock().unwrap();
+    table.contains_key(identifier)
 }
 
 pub fn get_dkg_round1_secret_packet(task_id: &str) -> Option<dkg::round1::SecretPackage> {

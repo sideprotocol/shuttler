@@ -19,12 +19,12 @@ use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
 use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
 use serde::Serialize;
 
-use crate::app::config;
+use crate::app::config::{self, TASK_ROUND_WINDOW};
 use crate::app::config::Config;
 use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::from_base64;
-use crate::helper::gossip::{subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic};
+use crate::helper::gossip::{subscribe_gossip_topics, SubscribeTopic};
 use crate::helper::mem_store;
 use crate::protocols::sign::{received_sign_message, SignMesage, SignTask};
 use crate::tickers::tss::time_free_tasks_executor;
@@ -296,7 +296,7 @@ impl Signer {
         }
     }
     pub fn get_signing_task(&self, task_id: &str) -> Option<SignTask>{
-        match self.db_sign.get( task_id) {
+        match self.db_sign.get( task_id.as_bytes()) {
             Ok(Some(v)) => {
                 Some(serde_json::from_slice(&v).unwrap())
             },
@@ -304,9 +304,9 @@ impl Signer {
         }
     }
 
-    pub fn save_sign_task(&self, task: &SignTask) {    
+    pub fn save_signing_task(&self, task: &SignTask) {    
         let value =  serde_json::to_vec(&task).unwrap();
-        self.db_sign.insert(task.id.as_str(), value).expect("Failed to save task to database");
+        self.db_sign.insert(task.id.as_bytes(), value).expect("Failed to save task to database");
     }
 
     pub fn list_signing_tasks(&self) -> Vec<SignTask>{
@@ -322,13 +322,19 @@ impl Signer {
     }
 
     pub fn remove_signing_task_variables(&self, task_id: &str) {
-        let _ = self.db_dkg_variables.remove( task_id.as_bytes());
-        let _ = self.db_dkg_variables.remove(format!("{}-commitments", task_id).as_bytes());
-        let _ = self.db_dkg_variables.remove(format!("{}-sig-shares", task_id).as_bytes());
+        if let Err(e) = self.db_sign_variables.remove( task_id.as_bytes()) {
+            error!("remove signing task error: {e}");
+        }
+        if let Err(e) = self.db_sign_variables.remove(format!("{}-commitments", task_id).as_bytes()) {
+            error!("remove commitments {e}");
+        }
+        if let Err(e) = self.db_sign_variables.remove(format!("{}-sig-shares", task_id).as_bytes()) {
+            error!("remove signature shares {e}");
+        };
     }
 
     pub fn is_signing_task_exists(&self, task_id: &str) -> bool {
-        self.db_sign.contains_key(task_id).map_or(false, |v|v)
+        self.db_sign.contains_key(task_id.as_bytes()).map_or(false, |v|v)
     }
 
     pub fn list_keypairs(&self) -> Vec<String> {
@@ -350,6 +356,7 @@ impl Signer {
             }
         }
     }
+    
     pub fn save_keypair_to_db(&self, address: String, keypair: &config::Keypair) {
         let value = serde_json::to_vec(keypair).unwrap();
         let _ = self.db_keypair.insert(address, value);
@@ -428,7 +435,7 @@ pub async fn run_signer_daemon(conf: Config) {
     dail_bootstrap_nodes(&mut swarm, &conf);
     subscribe_gossip_topics(&mut swarm);
 
-    let mut interval_free = tokio::time::interval(tokio::time::Duration::from_secs(30));
+    let mut interval_free = tokio::time::interval(TASK_ROUND_WINDOW);
     // let start = Instant::now() + (TASK_ROUND_WINDOW - tokio::time::Duration::from_secs(now() % TASK_ROUND_WINDOW.as_secs()));
     // let mut interval_aligned = tokio::time::interval_at(start, TASK_ROUND_WINDOW);
     // let mut alive_interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
@@ -494,19 +501,11 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
             // debug!("Received {:?}", message);
             if message.topic == SubscribeTopic::DKG.topic().hash() {
                 if let Ok(response) = serde_json::from_slice::<DKGResponse>(&message.data) {
-                    mem_store::update_alive_table(HeartBeatMessage {
-                        identifier: response.sender.clone(),
-                        last_seen: response.nonce.clone()
-                    });
                     received_dkg_response(response, signer);                   
                 }
             } else if message.topic == SubscribeTopic::SIGNING.topic().hash() {
                 // debug!("Gossip Received {:?}", msg);
                 if let Ok(msg) = serde_json::from_slice::<SignMesage>(&message.data) {
-                    mem_store::update_alive_table(HeartBeatMessage {
-                        identifier: msg.sender.clone(),
-                        last_seen: msg.nonce.clone()
-                    });
                     received_sign_message(swarm, signer, msg);
                 }
             } else if message.topic == SubscribeTopic::ALIVE.topic().hash() {

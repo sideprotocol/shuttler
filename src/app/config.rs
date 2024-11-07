@@ -11,7 +11,7 @@ use crate::helper::{cipher::random_bytes, encoding::to_base64};
 
 const CONFIG_FILE: &str = "config.toml";
 
-pub const TASK_ROUND_WINDOW: Duration = Duration::from_secs(60);
+pub const TASK_ROUND_WINDOW: Duration = Duration::from_secs(30);
 use lazy_static::lazy_static;
 
 lazy_static! {

@@ -8,43 +8,28 @@ use crate::{
     app::signer::Signer, 
     helper::{client_side::{get_signing_requests, send_cosmos_transaction}, gossip::sending_heart_beat}, 
     protocols::{dkg::{broadcast_dkg_packages, generate_round1_package, DKGTask}, 
-    sign::{process_tasks, save_task_into_signing_queue}, Round, TSSBehaviour
+    sign::{save_task_into_signing_queue, submit_signature_or_reset_task}, Round, TSSBehaviour
 }};
 pub async fn time_free_tasks_executor( swarm : &mut Swarm<TSSBehaviour>, signer: &Signer ) {
-    if signer.config().get_validator_key().is_none() {
-        return;
-    }
-
-    sending_heart_beat(swarm, signer).await;
-
-    // 1. fetch dkg request
-    fetch_dkg_requests(signer).await;
-    broadcast_dkg_packages(swarm, signer);
-    submit_dkg_address(signer).await;
-
-
-    fetch_signing_requests(swarm, signer).await;
-    // broadcast_sign_packages(swarm);
-}
-
-pub async fn time_aligned_tasks_executor(
-    swarm : &mut Swarm<TSSBehaviour>,
-    signer: &Signer,
-) {
-
+    
     debug!("Connected peers: {:?}", swarm.connected_peers().collect::<Vec<_>>());
 
     if signer.config().get_validator_key().is_none() {
         return;
     }
 
-    debug!("Start time aligned task!");
+    // 1. heart beat
+    sending_heart_beat(swarm, signer).await;
 
-    // 1. collect dkg packages
+    // 2. dkg tasks
+    fetch_dkg_requests(signer).await;
     broadcast_dkg_packages(swarm, signer);
-    // 2. collect signing requests tss packages
-    process_tasks(swarm, signer).await;
+    submit_dkg_address(signer).await;
 
+    // 3 signing tasks
+    fetch_signing_requests(swarm, signer).await;
+    submit_signature_or_reset_task(swarm, signer).await;
+    // broadcast_sign_packages(swarm);
 }
 
 pub async fn fetch_signing_requests(
