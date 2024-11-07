@@ -224,6 +224,10 @@ pub async fn submit_signature_or_reset_task(swarm: &mut Swarm<TSSBehaviour>, sig
 
 fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: &mut SignTask) {
 
+    if task.status == Status::CLOSE {
+        return
+    }
+
     let mut nonces = BTreeMap::new();
     let mut stored_commitments = signer.get_signing_commitments(&task.id);
     let mut broadcast_package = BTreeMap::new();
@@ -280,10 +284,14 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
     match msg.package {
         SignPackage::Round1(commitments) => {
             let first = 0;
-            let c_keys = commitments.get(&first).unwrap().keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
-            debug!("Received round1 message: {:?} {:?}", c_keys.len(), c_keys);
 
             let mut remote_commitments = signer.get_signing_commitments(&task_id);
+            // return if msg has received.
+            if let Some(exists) = remote_commitments.get(&first) {
+                if exists.contains_key(&msg.sender) {
+                    return
+                }
+            }
             commitments.iter().for_each(|(index, incoming)| {
                 match remote_commitments.get_mut(index) {
                     Some(existing) => {
@@ -298,6 +306,10 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
             signer.save_signing_commitments(&task_id, &remote_commitments);
 
             if let Some(mut task) = signer.get_signing_task(&task_id) {
+
+                if task.status == Status::CLOSE {
+                    return 
+                }
                 let first = 0; 
                 // Move to Round2 if the commitment of all inputs received from the latest retry exceeds the minimum number of signers.
                 // Only check the first input, because all other inputs are in the same package.
@@ -314,7 +326,6 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
                             } else if commitments.len() >= threshold && commitments.len() == mem_store::get_alive_participants(&participants) {
                                 generate_signature_shares(swarm, signer, &mut task);
                             }
-                            
                         }
                     }
                 }
@@ -327,6 +338,12 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
 
             // Merge all commitments by input index
             let mut remote_sig_shares = signer.get_signing_signature_shares(&task_id);
+            // return if msg has received.
+            if let Some(exists) = remote_sig_shares.get(&first) {
+                if exists.contains_key(&msg.sender) {
+                    return
+                }
+            }
             sig_shares.iter().for_each(|(index, incoming)| {
                 match remote_sig_shares.get_mut(index) {
                     Some(existing) => {
@@ -352,6 +369,10 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
                         return
                     }
                 };
+
+                if task.status == Status::CLOSE {
+                    return 
+                }
 
                 if let Some(input) = task.inputs.get(&first) {
                     if let Some(key) = signer.get_keypair_from_db(&input.address) {
