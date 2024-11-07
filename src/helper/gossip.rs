@@ -57,7 +57,7 @@ pub fn publish_signing_package(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer,
     publish_message(swarm, SubscribeTopic::SIGNING, message, true);
 }
 
-pub async fn publish_alive_info(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
+pub async fn sending_heart_beat(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
     let host = signer.config().side_chain.grpc.clone();
     let mut base_client = match TendermintServiceClient::connect(host).await {
         Ok(c) => c,

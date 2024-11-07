@@ -6,7 +6,7 @@ use tracing::{debug, error, info};
 
 use crate::{
     app::signer::Signer, 
-    helper::{client_side::{get_signing_requests, send_cosmos_transaction}, gossip::publish_alive_info}, 
+    helper::{client_side::{get_signing_requests, send_cosmos_transaction}, gossip::sending_heart_beat}, 
     protocols::{dkg::{broadcast_dkg_packages, generate_round1_package, DKGTask}, 
     sign::{process_tasks, save_task_into_signing_queue}, Round, TSSBehaviour
 }};
@@ -15,7 +15,7 @@ pub async fn time_free_tasks_executor( swarm : &mut Swarm<TSSBehaviour>, signer:
         return;
     }
 
-    publish_alive_info(swarm, signer).await;
+    sending_heart_beat(swarm, signer).await;
 
     // 1. fetch dkg request
     fetch_dkg_requests(signer).await;
