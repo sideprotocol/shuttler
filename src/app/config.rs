@@ -28,7 +28,6 @@ pub struct Config {
     pub home: PathBuf,
     pub p2p_keypair: String,
     pub port: u32,
-    pub seed_mode: bool,
     pub bootstrap_nodes: Vec<String>,
     /// logger level
     pub log_level: String,
@@ -207,7 +206,6 @@ impl Config {
             home,
             p2p_keypair ,
             port: port as u32,
-            seed_mode: false,
             bootstrap_nodes: vec!["/ip4/192.248.180.245/tcp/5158/p2p/12D3KooWMpMtmYQKSn1sZaSRn4CAcsraWZVrZ2zdNjEgsEPSd3Pv".to_string()],
             log_level: "debug".to_string(),
             mnemonic: mnemonic.to_string(),

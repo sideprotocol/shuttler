@@ -365,7 +365,7 @@ impl Signer {
 }
 
 
-pub async fn run_signer_daemon(conf: Config) {
+pub async fn run_signer_daemon(conf: Config, seed: bool) {
 
     info!("Starting TSS Signer Daemon");
 
@@ -432,7 +432,7 @@ pub async fn run_signer_daemon(conf: Config) {
     // swarm.listen_on(format!("/ip4/0.0.0.0/udp/{}/quic-v1", 5157).parse().expect("address parser error")).expect("failed to listen on all interfaces");
     swarm.listen_on(format!("/ip4/0.0.0.0/tcp/{}", conf.port).parse().expect("Address parse error")).expect("failed to listen on all interfaces");
 
-    if conf.seed_mode {
+    if seed || conf.bootstrap_nodes.len() == 0 {
         swarm.behaviour_mut().kad.set_mode(Some(libp2p::kad::Mode::Server));
     }
 

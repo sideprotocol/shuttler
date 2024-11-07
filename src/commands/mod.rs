@@ -27,6 +27,8 @@ pub enum Commands {
         relayer: bool,
         #[clap(long, default_value = "false")]
         signer: bool,
+        #[clap(long, default_value = "false")]
+        seed: bool,
     },
     #[command(about = "Submit a bitcoin header to the sidechain")]
     SubmitHeader {

@@ -4,7 +4,7 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 use crate::app::{config::Config, relayer, signer};
 
-pub async fn execute(home: &str, relayer: bool, signer: bool) {
+pub async fn execute(home: &str, relayer: bool, signer: bool, seed: bool) {
     
     let conf = Config::from_file(home).unwrap();
 
@@ -21,10 +21,10 @@ pub async fn execute(home: &str, relayer: bool, signer: bool) {
     if relayer && !signer {
         relayer::run_relayer_daemon(conf).await;
     } else if signer && !relayer {
-        signer::run_signer_daemon(conf).await;
+        signer::run_signer_daemon(conf, seed).await;
     } else {
         let conf2 = conf.clone();
-        let sign_handler = tokio::spawn(async move { signer::run_signer_daemon(conf).await });
+        let sign_handler = tokio::spawn(async move { signer::run_signer_daemon(conf, seed).await });
         let relay_handler = tokio::spawn(async move { relayer::run_relayer_daemon(conf2).await });
         // Start both signer and relayer as default
         match join!(sign_handler, relay_handler) {
