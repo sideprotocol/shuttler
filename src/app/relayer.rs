@@ -26,12 +26,10 @@ impl Relayer {
         let bitcoin_client = Client::new(
             &conf.bitcoin.rpc, 
             auth,
-        )
-            .expect("Could not initial bitcoin RPC client");
+        ).expect("Could not initial bitcoin RPC client");
 
         let ordinals_client = OrdinalsClient::new(&conf.ordinals.endpoint);
         let oracle_client = OracleClient::new(&conf.oracle);
-
 
         let db_relayer = sled::open(conf.get_database_with_name("relayer")).expect("Counld not create database!");
 

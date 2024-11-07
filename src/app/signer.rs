@@ -18,17 +18,16 @@ use libp2p::swarm::dial_opts::PeerCondition;
 use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
 use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
 use serde::Serialize;
-use tokio::time::Instant;
 
-use crate::app::config::{self, TASK_ROUND_WINDOW};
+use crate::app::config;
 use crate::app::config::Config;
 use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::from_base64;
-use crate::helper::gossip::{subscribe_gossip_topics, SubscribeTopic};
-use crate::helper::now;
+use crate::helper::gossip::{subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic};
+use crate::helper::mem_store;
 use crate::protocols::sign::{received_sign_message, SignMesage, SignTask};
-use crate::tickers::tss::{time_aligned_tasks_executor, time_free_tasks_executor};
+use crate::tickers::tss::time_free_tasks_executor;
 use crate::protocols::dkg::{received_dkg_response, DKGResponse, DKGTask};
 use crate::protocols::{TSSBehaviour, TSSBehaviourEvent};
 
@@ -195,7 +194,6 @@ impl Signer {
 
     fn save_dkg_package<T: Serialize>(&self, key: String, package: &BTreeMap<Identifier, T>) {
         let value = serde_json::to_vec(package).unwrap();
-        debug!("save {}:{:?}", key, value);
         if let Err(e) = self.db_dkg_variables.insert(key.as_bytes(), value) {
             error!("unable to save dkg variable: {e}");
         };
@@ -220,7 +218,6 @@ impl Signer {
     pub fn get_dkg_round2_package(&self, task_id: &str) -> Option<BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>>{
         match self.db_dkg_variables.get(format!("{}-round2", task_id).as_bytes()) {
             Ok(Some(v)) => {
-                debug!("loading package2: {}:{:?}", task_id, v);
                 Some(serde_json::from_slice(&v).unwrap())
             },
             _ => None
@@ -424,12 +421,17 @@ pub async fn run_signer_daemon(conf: Config) {
     // swarm.listen_on(format!("/ip4/0.0.0.0/udp/{}/quic-v1", 5157).parse().expect("address parser error")).expect("failed to listen on all interfaces");
     swarm.listen_on(format!("/ip4/0.0.0.0/tcp/{}", conf.port).parse().expect("Address parse error")).expect("failed to listen on all interfaces");
 
+    if conf.seed_mode {
+        swarm.behaviour_mut().kad.set_mode(Some(libp2p::kad::Mode::Server));
+    }
+
     dail_bootstrap_nodes(&mut swarm, &conf);
     subscribe_gossip_topics(&mut swarm);
 
     let mut interval_free = tokio::time::interval(tokio::time::Duration::from_secs(30));
-    let start = Instant::now() + (TASK_ROUND_WINDOW - tokio::time::Duration::from_secs(now() % TASK_ROUND_WINDOW.as_secs()));
-    let mut interval_aligned = tokio::time::interval_at(start, TASK_ROUND_WINDOW);
+    // let start = Instant::now() + (TASK_ROUND_WINDOW - tokio::time::Duration::from_secs(now() % TASK_ROUND_WINDOW.as_secs()));
+    // let mut interval_aligned = tokio::time::interval_at(start, TASK_ROUND_WINDOW);
+    // let mut alive_interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
 
     loop {
         select! {
@@ -456,11 +458,11 @@ pub async fn run_signer_daemon(conf: Config) {
                 },
             },
             _ = interval_free.tick() => {
-                time_free_tasks_executor(&signer).await;
+                time_free_tasks_executor(&mut swarm, &signer).await;
             }
-            _ = interval_aligned.tick() => {
-                time_aligned_tasks_executor(&mut swarm, &signer).await;
-            }
+            // _ = interval_aligned.tick() => {
+            //     time_aligned_tasks_executor(&mut swarm, &signer).await;
+            // }
 
         }
     }
@@ -482,8 +484,6 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<TSSBehaviour>, conf: &Config) {
                 warn!("Failed to start KAD bootstrap: {:?}", e);
             }
         }
-    } else {
-        swarm.behaviour_mut().kad.set_mode(Some(libp2p::kad::Mode::Server));
     }
 }
 
@@ -493,28 +493,27 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
         TSSBehaviourEvent::Gossip(gossipsub::Event::Message {message, .. }) => {
             // debug!("Received {:?}", message);
             if message.topic == SubscribeTopic::DKG.topic().hash() {
-                let response: DKGResponse = match serde_json::from_slice(&message.data) {
-                    Ok(resp) => resp,
-                    Err(_e) => {
-                        // debug!("Failed to deserialize the DKG message: {}", e);
-                        return;
-                    }
-                };
-
-                // dkg_event_handler(shuttler, swarm.behaviour_mut(), &propagation_source, dkg_message);
-                // debug!("Gossip Received DKG Response from {propagation_source}: {message_id} {:?}", response);
-                received_dkg_response(response, signer);
+                if let Ok(response) = serde_json::from_slice::<DKGResponse>(&message.data) {
+                    mem_store::update_alive_table(HeartBeatMessage {
+                        identifier: response.sender.clone(),
+                        last_seen: response.nonce.clone()
+                    });
+                    received_dkg_response(response, signer);                   
+                }
             } else if message.topic == SubscribeTopic::SIGNING.topic().hash() {
-                let msg: SignMesage = match serde_json::from_slice(&message.data) {
-                    Ok(msg) => msg,
-                    Err(_e) => {
-                        // debug!("Failed to deserialize the Sign message: {}", e);
-                        return;
-                    }
-                };
-
                 // debug!("Gossip Received {:?}", msg);
-                received_sign_message(signer, msg);
+                if let Ok(msg) = serde_json::from_slice::<SignMesage>(&message.data) {
+                    mem_store::update_alive_table(HeartBeatMessage {
+                        identifier: msg.sender.clone(),
+                        last_seen: msg.nonce.clone()
+                    });
+                    received_sign_message(swarm, signer, msg);
+                }
+            } else if message.topic == SubscribeTopic::ALIVE.topic().hash() {
+                if let Ok(alive) = serde_json::from_slice(&message.data) {
+                    debug!("Received {:?}", alive);
+                    mem_store::update_alive_table( alive );
+                }
             }
         }
         TSSBehaviourEvent::Identify(identify::Event::Received { peer_id, info, .. }) => {

@@ -18,9 +18,7 @@ use frost_secp256k1_tr::{self as frost, round1::{SigningCommitments, SigningNonc
 use crate::{
     app::{config::TASK_ROUND_WINDOW, signer::Signer}, 
     helper::{
-        client_side::send_cosmos_transaction, 
-        encoding::{self, from_base64, hash, to_base64}, 
-        gossip::publish_signing_package, now,
+        client_side::send_cosmos_transaction, encoding::{self, from_base64, hash, to_base64}, gossip::publish_signing_package, mem_store, now
     }
 };
 
@@ -118,7 +116,7 @@ pub struct TransactionInput {
     pub address: String,
 }
 
-pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
+pub fn save_task_into_signing_queue(swarm: &mut Swarm<TSSBehaviour>, request: SigningRequest, signer: &Signer) {
     if signer.is_signing_task_exists(&request.txid) {
         return
     }
@@ -183,9 +181,11 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
         return
     }
 
-    let task = SignTask::new(task_id, request.psbt, inputs, request.creation_time);
+    let mut task = SignTask::new(task_id, request.psbt, inputs, request.creation_time);
 
     signer.save_sign_task(&task);
+
+    generate_commitments(swarm, signer, &mut task);
 
 }
 
@@ -260,7 +260,7 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
     });
 }
 
-pub fn received_sign_message(signer: &Signer, msg: SignMesage) {
+pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, msg: SignMesage) {
 
     match PublicKey::from_slice(&msg.sender.serialize()) {
         Ok(public_key) => {
@@ -285,51 +285,40 @@ pub fn received_sign_message(signer: &Signer, msg: SignMesage) {
             debug!("Received round1 message: {:?} {:?}", c_keys.len(), c_keys);
 
             let mut remote_commitments = signer.get_signing_commitments(&task_id);
-            commitments.iter().for_each(|(index, coming)| {
+            commitments.iter().for_each(|(index, incoming)| {
                 match remote_commitments.get_mut(index) {
                     Some(existing) => {
-                        existing.extend(coming);
+                        existing.extend(incoming);
                     },
                     None => {
-                        remote_commitments.insert(*index, coming.clone());
+                        remote_commitments.insert(*index, incoming.clone());
                     },
                 }
             });
 
-            match signer.get_signing_task(&task_id) {
-                Some(task) => {
-                    let first = 0; 
-                    // Move to Round2 if the commitment of all inputs received from the latest retry exceeds the minimum number of signers.
-                    // Only check the first input, because all other inputs are in the same package.
-                    if let Some(commitments) = remote_commitments.get(&first) {
-                        if let Some(input) = task.inputs.get(&first) {
-                            if let Some(key) = signer.get_keypair_from_db(&input.address) {
-                                let threshold = key.priv_key.min_signers().clone() as usize;
-                                if commitments.len() >= threshold {
-                                    info!("{}:{first} is ready for Round2: {}>={}", &task_id[..6], commitments.len(), threshold);
-                                } else {
-                                    debug!("{}:{first} commitment lens: {}/{}", &task_id[..6], commitments.len(), threshold);
-                                }
+            signer.save_signing_commitments(&task_id, &remote_commitments);
+
+            if let Some(mut task) = signer.get_signing_task(&task_id) {
+                let first = 0; 
+                // Move to Round2 if the commitment of all inputs received from the latest retry exceeds the minimum number of signers.
+                // Only check the first input, because all other inputs are in the same package.
+                if let Some(commitments) = remote_commitments.get(&first) {
+                    if let Some(input) = task.inputs.get(&first) {
+                        if let Some(key) = signer.get_keypair_from_db(&input.address) {
+                            let participants = key.pub_key.verifying_shares().keys().collect::<Vec<_>>();
+                            let threshold = key.priv_key.min_signers().clone() as usize;
+                            // if commitments.len() == participants.len() {
+                            //     generate_signature_shares(swarm, signer, &mut task);
+                            // } else 
+                            if commitments.len() >= threshold && commitments.len() == mem_store::get_alive_participants(&participants) {
+                                generate_signature_shares(swarm, signer, &mut task);
+                            } else {
+                                debug!("{}:{first} commitment lens: {}/{}", &task_id[..6], commitments.len(), participants.len());
                             }
                         }
                     }
-
-                    // Commitments are accepted only when a fingerprint does not exist. if it does, the task moves to the next round.
-                    if task.fingerprint.len() == 0 {
-                    }
-
-                },
-                None => {
-                    debug!("Not found task {} on my sided", &task_id[..6]);
-                    // save_sign_remote_commitments(&task_id, &remote_commitments);
                 }
-            };
-
-            // let first = 0;
-            // let c_keys = remote_commitments.get(&first).unwrap().keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
-            // debug!("Received round1 message: {:?} {:?}", c_keys.len(), c_keys);
-            signer.save_signing_commitments(&task_id, &remote_commitments);
-            
+            }
         },
         SignPackage::Round2(sig_shares) => {
             let first = 0;
@@ -349,18 +338,14 @@ pub fn received_sign_message(signer: &Signer, msg: SignMesage) {
                 }
             });
 
-            // sanitize(&task, &mut remote_sig_shares);
-            // let first = 0;
-            // let c_keys = remote_sig_shares.get(&first).unwrap().keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
-            // debug!("Received round2 message: {:?} {:?}", c_keys.len(), c_keys);
             signer.save_signing_signature_shares(&task_id, &remote_sig_shares);
 
             let first = 0;
-            // Move to Round2 if the commitment of all inputs received from the latest retry exceeds the minimum number of signers.
+            // Try to aggregrate if the signature shares of all inputs received from the latest retry exceeds the minimum number of signers.
             // Only check the first input, because all other inputs are in the same package.
             if let Some(shares) = remote_sig_shares.get(&first) {
             
-                let task = match signer.get_signing_task(&task_id) {
+                let mut task = match signer.get_signing_task(&task_id) {
                     Some(t) => t,
                     None => {
                         debug!("Skip, not found the task {} from local sign queue.", &task_id);
@@ -370,11 +355,15 @@ pub fn received_sign_message(signer: &Signer, msg: SignMesage) {
 
                 if let Some(input) = task.inputs.get(&first) {
                     if let Some(key) = signer.get_keypair_from_db(&input.address) {
+                        let participants = key.pub_key.verifying_shares().keys().map(|a| a).collect::<Vec<_>>(); 
                         let threshold = key.priv_key.min_signers().clone() as usize;
-                        if shares.len() >= threshold {
-                            info!("Ready for aggregration: {}:{first} {:?}>={}", &task_id[..6], shares.len(), threshold);
+                        // if shares.len() == participants.len() {
+                        //     aggregate_signature_shares(signer, &mut task);
+                        // } else 
+                        if shares.len() >= threshold && shares.len() == mem_store::get_alive_participants(&participants) {
+                            aggregate_signature_shares(signer, &mut task);
                         } else {
-                            debug!("Received signature shares: {}:{first} {:?}/{}", &task_id[..6], shares.len(), threshold);
+                            debug!("Received signature shares: {}:{first} {:?}/{}", &task_id[..6], shares.len(), participants.len());
                         }
                     }
                 }

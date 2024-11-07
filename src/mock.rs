@@ -228,7 +228,10 @@ async fn mock_latest_block() -> Result<tonic::Response<cosmos_sdk_proto::cosmos:
     let mut header = Header::default();
     header.chain_id = "mock-testnet".to_owned();
     header.height = 123;
-    // header.time
+    header.time = Some(cosmos_sdk_proto::tendermint::google::protobuf::Timestamp {
+        seconds: now() as i64,
+        nanos: 0
+    });
     
     let res = cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::GetLatestBlockResponse {
         block_id: None,

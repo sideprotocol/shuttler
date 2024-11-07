@@ -6,25 +6,25 @@ use tracing::{debug, error, info};
 
 use crate::{
     app::signer::Signer, 
-    helper::client_side::{get_signing_requests, send_cosmos_transaction}, 
+    helper::{client_side::{get_signing_requests, send_cosmos_transaction}, gossip::publish_alive_info}, 
     protocols::{dkg::{broadcast_dkg_packages, generate_round1_package, DKGTask}, 
     sign::{process_tasks, save_task_into_signing_queue}, Round, TSSBehaviour
 }};
-pub async fn time_free_tasks_executor(
-    signer: &Signer,
-) {
-    debug!("start");
+pub async fn time_free_tasks_executor( swarm : &mut Swarm<TSSBehaviour>, signer: &Signer ) {
     if signer.config().get_validator_key().is_none() {
         return;
     }
 
-    debug!("querying...");
+    publish_alive_info(swarm, signer).await;
 
     // 1. fetch dkg request
     fetch_dkg_requests(signer).await;
-    fetch_signing_requests(signer).await;
-    // broadcast_sign_packages(swarm);
+    broadcast_dkg_packages(swarm, signer);
     submit_dkg_address(signer).await;
+
+
+    fetch_signing_requests(swarm, signer).await;
+    // broadcast_sign_packages(swarm);
 }
 
 pub async fn time_aligned_tasks_executor(
@@ -32,12 +32,13 @@ pub async fn time_aligned_tasks_executor(
     signer: &Signer,
 ) {
 
-    debug!("Start time aligned task!");
+    debug!("Connected peers: {:?}", swarm.connected_peers().collect::<Vec<_>>());
+
     if signer.config().get_validator_key().is_none() {
         return;
     }
 
-    debug!("Connected peers: {:?}", swarm.connected_peers().collect::<Vec<_>>());
+    debug!("Start time aligned task!");
 
     // 1. collect dkg packages
     broadcast_dkg_packages(swarm, signer);
@@ -47,6 +48,7 @@ pub async fn time_aligned_tasks_executor(
 }
 
 pub async fn fetch_signing_requests(
+    swarm: &mut Swarm<TSSBehaviour>, 
     signer: &Signer,
 ) {
     let host = signer.config().side_chain.grpc.as_str();
@@ -63,7 +65,7 @@ pub async fn fetch_signing_requests(
                 }
             });
             for request in requests {
-                save_task_into_signing_queue(request, signer);
+                save_task_into_signing_queue(swarm, request, signer);
             }
         }
         Err(e) => {
