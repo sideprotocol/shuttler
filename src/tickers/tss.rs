@@ -12,7 +12,11 @@ use crate::{
 }};
 pub async fn time_free_tasks_executor( swarm : &mut Swarm<TSSBehaviour>, signer: &Signer ) {
     
-    debug!("Connected peers: {:?}", swarm.connected_peers().collect::<Vec<_>>());
+    let connected = swarm.connected_peers().collect::<Vec<_>>();
+    debug!("Connected peers: {:?}", connected);
+    if connected.len() == 0 {
+        return
+    }
 
     if signer.config().get_validator_key().is_none() {
         return;
