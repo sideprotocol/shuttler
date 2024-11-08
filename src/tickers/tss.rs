@@ -8,7 +8,7 @@ use crate::{
     app::signer::Signer, 
     helper::{client_side::{get_signing_requests, send_cosmos_transaction}, gossip::sending_heart_beat}, 
     protocols::{dkg::{broadcast_dkg_packages, generate_round1_package, DKGTask}, 
-    sign::{save_task_into_signing_queue, submit_signature_or_reset_task}, Round, TSSBehaviour
+    sign::{save_task_into_signing_queue, dispatch_executions}, Round, TSSBehaviour
 }};
 pub async fn time_free_tasks_executor( swarm : &mut Swarm<TSSBehaviour>, signer: &Signer ) {
     
@@ -31,13 +31,12 @@ pub async fn time_free_tasks_executor( swarm : &mut Swarm<TSSBehaviour>, signer:
     submit_dkg_address(signer).await;
 
     // 3 signing tasks
-    fetch_signing_requests(swarm, signer).await;
-    submit_signature_or_reset_task(swarm, signer).await;
+    fetch_signing_requests(signer).await;
+    dispatch_executions(swarm, signer).await;
     // broadcast_sign_packages(swarm);
 }
 
 pub async fn fetch_signing_requests(
-    swarm: &mut Swarm<TSSBehaviour>, 
     signer: &Signer,
 ) {
     let host = signer.config().side_chain.grpc.as_str();
@@ -54,7 +53,7 @@ pub async fn fetch_signing_requests(
                 }
             });
             for request in requests {
-                save_task_into_signing_queue(swarm, request, signer);
+                save_task_into_signing_queue(request, signer);
             }
         }
         Err(e) => {

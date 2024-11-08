@@ -14,7 +14,8 @@ use futures::StreamExt;
 use libp2p::identity::Keypair;
 use libp2p::kad::store::MemoryStore;
 
-use libp2p::swarm::SwarmEvent;
+use libp2p::swarm::dial_opts::PeerCondition;
+use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
 use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
 use serde::Serialize;
 
@@ -469,7 +470,7 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
                     //     swarm.behaviour_mut().identify.push(connected);
                     // }
                     let addr = endpoint.get_remote_address();
-                    info!("Connected to {:?}/p2p/{peer_id} ", addr);
+                    info!("Connected to {:?}/p2p/{peer_id}, ", addr);                  
                 },
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                     info!("Disconnected {peer_id}: {:?}", cause);
@@ -528,9 +529,29 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 }
             }
         }
+        TSSBehaviourEvent::Identify(identify::Event::Received { peer_id, info, .. }) => {
+            swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
+            // info!(" @@(Received) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
+            info.listen_addrs.iter().for_each(|addr| {
+                if !addr.to_string().starts_with("/ip4/127.0.0.1") {
+                    tracing::debug!("Discovered: {addr}/p2p/{peer_id}");
+                    swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
+                }
+            });
+        }
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
-            for (peer_id, _multiaddr) in list {
-                swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id); 
+            for (peer_id, multiaddr) in list {
+                swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
+                if swarm.is_connected(&peer_id) {
+                    return;
+                }
+                let opt = DialOpts::peer_id(peer_id)
+                    .addresses(vec![multiaddr.clone()])
+                    .condition(PeerCondition::DisconnectedAndNotDialing)
+                    .build();
+                if swarm.dial(opt).is_ok() {
+                    info!("Connected to {multiaddr}");
+                };  
             }
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Expired(list)) => {
