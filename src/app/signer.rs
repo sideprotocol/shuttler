@@ -14,8 +14,7 @@ use futures::StreamExt;
 use libp2p::identity::Keypair;
 use libp2p::kad::store::MemoryStore;
 
-use libp2p::swarm::dial_opts::PeerCondition;
-use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
+use libp2p::swarm::SwarmEvent;
 use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
 use serde::Serialize;
 
@@ -461,18 +460,19 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
                     event_handler(evt, &mut swarm, &signer).await;
                 },
                 SwarmEvent::NewListenAddr { address, .. } => {
-                    info!("Local node is listening on {address}/p2p/{}", swarm.local_peer_id());
+                    info!("Listening on {address}/p2p/{}", swarm.local_peer_id());
                 },
-                SwarmEvent::ConnectionEstablished { peer_id, num_established, endpoint, ..} => {
+                SwarmEvent::ConnectionEstablished { peer_id, endpoint, ..} => {
                     swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
                     // let connected = swarm.connected_peers().map(|p| p.clone()).collect::<Vec<_>>();
                     // if connected.len() > 0 {
                     //     swarm.behaviour_mut().identify.push(connected);
                     // }
-                    info!("Connected to {peer_id}, {num_established} {:?} ", endpoint);                  
+                    let addr = endpoint.get_remote_address();
+                    info!("Connected to {:?}/p2p/{peer_id} ", addr);
                 },
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
-                    info!("Connection {peer_id} closed.{:?}", cause);
+                    info!("Disconnected {peer_id}: {:?}", cause);
                 },
                 _ => {
                     // debug!("Swarm event: {:?}", swarm_event);
@@ -494,7 +494,7 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<TSSBehaviour>, conf: &Config) {
         let address = Multiaddr::from_str(addr_text).expect("invalid bootstrap node address");
         let peer = PeerId::from_str(addr_text.split("/").last().unwrap()).expect("invalid peer id");
         swarm.behaviour_mut().kad.add_address(&peer, address);
-        info!("Adding bootstrap node: {:?}", addr_text);
+        info!("Load bootstrap node: {:?}", addr_text);
     }
     if conf.bootstrap_nodes.len() > 0 {
         match swarm.behaviour_mut().kad.bootstrap() {
@@ -549,24 +549,8 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
         //     }
         // }
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
-            for (peer_id, multiaddr) in list {
-                info!("mDNS discovered a new peer: {peer_id}");
-                swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-                if swarm.is_connected(&peer_id) {
-                    return;
-                }
-                let opt = DialOpts::peer_id(peer_id)
-                    .addresses(vec![multiaddr.clone()])
-                    .condition(PeerCondition::DisconnectedAndNotDialing)
-                    .build();
-                match swarm.dial(opt) {
-                    Ok(_) => {
-                        info!("Connected to {peer_id}, {multiaddr}");
-                    }
-                    Err(e) => {
-                        error!("Unable to connect to {peer_id}: {e}");
-                    }
-                };  
+            for (peer_id, _multiaddr) in list {
+                swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id); 
             }
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Expired(list)) => {
