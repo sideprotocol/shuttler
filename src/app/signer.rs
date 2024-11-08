@@ -528,26 +528,6 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 }
             }
         }
-        // TSSBehaviourEvent::Identify(identify::Event::Received { peer_id, info, .. }) => {
-        //     swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-        //     // // info!(" @@(Received) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
-        //     // info.listen_addrs.iter().for_each(|addr| {
-        //     //     if !addr.to_string().starts_with("/ip4/127.0.0.1") {
-        //     //         debug!("Discovered new address: {addr}/p2p/{peer_id} ");
-        //     //         swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
-        //     //     }
-        //     // });
-        // }
-        // TSSBehaviourEvent::Kad(libp2p::kad::Event::RoutablePeer { peer, address }) => {
-        //     info!("@@@ Kad @@@ discovered a new routable peer {peer} - {:?}", address);
-        //     swarm.behaviour_mut().kad.add_address(&peer, address);
-        // } 
-        // TSSBehaviourEvent::Kad(libp2p::kad::Event::RoutingUpdated { peer, is_new_peer, addresses, .. }) => {
-        //     debug!("KAD Routing updated for {peer} {is_new_peer}: {:?}", addresses);
-        //     if is_new_peer {
-        //         swarm.behaviour_mut().gossip.add_explicit_peer(&peer);
-        //     }
-        // }
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, _multiaddr) in list {
                 swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id); 
