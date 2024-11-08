@@ -277,7 +277,7 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
 
     let task_id = msg.task_id.clone();
 
-    // filter package from non-participant.
+    // filter packages from non-participant.
     let mut task = match signer.get_signing_task(&task_id) {
         Some(t) => t,
         None => return,
@@ -287,7 +287,7 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
         return 
     }
 
-    // Only check first input
+    // Only check first input for efficiency.
     let first = 0;
     let vkp = match signer.get_keypair_from_db(&task.inputs[&first].address) {
         Some(kp) => kp,
@@ -342,7 +342,6 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
         },
         SignPackage::Round2(sig_shares) => {
 
-            // Merge all commitments by input index
             let mut remote_sig_shares = signer.get_signing_signature_shares(&task_id);
             // return if msg has received.
             if let Some(exists) = remote_sig_shares.get(&first) {
@@ -350,6 +349,8 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
                     return
                 }
             }
+
+            // Merge all signature shares
             sig_shares.iter().for_each(|(index, incoming)| {
                 match remote_sig_shares.get_mut(index) {
                     Some(existing) => {
