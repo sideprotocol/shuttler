@@ -27,8 +27,9 @@ lazy_static! {
 }
 
 pub fn update_alive_table(alive: HeartBeatMessage) {
-    let mut x= AliveTable.lock().unwrap();
-    x.insert(alive.identifier, alive.last_seen);
+    let mut table= AliveTable.lock().unwrap();
+    table.insert(alive.identifier, alive.last_seen);
+    table.retain(|_, v| {*v + 1800u64 > now()});
 }
 
 pub fn get_alive_participants(keys: &Vec<&Identifier>) -> usize {
@@ -39,11 +40,11 @@ pub fn get_alive_participants(keys: &Vec<&Identifier>) -> usize {
         // debug!("is alive {:?} {}", key, now() - last_seen);
         now() - last_seen < TASK_ROUND_WINDOW.as_secs() * 2
     }).count() + 1;
-    debug!("alive table: {alive}, {:?}", table);
+    // debug!("alive table: {alive}, {:?}", table);
     alive
 }
 
-pub fn is_alive(identifier: &Identifier) -> bool {
+pub fn is_white_listed_peer(identifier: &Identifier) -> bool {
     let table= AliveTable.lock().unwrap();
     table.contains_key(identifier)
 }

@@ -1,4 +1,4 @@
-use std::{collections::{btree_map::Keys, BTreeMap}, time::Duration};
+use std::collections::{btree_map::Keys, BTreeMap};
 
 use bitcoin::{sighash::{self, SighashCache}, Address, Psbt, TapSighashType, Witness};
 use bitcoin_hashes::Hash;
@@ -16,7 +16,7 @@ use tracing::{debug, error, info};
 use frost::{Identifier, round1, round2}; 
 use frost_secp256k1_tr::{self as frost, round1::{SigningCommitments, SigningNonces}};
 use crate::{
-    app::signer::Signer, 
+    app::{config::TASK_ROUND_WINDOW, signer::Signer}, 
     helper::{
         client_side::send_cosmos_transaction, encoding::{self, from_base64, hash, to_base64}, gossip::publish_signing_package, mem_store, now
     }
@@ -209,8 +209,7 @@ pub async fn submit_signature_or_reset_task(swarm: &mut Swarm<TSSBehaviour>, sig
                 generate_commitments(swarm, signer, &mut task);
             },
             Status::WIP => {
-                let signing_window = Duration::from_secs(600);
-                if task.start_time + signing_window.as_secs() < now() {
+                if task.start_time + TASK_ROUND_WINDOW.as_secs() * 10 < now() {
                     info!("Timeout, re-sign task {}", task.id);
                     task.start_time = now();
                     task.status = Status::RESET;
@@ -261,7 +260,7 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
 
 pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, msg: SignMesage) {
     // This is for upgrade
-    if !mem_store::is_alive(&msg.sender) {
+    if !mem_store::is_white_listed_peer(&msg.sender) {
         return 
     }
     
@@ -281,6 +280,20 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
     }
 
     let task_id = msg.task_id.clone();
+
+    // filter package from non-participant.
+    if let Some(task) = signer.get_signing_task(&task_id) {
+        if !task.inputs.iter().any(|(_, input)| {
+            match signer.get_keypair_from_db(&input.address) {
+                Some(kp) => {
+                    kp.pub_key.verifying_shares().contains_key(&msg.sender)
+                },
+                None => false,
+            }
+        }) {
+            return
+        }
+    }
     match msg.package {
         SignPackage::Round1(commitments) => {
             let first = 0;
@@ -317,6 +330,9 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
                     if let Some(input) = task.inputs.get(&first) {
                         if let Some(key) = signer.get_keypair_from_db(&input.address) {
                             let participants = key.pub_key.verifying_shares().keys().collect::<Vec<_>>();
+                            if !participants.contains(&&msg.sender) {
+                                return
+                            }
                             let threshold = key.priv_key.min_signers().clone() as usize;
                             sanitize(commitments, &participants);
                             debug!("{}:{first} commitment lens: {}/{}", &task_id[..6], commitments.len(), participants.len());
@@ -333,9 +349,6 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
         },
         SignPackage::Round2(sig_shares) => {
             let first = 0;
-            let c_keys = sig_shares.get(&first).unwrap().keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
-            debug!("Received round2 message: {:?} {:?}", c_keys.len(), c_keys);
-
             // Merge all commitments by input index
             let mut remote_sig_shares = signer.get_signing_signature_shares(&task_id);
             // return if msg has received.

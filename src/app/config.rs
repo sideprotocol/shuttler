@@ -49,7 +49,7 @@ pub struct Config {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Keypair {
+pub struct VaultKeypair {
     pub priv_key: KeyPackage,
     pub pub_key: PublicKeyPackage,
     pub tweak: Option<[u8; 32]>,

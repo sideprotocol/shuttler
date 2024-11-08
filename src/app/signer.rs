@@ -24,7 +24,7 @@ use crate::app::config::Config;
 use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::from_base64;
-use crate::helper::gossip::{subscribe_gossip_topics, SubscribeTopic};
+use crate::helper::gossip::{subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic};
 use crate::helper::mem_store;
 use crate::protocols::sign::{received_sign_message, SignMesage, SignTask};
 use crate::tickers::tss::time_free_tasks_executor;
@@ -168,7 +168,7 @@ impl Signer {
             let address_with_tweak = get_group_address_by_tweak(&pubkey.verifying_key(), tweak.clone(), self.config.bitcoin.network);
 
             addrs.push(address_with_tweak.to_string());
-            self.save_keypair_to_db(address_with_tweak.to_string(), &config::Keypair{
+            self.save_keypair_to_db(address_with_tweak.to_string(), &config::VaultKeypair{
                 priv_key: key.clone(),
                 pub_key: pubkey.clone(),
                 tweak: tweak,
@@ -337,15 +337,14 @@ impl Signer {
         self.db_sign.contains_key(task_id.as_bytes()).map_or(false, |v|v)
     }
 
-    pub fn list_keypairs(&self) -> Vec<String> {
+    pub fn list_keypairs(&self) -> Vec<(String, config::VaultKeypair)> {
         self.db_keypair.iter().map(|v| {
-            let (k, _value) = v.unwrap();
-            // keys.push(String::from_utf8(key.unwrap().0.to_vec()).unwrap());
-            String::from_utf8(k.to_vec()).unwrap()
+            let (k, value) = v.unwrap();
+            (String::from_utf8(k.to_vec()).unwrap(), serde_json::from_slice(&value).unwrap())
         }).collect::<Vec<_>>()
     }
 
-    pub fn get_keypair_from_db(&self, address: &str) -> Option<config::Keypair> {
+    pub fn get_keypair_from_db(&self, address: &str) -> Option<config::VaultKeypair> {
         match self.db_keypair.get(address) {
             Ok(Some(value)) => {
                 Some(serde_json::from_slice(&value).unwrap())
@@ -357,7 +356,7 @@ impl Signer {
         }
     }
     
-    pub fn save_keypair_to_db(&self, address: String, keypair: &config::Keypair) {
+    pub fn save_keypair_to_db(&self, address: String, keypair: &config::VaultKeypair) {
         let value = serde_json::to_vec(keypair).unwrap();
         let _ = self.db_keypair.insert(address, value);
     }
@@ -373,8 +372,12 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
     conf.load_validator_key();
     let signer = Signer::new(conf.clone());
 
-    for (i, key ) in signer.list_keypairs().iter().enumerate() {
-        info!("address {i}. {key}");
+    for (i, (addr, vkp) ) in signer.list_keypairs().iter().enumerate() {
+        info!("Vault {i}. {addr}");
+        // maintain a permission white list for heartbeat
+        vkp.pub_key.verifying_shares().keys().for_each(|identifier| {
+            mem_store::update_alive_table(HeartBeatMessage { identifier: identifier.clone(), last_seen: 0 });
+        });
     }
 
     let libp2p_keypair = Keypair::from_protobuf_encoding(from_base64(&conf.p2p_keypair).unwrap().as_slice()).unwrap();
@@ -514,7 +517,6 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 }
             } else if message.topic == SubscribeTopic::ALIVE.topic().hash() {
                 if let Ok(alive) = serde_json::from_slice(&message.data) {
-                    debug!("Received {:?}", alive);
                     mem_store::update_alive_table( alive );
                 }
             }
