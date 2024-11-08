@@ -209,9 +209,12 @@ pub async fn submit_signature_or_reset_task(swarm: &mut Swarm<TSSBehaviour>, sig
                 generate_commitments(swarm, signer, &mut task);
             },
             Status::WIP => {
-                if task.start_time + TASK_ROUND_WINDOW.as_secs() * 20 < now() {
+                let current = now();
+                if task.start_time + TASK_ROUND_WINDOW.as_secs() * 20 < current {
                     info!("Timeout, re-sign task {}", task.id);
-                    task.start_time = now();
+                    while task.start_time < current {
+                        task.start_time += TASK_ROUND_WINDOW.as_secs() * 20;
+                    }
                     task.status = Status::RESET;
                     signer.save_signing_task(&task);
                     signer.remove_signing_task_variables(&task.id);
