@@ -39,7 +39,7 @@ use std::io;
 use std::time::Duration;
 use tokio::select;
 use usize as Index;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use ed25519_compact::SecretKey;
 
