@@ -361,6 +361,13 @@ impl Signer {
         let _ = self.db_keypair.insert(address, value);
     }
 
+    pub fn reset_db(&self) {
+        self.db_dkg.clear().expect("failed to clean db");
+        self.db_dkg_variables.clear().expect("failed to clean db");
+        self.db_sign.clear().expect("failed to clean db");
+        self.db_sign_variables.clear().expect("failed to clean db");
+    }
+
 }
 
 
