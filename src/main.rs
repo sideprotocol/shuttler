@@ -11,8 +11,8 @@ async fn main() {
         Commands::Init { port, network } => {
             init::execute(&cli, port.to_owned(), network.to_owned());
         }
-        Commands::Start {relayer, signer} => {
-            start::execute(&cli.home, *relayer, *signer).await;
+        Commands::Start {relayer, signer, seed} => {
+            start::execute(&cli.home, *relayer, *signer, *seed).await;
         }
         Commands::Address => {
             address::execute(&cli);

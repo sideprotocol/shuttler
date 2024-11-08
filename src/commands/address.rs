@@ -1,4 +1,4 @@
-use crate::app::config::Config;
+use crate::app::{config::Config, signer::Signer};
 
 use super::Cli;
 
@@ -10,11 +10,10 @@ pub fn execute(cli: &Cli) {
     println!("\n NOTE: Please fund relayer address on sidechain before using it.");
     println!("-------------------------------------------------------------");
 
-    // println!("\nVault addresses: ({})", keypairs.len());
-    // println!("-------------------------------------------------------------");
-    // let keypairs = config::list_keypairs();
-    // for (index, k) in keypairs.iter().enumerate() {
-    //     println!("{}: {}", index, k);
-    // }
-    // println!("\n");
+    let conf = Config::from_file(&cli.home).unwrap();
+    let signer = Signer::new(conf);
+    println!("\nVault Address:");
+    signer.list_keypairs().iter().enumerate().for_each(| (i, (addr, _kp))| {
+        println!("{i}. {addr}");
+    });
 }
