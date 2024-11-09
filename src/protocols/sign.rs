@@ -331,7 +331,7 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
             };
             // sanitize(commitments, &participants);
             let alive = mem_store::get_alive_participants(&participants);
-            debug!("{}:{first} commitments: {}/{}({alive})", &task_id[..6], commitments.len(), participants.len());
+            debug!("{}:{first} commitments: {}/{}({alive}) from {:?}", &task_id[..6], commitments.len(), participants.len(), msg.sender);
             
             if commitments.len() == participants.len() {
                 generate_signature_shares(swarm, signer, &mut task);
@@ -368,7 +368,7 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
             if let Some(shares) = remote_sig_shares.get_mut(&first) {
                 // sanitize(shares, &participants);
                 let alive = mem_store::get_alive_participants(&participants);
-                debug!("Received signature shares: {}:{first} {:?}/{}({alive})", &task_id[..6], shares.len(), participants.len());
+                debug!("Received signature shares: {}:{first} {:?}/{}({alive}) from {:?}", &task_id[..6], shares.len(), participants.len(), msg.sender);
                 
                 if shares.len() == participants.len() {
                     aggregate_signature_shares(signer, &mut task);
