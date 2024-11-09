@@ -208,7 +208,7 @@ pub async fn dispatch_executions(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
                 let retry = (now() - task.start_time) / window;
                 
                 if task.retry != retry {
-                    info!("Timeout, re-sign {}", task.id);
+                    info!("Timeout, re-sign {retry}, {}", task.id);
                     task.retry = retry;
                     task.status = Status::RESET;
                     signer.save_signing_task(&task);
@@ -242,18 +242,22 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
             };
         }
     });
+
     // save local variable: nonces
     signer.save_signing_local_variable(&task.id, &nonces);
     signer.save_signing_commitments(&task.id, &stored_commitments);
 
     // publish remote variable: commitment
-    publish_signing_package(swarm, signer, &mut SignMesage {
+    let mut msg =  SignMesage {
         task_id: task.id.clone(),
         package: SignPackage::Round1(broadcast_package),
         nonce: now(),
         sender: signer.identifier().clone(),
         signature: vec![], 
-    });
+    };
+    publish_signing_package(swarm, signer, &mut msg);
+
+    received_sign_message(swarm, signer, msg);
 }
 
 pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, msg: SignMesage) {
@@ -278,14 +282,20 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
     // filter packages from non-participant.
     let mut task = match signer.get_signing_task(&task_id) {
         Some(t) => t,
-        None => return,
+        None => {
+            debug!("task does not exists: {}", &task_id);
+            return;
+        }
     };
 
     // Only check first input for efficiency.
     let first = 0;
     let vkp = match signer.get_keypair_from_db(&task.inputs[&first].address) {
         Some(kp) => kp,
-        None => return,
+        None => {
+            debug!("vkp not found: {task_id}");
+            return;
+        }
     };
 
     let participants = vkp.pub_key.verifying_shares().keys().collect::<Vec<_>>();
@@ -485,6 +495,8 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
     publish_signing_package(swarm, signer, &mut msg);
     signer.save_signing_signature_shares(&task.id, &received_sig_shares);
     // save_sign_task(task)
+
+    received_sign_message(swarm, signer, msg);
 
 }
 
