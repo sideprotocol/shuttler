@@ -281,7 +281,7 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
         None => return,
     };
 
-    if task.status == Status::CLOSE {
+    if task.status != Status::WIP {
         return 
     }
 
