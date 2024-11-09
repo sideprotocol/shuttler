@@ -226,27 +226,19 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
     }
 
     let mut nonces = BTreeMap::new();
-    //let mut stored_commitments = signer.get_signing_commitments(&task.id);
-    // let mut stored_commitments = BTreeMap::new();
     let mut broadcast_package = BTreeMap::new();
 
     task.inputs.iter().for_each(|(index, input)| {
         if let Some((nonce, commitment)) = generate_nonce_and_commitment_by_address(&input.address, signer) {
             nonces.insert(*index, nonce);
-            let mut my_commits: BTreeMap<frost_core::Identifier<frost_secp256k1_tr::Secp256K1Sha256>, frost_core::round1::SigningCommitments<frost_secp256k1_tr::Secp256K1Sha256>> = BTreeMap::new();
+            let mut my_commits = BTreeMap::new();
             my_commits.insert(signer.identifier().clone(), commitment);
             broadcast_package.insert(*index, my_commits.clone());
-            // if let Some(existing) = stored_commitments.get_mut(index) {
-            //     existing.extend(my_commits);
-            // } else {
-                // stored_commitments.insert(*index, my_commits);
-            // };
         }
     });
 
     // save local variable: nonces
     signer.save_signing_local_variable(&task.id, &nonces);
-    // signer.save_signing_commitments(&task.id, &stored_commitments);
 
     // publish remote variable: commitment
     let mut msg =  SignMesage {
@@ -263,20 +255,21 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
 
 pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, msg: SignMesage) {
 
-    if let Ok(public_key) = PublicKey::from_slice(&msg.sender.serialize()) {
-        let raw = serde_json::to_vec(&msg.package).unwrap();
-        let sig = Signature::from_slice(&msg.signature).unwrap();
-        if public_key.verify(&raw, &sig).is_err() {
-            debug!("Verify signature failed");
-            return;
+    // Ensure the message is not forged.
+    match PublicKey::from_slice(&msg.sender.serialize()) {
+        Ok(public_key) => {
+            let raw = serde_json::to_vec(&msg.package).unwrap();
+            let sig = Signature::from_slice(&msg.signature).unwrap();
+            if public_key.verify(&raw, &sig).is_err() {
+                debug!("Verify signature failed");
+                return;
+            }
         }
-    } else {
-        return
+        Err(_) => return
     }
 
+    // Ensure the task exists locally to prevent forged signature tasks. 
     let task_id = msg.task_id.clone();
-
-    // filter packages from non-participant.
     let mut task = match signer.get_signing_task(&task_id) {
         Some(t) => t,
         None => {
@@ -290,11 +283,12 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
     let vkp = match signer.get_keypair_from_db(&task.inputs[&first].address) {
         Some(kp) => kp,
         None => {
-            debug!("vkp not found: {task_id}");
+            debug!("vault key pair not found: {task_id}");
             return;
         }
     };
 
+    // Ensure the message is from the participants.
     let participants = vkp.pub_key.verifying_shares().keys().collect::<Vec<_>>();
     if !participants.contains(&&msg.sender) {
         return
@@ -529,19 +523,15 @@ pub fn aggregate_signature_shares(signer: &Signer, task: &mut SignTask) -> Optio
             }
         };
 
-        let mut signing_commitments = match stored_remote_commitments.get(index) {
+        let signing_commitments = match stored_remote_commitments.get(index) {
             Some(e) => e.clone(),
             None => return None
         };
 
-        let mut signature_shares = match stored_remote_signature_shares.get(index) {
+        let signature_shares = match stored_remote_signature_shares.get(index) {
             Some(e) => e.clone(),
             None => return None
         };
-        
-        if signature_shares.len() < *keypair.priv_key.min_signers() as usize {
-            return None;
-        }
 
         if signing_commitments.len() != signature_shares.len() {
             let s_keys = signature_shares.keys();
