@@ -262,11 +262,7 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
 }
 
 pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, msg: SignMesage) {
-    // This is for upgrade
-    if !mem_store::is_white_listed_peer(&msg.sender) {
-        return 
-    }
-    
+        
     if let Ok(public_key) = PublicKey::from_slice(&msg.sender.serialize()) {
         let raw = serde_json::to_vec(&msg.package).unwrap();
         let sig = Signature::from_slice(&msg.signature).unwrap();
