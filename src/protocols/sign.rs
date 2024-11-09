@@ -281,10 +281,6 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
         None => return,
     };
 
-    if task.status != Status::WIP {
-        return 
-    }
-
     // Only check first input for efficiency.
     let first = 0;
     let vkp = match signer.get_keypair_from_db(&task.inputs[&first].address) {
