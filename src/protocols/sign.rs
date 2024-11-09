@@ -226,7 +226,8 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
     }
 
     let mut nonces = BTreeMap::new();
-    let mut stored_commitments = signer.get_signing_commitments(&task.id);
+    //let mut stored_commitments = signer.get_signing_commitments(&task.id);
+    // let mut stored_commitments = BTreeMap::new();
     let mut broadcast_package = BTreeMap::new();
 
     task.inputs.iter().for_each(|(index, input)| {
@@ -235,17 +236,17 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
             let mut my_commits: BTreeMap<frost_core::Identifier<frost_secp256k1_tr::Secp256K1Sha256>, frost_core::round1::SigningCommitments<frost_secp256k1_tr::Secp256K1Sha256>> = BTreeMap::new();
             my_commits.insert(signer.identifier().clone(), commitment);
             broadcast_package.insert(*index, my_commits.clone());
-            if let Some(existing) = stored_commitments.get_mut(index) {
-                existing.extend(my_commits);
-            } else {
-                stored_commitments.insert(*index, my_commits);
-            };
+            // if let Some(existing) = stored_commitments.get_mut(index) {
+            //     existing.extend(my_commits);
+            // } else {
+                // stored_commitments.insert(*index, my_commits);
+            // };
         }
     });
 
     // save local variable: nonces
     signer.save_signing_local_variable(&task.id, &nonces);
-    signer.save_signing_commitments(&task.id, &stored_commitments);
+    // signer.save_signing_commitments(&task.id, &stored_commitments);
 
     // publish remote variable: commitment
     let mut msg =  SignMesage {
@@ -400,7 +401,8 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
     }
     let stored_remote_commitments = signer.get_signing_commitments(&task.id);
 
-    let mut received_sig_shares = signer.get_signing_signature_shares(&task.id);
+    // let mut received_sig_shares = signer.get_signing_signature_shares(&task.id);
+    // let mut received_sig_shares = BTreeMap::new();
     // let received_sig_shares.get_mut(&retry);
     let mut broadcast_packages = BTreeMap::new();
     task.inputs.iter_mut().for_each(|(index, input)| {
@@ -462,14 +464,14 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
                 // broadcast my share
                 broadcast_packages.insert(index.clone(), my_share.clone());
                 // save my share to local
-                match received_sig_shares.get_mut(index) {
-                    Some(existing) => {
-                        existing.extend(my_share);
-                    },
-                    None => {
-                        received_sig_shares.insert(index.clone(), my_share);
-                    }
-                }
+                // match received_sig_shares.get_mut(index) {
+                //     Some(existing) => {
+                //         existing.extend(my_share);
+                //     },
+                //     None => {
+                //         received_sig_shares.insert(index.clone(), my_share);
+                //     }
+                // }
             }
             None => {
                 error!("skip, I am not the signer of task: {:?}", task.id);
@@ -493,7 +495,7 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
     debug!("publish signature share: {:?}", msg);
 
     publish_signing_package(swarm, signer, &mut msg);
-    signer.save_signing_signature_shares(&task.id, &received_sig_shares);
+    // signer.save_signing_signature_shares(&task.id, &received_sig_shares);
     // save_sign_task(task)
 
     received_sign_message(swarm, signer, msg);
