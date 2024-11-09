@@ -14,8 +14,7 @@ use futures::StreamExt;
 use libp2p::identity::Keypair;
 use libp2p::kad::store::MemoryStore;
 
-use libp2p::swarm::dial_opts::PeerCondition;
-use libp2p::swarm::{dial_opts::DialOpts, SwarmEvent};
+use libp2p::swarm::SwarmEvent;
 use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
 use serde::Serialize;
 
