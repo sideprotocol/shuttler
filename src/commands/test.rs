@@ -1,4 +1,4 @@
-use std::{fs::{self, File}, path::PathBuf};
+use std::{fs::{self, File}, path::PathBuf, time::Duration};
 
 use cosmos_sdk_proto::side::btcbridge::query_server::QueryServer;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_server::QueryServer as AuthServer;
@@ -12,7 +12,7 @@ use std::process::Command;
 
 use crate::{app::config, mock::{MockBlockService, MockQuery, MockTxService, DKG, DKG_FILE_NAME}};
 
-pub async fn execute(bin: &'static str, n: u32, tx: u32) {
+pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32) {
     // parameters
     //let n: u32 = 3;
     let executor = bin;
@@ -27,6 +27,9 @@ pub async fn execute(bin: &'static str, n: u32, tx: u32) {
     let mut participants = vec![];
     
     for i in 1..=n {
+
+        std::thread::sleep(Duration::from_secs(delay as u64));
+
         let mut home_i = PathBuf::new();
         home_i.push(testdir.path());
         home_i.push(format!("home{}", i));

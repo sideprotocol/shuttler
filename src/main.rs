@@ -32,8 +32,8 @@ async fn main() {
         Commands::Id => {
             id::execute(&cli.home);
         }
-        Commands::Test {bin, n, tx} => {
-            test::execute(bin.clone().leak(), *n, *tx).await;
+        Commands::Test {bin, n, tx, delay} => {
+            test::execute(bin.clone().leak(), *n, *tx, *delay).await;
         }
     }
 }
