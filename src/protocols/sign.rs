@@ -534,15 +534,11 @@ pub fn aggregate_signature_shares(signer: &Signer, task: &mut SignTask) -> Optio
             None => return None
         };
 
-        sanitize( &mut signing_commitments, &keypair.pub_key.verifying_shares().keys().map(|k| k).collect::<Vec<_>>());
-
         let mut signature_shares = match stored_remote_signature_shares.get(index) {
             Some(e) => e.clone(),
             None => return None
         };
         
-        sanitize( &mut signature_shares, &keypair.pub_key.verifying_shares().keys().map(|k| k).collect::<Vec<_>>());
-
         if signature_shares.len() < *keypair.priv_key.min_signers() as usize {
             return None;
         }
@@ -574,9 +570,9 @@ pub fn aggregate_signature_shares(signer: &Signer, task: &mut SignTask) -> Optio
                 // println!("public key: {:?}", pub)
                 // let sighash = &hex::decode(sig_shares_message.message).unwrap();
                 match keypair.pub_key.verifying_key().verify(signing_package.sig_target().clone(), &signature) {
-                    Ok(_) => info!( "{}:{} {:?} is verified", &task.id[..6], index, signature ),
+                    Ok(_) => info!( "{}:{} is verified", &task.id[..6], index ),
                     Err(e) => {
-                        error!("Signature is invalid {}", e);
+                        error!( "{}:{} is invalid: {e}", &task.id[..6], index );
                         return None;
                     }
                 }
@@ -601,7 +597,7 @@ pub fn aggregate_signature_shares(signer: &Signer, task: &mut SignTask) -> Optio
     };
 
     if psbt.inputs.iter().all(|input| input.final_script_witness.is_some() ) {
-        debug!("Signing task {} completed", &task.id[..6]);
+        debug!("Completed task {}", &task.id[..6]);
 
         let psbt_bytes = psbt.serialize();
         let psbt_base64 = encoding::to_base64(&psbt_bytes);
