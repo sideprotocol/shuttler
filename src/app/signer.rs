@@ -465,10 +465,10 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
                 },
                 SwarmEvent::ConnectionEstablished { peer_id, endpoint, ..} => {
                     swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-                    // let connected = swarm.connected_peers().map(|p| p.clone()).collect::<Vec<_>>();
-                    // if connected.len() > 0 {
-                    //     swarm.behaviour_mut().identify.push(connected);
-                    // }
+                    let connected = swarm.connected_peers().map(|p| p.clone()).collect::<Vec<_>>();
+                    if connected.len() > 0 {
+                        swarm.behaviour_mut().identify.push(connected);
+                    }
                     let addr = endpoint.get_remote_address();
                     info!("Connected to {:?}/p2p/{peer_id}, ", addr);                  
                 },
@@ -545,13 +545,14 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 if swarm.is_connected(&peer_id) {
                     return;
                 }
-                let opt = DialOpts::peer_id(peer_id)
-                    .addresses(vec![multiaddr.clone()])
-                    .condition(PeerCondition::DisconnectedAndNotDialing)
-                    .build();
-                if swarm.dial(opt).is_ok() {
-                    info!("Connected to {multiaddr}");
-                };  
+                swarm.add_peer_address(peer_id, multiaddr);
+                // let opt = DialOpts::peer_id(peer_id)
+                //     .addresses(vec![multiaddr.clone()])
+                //     .condition(PeerCondition::DisconnectedAndNotDialing)
+                //     .build();
+                // if swarm.dial(opt).is_ok() {
+                //     info!("Dailing {multiaddr}");
+                // };  
             }
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Expired(list)) => {
