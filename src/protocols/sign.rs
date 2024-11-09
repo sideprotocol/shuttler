@@ -69,6 +69,7 @@ pub struct SignTask {
     pub inputs: BTreeMap<Index, TransactionInput>,
     pub is_signature_submitted: bool,
     pub start_time: u64,
+    pub retry: u64,
 }
 
 impl SignTask {
@@ -88,6 +89,7 @@ impl SignTask {
             inputs,
             is_signature_submitted: false,
             start_time,
+            retry: 0,
         }
     }
 }
@@ -206,12 +208,12 @@ pub async fn dispatch_executions(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
                 generate_commitments(swarm, signer, &mut task);
             },
             Status::WIP => {
-                let current = now();
-                if task.start_time + TASK_ROUND_WINDOW.as_secs() * 20 < current {
+                let window = TASK_ROUND_WINDOW.as_secs() * 20; // n = 20, n should large than 3 
+                let retry = (now() - task.start_time) / window;
+                
+                if task.retry != retry {
                     info!("Timeout, re-sign {}", task.id);
-                    while task.start_time < current {
-                        task.start_time += TASK_ROUND_WINDOW.as_secs() * 20;
-                    }
+                    task.retry = retry;
                     task.status = Status::RESET;
                     signer.save_signing_task(&task);
                     signer.remove_signing_task_variables(&task.id);
