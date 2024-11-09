@@ -39,7 +39,7 @@ use std::io;
 use std::time::Duration;
 use tokio::select;
 use usize as Index;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use ed25519_compact::SecretKey;
 
@@ -380,7 +380,7 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
     let signer = Signer::new(conf.clone());
 
     for (i, (addr, vkp) ) in signer.list_keypairs().iter().enumerate() {
-        info!("Vault {i}. {addr}");
+        debug!("Vault {i}. {addr}");
         // maintain a permission white list for heartbeat
         vkp.pub_key.verifying_shares().keys().for_each(|identifier| {
             mem_store::update_alive_table(HeartBeatMessage { identifier: identifier.clone(), last_seen: 0 });
@@ -524,7 +524,7 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                     received_sign_message(swarm, signer, msg);
                 }
             } else if message.topic == SubscribeTopic::ALIVE.topic().hash() {
-                if let Ok(alive) = serde_json::from_slice(&message.data) {
+                if let Ok(alive) = serde_json::from_slice::<HeartBeatMessage>(&message.data) {
                     mem_store::update_alive_table( alive );
                 }
             }

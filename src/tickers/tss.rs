@@ -22,17 +22,18 @@ pub async fn time_free_tasks_executor( swarm : &mut Swarm<TSSBehaviour>, signer:
         return;
     }
 
-    // 1. heart beat
-    sending_heart_beat(swarm, signer).await;
-
-    // 2. dkg tasks
-    fetch_dkg_requests(signer).await;
+    // 1. dkg tasks
     broadcast_dkg_packages(swarm, signer);
     submit_dkg_address(signer).await;
+    fetch_dkg_requests(signer).await;
+
+    // 2. heart beat
+    sending_heart_beat(swarm, signer).await;
 
     // 3 signing tasks
-    fetch_signing_requests(signer).await;
     dispatch_executions(swarm, signer).await;
+    // fetch request for next execution
+    fetch_signing_requests(signer).await;
     // broadcast_sign_packages(swarm);
 }
 

@@ -3,7 +3,7 @@ use std::collections::{btree_map::Keys, BTreeMap};
 use bitcoin::{sighash::{self, SighashCache}, Address, Psbt, TapSighashType, Witness};
 use bitcoin_hashes::Hash;
 use bitcoincore_rpc::RpcApi;
-use cosmos_sdk_proto::side::btcbridge::{MsgSubmitSignatures, SigningRequest};
+use cosmos_sdk_proto::side::btcbridge::{MsgSubmitSignatures, SigningRequest, SigningStatus};
 use cosmrs::Any;
 
 use ed25519_compact::{PublicKey, Signature};
@@ -18,7 +18,9 @@ use frost_secp256k1_tr::{self as frost, round1::{SigningCommitments, SigningNonc
 use crate::{
     app::{config::TASK_ROUND_WINDOW, signer::Signer}, 
     helper::{
-        client_side::send_cosmos_transaction, encoding::{self, from_base64, hash, to_base64}, gossip::publish_signing_package, mem_store, now
+        client_side::{get_signing_request_by_txid, send_cosmos_transaction}, 
+        encoding::{self, from_base64, hash, to_base64}, 
+        gossip::publish_signing_package, mem_store, now
     }
 };
 
@@ -178,12 +180,6 @@ pub async fn dispatch_executions(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
         match task.status {
             Status::CLOSE => {
                 if task.is_signature_submitted {
-
-                    // only for development
-                    // debug!("change status for resign");
-                    // task.status = Status::WIP;
-                    // signer.save_signing_task(&task);
-
                     continue;
                 }
                 let psbt_bytes = from_base64(&task.psbt).unwrap();
@@ -334,11 +330,12 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
                 None => return,
             };
             // sanitize(commitments, &participants);
-            debug!("{}:{first} commitment lens: {}/{}", &task_id[..6], commitments.len(), participants.len());
+            let alive = mem_store::get_alive_participants(&participants);
+            debug!("{}:{first} commitments: {}/{}({alive})", &task_id[..6], commitments.len(), participants.len());
             
             if commitments.len() == participants.len() {
                 generate_signature_shares(swarm, signer, &mut task);
-            } else if commitments.len() >= threshold && commitments.len() == mem_store::get_alive_participants(&participants) {
+            } else if commitments.len() >= threshold && commitments.len() == alive {
                 generate_signature_shares(swarm, signer, &mut task);
             }
         },
@@ -370,7 +367,8 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
             // Only check the first input, because all other inputs are in the same package.
             if let Some(shares) = remote_sig_shares.get_mut(&first) {
                 // sanitize(shares, &participants);
-                debug!("Received signature shares: {}:{first} {:?}/{}", &task_id[..6], shares.len(), participants.len());
+                let alive = mem_store::get_alive_participants(&participants);
+                debug!("Received signature shares: {}:{first} {:?}/{}({alive})", &task_id[..6], shares.len(), participants.len());
                 
                 if shares.len() == participants.len() {
                     aggregate_signature_shares(signer, &mut task);
@@ -548,11 +546,6 @@ pub fn aggregate_signature_shares(signer: &Signer, task: &mut SignTask) -> Optio
             return None;
         }
 
-        // if !signature_shares.keys().all(|key | {signing_commitments.contains_key(key)}) {
-        //     error!("Aggregate error: signature share and commitment unmatch");
-        //     return None
-        // }
-
         let sig_target = frost::SigningTarget::new(
             &input.sig_hash,
             frost::SigningParameters {
@@ -594,18 +587,20 @@ pub fn aggregate_signature_shares(signer: &Signer, task: &mut SignTask) -> Optio
             }
             Err(e) => {
                 error!("Signature aggregation error: {:?} {:?}", &task.id[..6], e);
+                return None;
             }
         };
     };
 
     if psbt.inputs.iter().all(|input| input.final_script_witness.is_some() ) {
         debug!("Signing task {} completed", &task.id[..6]);
-        // task.round = Round::Closed;
+
         let psbt_bytes = psbt.serialize();
         let psbt_base64 = encoding::to_base64(&psbt_bytes);
         task.psbt = psbt_base64;
         task.status = Status::CLOSE;
         signer.save_signing_task(task);
+        signer.remove_signing_task_variables(&task.id);
         Some(psbt.to_owned())
     } else {
         None
@@ -618,6 +613,18 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
 
     // broadcast to bitcoin network
     let signed_tx = psbt.clone().extract_tx().expect("failed to extract signed tx");
+
+    let host = signer.config().side_chain.grpc.clone();
+    let txid = signed_tx.compute_txid().to_string();
+    if let Ok(response) = get_signing_request_by_txid(&host, txid.clone()).await {
+        match response.into_inner().request {
+            Some(request) => if request.status != SigningStatus::Pending as i32 {
+               debug!("Other participant has broadcasted. {txid}",);  
+               return;  
+            },
+            None => return,
+        };
+    };
     match signer.bitcoin_client.send_raw_transaction(&signed_tx) {
         Ok(txid) => {
             info!("PSBT broadcasted to Bitcoin: {}", txid);
