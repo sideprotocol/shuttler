@@ -49,7 +49,7 @@ pub async fn fetch_signing_requests(
             debug!("In-process signing tasks: {:?} {:?}", tasks_in_process.len(), tasks_in_process);
             signer.list_signing_tasks().iter().for_each(|task| {
                 if !tasks_in_process.contains(&task.id) {
-                    debug!("Removing expired signing task: {:?}", task.id);
+                    debug!("Removing expired signing task: {}", &task.id[..6]);
                     signer.remove_signing_task(&task.id);
                 }
             });
@@ -89,8 +89,6 @@ async fn fetch_dkg_requests(signer: &Signer) {
             }
         });
 
-        let x: Vec<u64> = requests.iter().map(|a| a.id).collect::<Vec<_>>();
-        debug!("In-process DKGs: {:?}", x);
         for request in requests {
             if request
                 .participants
