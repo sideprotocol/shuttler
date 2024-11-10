@@ -9,7 +9,7 @@ use frost_secp256k1_tr::{keys::dkg, Identifier};
 use std::sync::Mutex;
 use lazy_static::lazy_static;
 
-use crate::app::config::TASK_ROUND_WINDOW;
+use crate::app::config::TASK_INTERVAL;
 
 use super::{gossip::HeartBeatMessage, now};
 
@@ -36,8 +36,7 @@ pub fn get_alive_participants(keys: &Vec<&Identifier>) -> usize {
     
     let alive = keys.iter().filter(|key| {
         let last_seen = table.get(key).unwrap_or(&0u64);
-        // debug!("is alive {:?} {}", key, now() - last_seen);
-        now() - last_seen < TASK_ROUND_WINDOW.as_secs() * 2
+        now() - last_seen < TASK_INTERVAL.as_secs() * 2
     }).count() + 1;
     // debug!("alive table: {alive}, {:?}", table);
     alive
