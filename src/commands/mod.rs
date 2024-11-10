@@ -54,6 +54,8 @@ pub enum Commands {
         n: u32,
         #[clap(long, default_value = "1")]
         tx: u32,
+        #[clap(long, default_value = "2")]
+        delay: u32,
     },
 }
 

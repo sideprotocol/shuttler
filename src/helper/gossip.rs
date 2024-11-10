@@ -50,7 +50,7 @@ pub fn publish_signing_package(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer,
     let signaure = signer.identity_key.sign(raw, None).to_vec();
     message.signature = signaure;
 
-    // debug!("Broadcasting: {:?}", package);
+    // tracing::debug!("Broadcasting: {:?}", message);
     let message = serde_json::to_vec(&message).expect("Failed to serialize Sign package");
     publish_message(swarm, SubscribeTopic::SIGNING, message);
 }

@@ -192,7 +192,6 @@ pub fn received_dkg_response(response: DKGResponse, signer: &Signer) {
     let mut task = match signer.get_dkg_task(&task_id) {
         Some(task) => task,
         None => {
-            error!("No task found for DKG: {}", task_id);
             return;
         }
     };
@@ -207,8 +206,6 @@ pub fn received_dkg_response(response: DKGResponse, signer: &Signer) {
         received_round1_packages(&mut task, response.payload.round1_packages, signer)
     } else if task.round == Round::Round2 {
         received_round2_packages(&mut task, response.payload.round2_packages, signer)
-    } else {
-        debug!("DKG has already completed on my side: {}", task_id);
     }
 }
 

@@ -38,7 +38,7 @@ use std::io;
 use std::time::Duration;
 use tokio::select;
 use usize as Index;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use ed25519_compact::SecretKey;
 
@@ -379,7 +379,7 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
     let signer = Signer::new(conf.clone());
 
     for (i, (addr, vkp) ) in signer.list_keypairs().iter().enumerate() {
-        info!("Vault {i}. {addr}");
+        debug!("Vault {i}. {addr}");
         // maintain a permission white list for heartbeat
         vkp.pub_key.verifying_shares().keys().for_each(|identifier| {
             mem_store::update_alive_table(HeartBeatMessage { identifier: identifier.clone(), last_seen: 0 });
@@ -464,12 +464,12 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
                 },
                 SwarmEvent::ConnectionEstablished { peer_id, endpoint, ..} => {
                     swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-                    // let connected = swarm.connected_peers().map(|p| p.clone()).collect::<Vec<_>>();
-                    // if connected.len() > 0 {
-                    //     swarm.behaviour_mut().identify.push(connected);
-                    // }
+                    let connected = swarm.connected_peers().map(|p| p.clone()).collect::<Vec<_>>();
+                    if connected.len() > 0 {
+                        swarm.behaviour_mut().identify.push(connected);
+                    }
                     let addr = endpoint.get_remote_address();
-                    info!("Connected to {:?}/p2p/{peer_id} ", addr);
+                    info!("Connected to {:?}/p2p/{peer_id}, ", addr);                  
                 },
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                     info!("Disconnected {peer_id}: {:?}", cause);
@@ -523,14 +523,27 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                     received_sign_message(swarm, signer, msg);
                 }
             } else if message.topic == SubscribeTopic::ALIVE.topic().hash() {
-                if let Ok(alive) = serde_json::from_slice(&message.data) {
+                if let Ok(alive) = serde_json::from_slice::<HeartBeatMessage>(&message.data) {
                     mem_store::update_alive_table( alive );
                 }
             }
         }
+        TSSBehaviourEvent::Identify(identify::Event::Received { peer_id, info, .. }) => {
+            swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
+            // info!(" @@(Received) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
+            info.listen_addrs.iter().for_each(|addr| {
+                if !addr.to_string().starts_with("/ip4/127.0.0.1") {
+                    // tracing::debug!("Discovered: {addr}/p2p/{peer_id}");
+                    swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
+                }
+            });
+        }
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
-            for (peer_id, _multiaddr) in list {
-                swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id); 
+            for (peer_id, multiaddr) in list {
+                swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
+                // swarm.add_peer_address(peer_id, multiaddr);
+                // swarm.add_external_address(multiaddr);
+                swarm.behaviour_mut().kad.add_address(&peer_id, multiaddr);
             }
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Expired(list)) => {

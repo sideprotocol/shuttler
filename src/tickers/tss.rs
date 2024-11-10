@@ -8,7 +8,7 @@ use crate::{
     app::signer::Signer, 
     helper::{client_side::{get_signing_requests, send_cosmos_transaction}, gossip::sending_heart_beat}, 
     protocols::{dkg::{broadcast_dkg_packages, generate_round1_package, DKGTask}, 
-    sign::{save_task_into_signing_queue, submit_signature_or_reset_task}, Round, TSSBehaviour
+    sign::{save_task_into_signing_queue, dispatch_executions}, Round, TSSBehaviour
 }};
 pub async fn time_free_tasks_executor( swarm : &mut Swarm<TSSBehaviour>, signer: &Signer ) {
     
@@ -22,22 +22,22 @@ pub async fn time_free_tasks_executor( swarm : &mut Swarm<TSSBehaviour>, signer:
         return;
     }
 
-    // 1. heart beat
-    sending_heart_beat(swarm, signer).await;
-
-    // 2. dkg tasks
-    fetch_dkg_requests(signer).await;
+    // 1. dkg tasks
     broadcast_dkg_packages(swarm, signer);
     submit_dkg_address(signer).await;
+    fetch_dkg_requests(signer).await;
+
+    // 2. heart beat
+    sending_heart_beat(swarm, signer).await;
 
     // 3 signing tasks
-    fetch_signing_requests(swarm, signer).await;
-    submit_signature_or_reset_task(swarm, signer).await;
+    dispatch_executions(swarm, signer).await;
+    // fetch request for next execution
+    fetch_signing_requests(signer).await;
     // broadcast_sign_packages(swarm);
 }
 
 pub async fn fetch_signing_requests(
-    swarm: &mut Swarm<TSSBehaviour>, 
     signer: &Signer,
 ) {
     let host = signer.config().side_chain.grpc.as_str();
@@ -49,12 +49,12 @@ pub async fn fetch_signing_requests(
             debug!("In-process signing tasks: {:?} {:?}", tasks_in_process.len(), tasks_in_process);
             signer.list_signing_tasks().iter().for_each(|task| {
                 if !tasks_in_process.contains(&task.id) {
-                    debug!("Removing expired signing task: {:?}", task.id);
+                    debug!("Removing expired signing task: {}", &task.id[..6]);
                     signer.remove_signing_task(&task.id);
                 }
             });
             for request in requests {
-                save_task_into_signing_queue(swarm, request, signer);
+                save_task_into_signing_queue(request, signer);
             }
         }
         Err(e) => {
@@ -89,8 +89,6 @@ async fn fetch_dkg_requests(signer: &Signer) {
             }
         });
 
-        let x: Vec<u64> = requests.iter().map(|a| a.id).collect::<Vec<_>>();
-        debug!("In-process DKGs: {:?}", x);
         for request in requests {
             if request
                 .participants
