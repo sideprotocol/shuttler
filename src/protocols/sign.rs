@@ -177,9 +177,6 @@ pub async fn dispatch_executions(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
     for mut task in signer.list_signing_tasks() {
         match task.status {
             Status::CLOSE => {
-                if task.is_signature_submitted {
-                    continue;
-                }
                 let psbt_bytes = from_base64(&task.psbt).unwrap();
                 let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
                     Ok(psbt) => psbt,
