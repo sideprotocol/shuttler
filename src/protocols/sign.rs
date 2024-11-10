@@ -18,9 +18,7 @@ use frost_secp256k1_tr::{self as frost, round1::{SigningCommitments, SigningNonc
 use crate::{
     app::{config::TASK_ROUND_WINDOW, signer::Signer}, 
     helper::{
-        client_side::{get_signing_request_by_txid, send_cosmos_transaction}, 
-        encoding::{self, from_base64, hash, to_base64}, 
-        gossip::publish_signing_package, mem_store, now
+        client_side::{get_signing_request_by_txid, send_cosmos_transaction}, encoding::{abbr, from_base64, hash, to_base64}, gossip::publish_signing_package, mem_store, now
     }
 };
 
@@ -219,7 +217,7 @@ pub async fn dispatch_executions(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
     };
 }
 
-fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: &mut SignTask) {
+fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: &SignTask) {
 
     if task.status == Status::CLOSE {
         return
@@ -261,7 +259,7 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
             let raw = serde_json::to_vec(&msg.package).unwrap();
             let sig = Signature::from_slice(&msg.signature).unwrap();
             if public_key.verify(&raw, &sig).is_err() {
-                debug!("Verify signature failed");
+                debug!("Reject, untrusted package from {:?}", msg.sender);
                 return;
             }
         }
@@ -273,17 +271,21 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
     let mut task = match signer.get_signing_task(&task_id) {
         Some(t) => t,
         None => {
-            debug!("task does not exists: {}", &task_id);
+            debug!("Reject, unknown task: {}", &task_id);
             return;
         }
     };
 
     // Only check first input for efficiency.
     let first = 0;
-    let vkp = match signer.get_keypair_from_db(&task.inputs[&first].address) {
+    let vault = match task.inputs.get(&first) {
+        Some(input) => &input.address,
+        None => return
+    };
+    let vkp = match signer.get_keypair_from_db(vault) {
         Some(kp) => kp,
         None => {
-            debug!("vault key pair not found: {task_id}");
+            debug!("Reject, unknown vault address: {task_id} {vault}");
             return;
         }
     };
@@ -297,7 +299,6 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
 
     match msg.package {
         SignPackage::Round1(commitments) => {
-            let first = 0;
 
             let mut remote_commitments = signer.get_signing_commitments(&task_id);
             // return if msg has received.
@@ -321,21 +322,21 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
 
             signer.save_signing_commitments(&task_id, &remote_commitments);
 
-            // check whether it's able to generate signature share
+            // check whether it's ready to generate signature share
             let commitments = match remote_commitments.get_mut(&first) {
                 Some(c) => c,
                 None => return,
             };
 
             let alive = mem_store::get_alive_participants(&participants);
-            debug!("Commitment: {}:{first} {}/{}({alive}) from {:?}", 
-                &task_id[..6], commitments.len(), participants.len(), msg.sender
+            debug!("Commitment: {}:{first} {}/{}({alive}) from {}", 
+                &task_id[..6], commitments.len(), participants.len(), abbr(&msg.sender)
             );
             
             if commitments.len() == participants.len() {
-                generate_signature_shares(swarm, signer, &mut task);
-            } else if commitments.len() >= threshold && commitments.len() == alive {
-                generate_signature_shares(swarm, signer, &mut task);
+                generate_signature_shares(swarm, signer, &task);
+            } else if alive >= threshold && commitments.len() == alive {
+                generate_signature_shares(swarm, signer, &task);
             }
         },
         SignPackage::Round2(sig_shares) => {
@@ -367,11 +368,11 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
             if let Some(shares) = remote_sig_shares.get_mut(&first) {
                 // sanitize(shares, &participants);
                 let alive = mem_store::get_alive_participants(&participants);
-                debug!("Signature shares: {}:{first} {:?}/{}({alive}) from {:?}", &task_id[..6], shares.len(), participants.len(), msg.sender);
+                debug!("Signature shares: {}:{first} {:?}/{}({alive}) from {}", &task_id[..6], shares.len(), participants.len(), abbr(&msg.sender));
                 
                 if shares.len() == participants.len() {
                     aggregate_signature_shares(signer, &mut task);
-                } else if shares.len() >= threshold && shares.len() == mem_store::get_alive_participants(&participants) {
+                } else if alive >= threshold && shares.len() == alive {
                     aggregate_signature_shares(signer, &mut task);
                 } 
             }
@@ -385,7 +386,7 @@ pub fn sanitize<T>(storages: &mut BTreeMap<Identifier, T>, keys: &Vec<&Identifie
     }
 }
 
-pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: &mut SignTask) {
+pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: &SignTask) {
 
     let stored_nonces = signer.get_signing_local_variable(&task.id);
     if stored_nonces.len() == 0 {
@@ -393,82 +394,60 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
     }
     let stored_remote_commitments = signer.get_signing_commitments(&task.id);
 
-    // let mut received_sig_shares = signer.get_signing_signature_shares(&task.id);
-    // let mut received_sig_shares = BTreeMap::new();
-    // let received_sig_shares.get_mut(&retry);
     let mut broadcast_packages = BTreeMap::new();
-    task.inputs.iter_mut().for_each(|(index, input)| {
+    task.inputs.iter().for_each(|(index, input)| {
         // filter packets from unknown parties
-        match signer.get_keypair_from_db(&input.address) {
-            Some(keypair) => {
+        if let Some(keypair) = signer.get_keypair_from_db(&input.address) {
 
-                let mut signing_commitments = match stored_remote_commitments.get(index) {
-                    Some(e) => e.clone(),
-                    None => return
-                };
+            let mut signing_commitments = match stored_remote_commitments.get(index) {
+                Some(e) => e.clone(),
+                None => return
+            };
 
-                if signing_commitments.len() < keypair.priv_key.min_signers().clone() as usize {
-                    return
-                }
+            if signing_commitments.len() < keypair.priv_key.min_signers().clone() as usize {
+                return
+            }
 
-                sanitize( &mut signing_commitments, &keypair.pub_key.verifying_shares().keys().map(|k| k).collect::<Vec<_>>());
+            sanitize( &mut signing_commitments, &keypair.pub_key.verifying_shares().keys().map(|k| k).collect::<Vec<_>>());
 
-                if *index == 0 {
-                    let k = signing_commitments.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
-                    debug!("Commitments: {} {}, {:?}", &task.id[..6], signing_commitments.len(), k);
-                }
-
-                // when number of receved commitments is larger than min_signers
-                // the following code will be executed or re-executed
-                let signing_package = frost::SigningPackage::new(
-                    signing_commitments, 
-                    frost::SigningTarget::new(
-                        &input.sig_hash, 
-                        frost::SigningParameters{
-                            tapscript_merkle_root: match keypair.tweak {
-                                Some(tweak) => Some(tweak.to_vec()),
-                                None => None,
-                            },
-                        }
-                    ));
-
-                let signer_nonces = match stored_nonces.get(index) {
-                    Some(d) => d,
-                    None => {
-                        debug!("not found local nonce for input {index}");
-                        return
-                    },
-                };
-
-                let signature_shares = match frost::round2::sign(
-                    &signing_package, signer_nonces, &keypair.priv_key
-                ) {
-                    Ok(shares) => shares,
-                    Err(e) => {
-                        error!("Error: {:?}", e);
-                        return;
+            // when number of receved commitments is larger than min_signers
+            // the following code will be executed or re-executed
+            let signing_package = frost::SigningPackage::new(
+                signing_commitments, 
+                frost::SigningTarget::new(
+                    &input.sig_hash, 
+                    frost::SigningParameters{
+                        tapscript_merkle_root: match keypair.tweak {
+                            Some(tweak) => Some(tweak.to_vec()),
+                            None => None,
+                        },
                     }
-                };
-                
-                let mut my_share = BTreeMap::new();
-                my_share.insert(signer.identifier().clone(), signature_shares);
-                
-                // broadcast my share
-                broadcast_packages.insert(index.clone(), my_share.clone());
-                // save my share to local
-                // match received_sig_shares.get_mut(index) {
-                //     Some(existing) => {
-                //         existing.extend(my_share);
-                //     },
-                //     None => {
-                //         received_sig_shares.insert(index.clone(), my_share);
-                //     }
-                // }
-            }
-            None => {
-                error!("skip, I am not the signer of task: {:?}", task.id);
-                return;
-            }
+                ));
+
+            let signer_nonces = match stored_nonces.get(index) {
+                Some(d) => d,
+                None => {
+                    debug!("not found local nonce for input {index}");
+                    return
+                },
+            };
+
+            let signature_shares = match frost::round2::sign(
+                &signing_package, signer_nonces, &keypair.priv_key
+            ) {
+                Ok(shares) => shares,
+                Err(e) => {
+                    error!("Error: {:?}", e);
+                    return;
+                }
+            };
+            
+            let mut my_share = BTreeMap::new();
+            my_share.insert(signer.identifier().clone(), signature_shares);
+            
+            // broadcast my share
+            broadcast_packages.insert(index.clone(), my_share.clone());
+        
         };
     });
 
@@ -484,11 +463,9 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
         signature: vec![],
     };
 
-    debug!("publish signature share: {:?}", msg);
+    // debug!("Publish signature share: {:?}", msg);
 
     publish_signing_package(swarm, signer, &mut msg);
-    // signer.save_signing_signature_shares(&task.id, &received_sig_shares);
-    // save_sign_task(task)
 
     received_sign_message(swarm, signer, msg);
 
@@ -513,31 +490,31 @@ pub fn aggregate_signature_shares(signer: &Signer, task: &mut SignTask) -> Optio
         }
     };
 
-    for (index, input) in task.inputs.iter() {
+    let verifies = task.inputs.iter().map(|(index, input)| {
 
         let keypair = match signer.get_keypair_from_db(&input.address) {
             Some(keypair) => keypair,
             None => {
                 error!("Failed to get keypair for address: {}", input.address);
-                return None;
+                return false;
             }
         };
 
         let signing_commitments = match stored_remote_commitments.get(index) {
             Some(e) => e.clone(),
-            None => return None
+            None => return false
         };
 
         let signature_shares = match stored_remote_signature_shares.get(index) {
             Some(e) => e.clone(),
-            None => return None
+            None => return false
         };
 
         if signing_commitments.len() != signature_shares.len() {
             let s_keys = signature_shares.keys();
             let c_keys = signing_commitments.keys();
             error!("Aggregate error: {} != {} {:?} {:?}", signing_commitments.len(), signature_shares.len(), c_keys, s_keys);
-            return None;
+            return false;
         }
 
         let sig_target = frost::SigningTarget::new(
@@ -557,40 +534,44 @@ pub fn aggregate_signature_shares(signer: &Signer, task: &mut SignTask) -> Optio
 
         match frost::aggregate(&signing_package, &signature_shares, &keypair.pub_key) {
             Ok(signature) => {
-                // println!("public key: {:?}", pub)
-                // let sighash = &hex::decode(sig_shares_message.message).unwrap();
                 match keypair.pub_key.verifying_key().verify(signing_package.sig_target().clone(), &signature) {
-                    Ok(_) => info!( "{}:{} is verified", &task.id[..6], index ),
+                    Ok(_) => {
+                        let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&signature.serialize()).unwrap();
+
+                        psbt.inputs[*index].tap_key_sig = Option::Some(bitcoin::taproot::Signature {
+                            signature: sig,
+                            sighash_type: TapSighashType::Default,
+                        });
+        
+                        let witness = Witness::p2tr_key_spend(&psbt.inputs[*index].tap_key_sig.unwrap());
+                        psbt.inputs[*index].final_script_witness = Some(witness);
+                        psbt.inputs[*index].partial_sigs = BTreeMap::new();
+                        psbt.inputs[*index].sighash_type = None;
+                        return true;
+                    },
                     Err(e) => {
                         error!( "{}:{} is invalid: {e}", &task.id[..6], index );
-                        return None;
                     }
                 }
-
-                let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&signature.serialize()).unwrap();
-
-                psbt.inputs[*index].tap_key_sig = Option::Some(bitcoin::taproot::Signature {
-                    signature: sig,
-                    sighash_type: TapSighashType::Default,
-                });
-
-                let witness = Witness::p2tr_key_spend(&psbt.inputs[*index].tap_key_sig.unwrap());
-                psbt.inputs[*index].final_script_witness = Some(witness);
-                psbt.inputs[*index].partial_sigs = BTreeMap::new();
-                psbt.inputs[*index].sighash_type = None;
             }
             Err(e) => {
                 error!("Signature aggregation error: {:?} {:?}", &task.id[..6], e);
-                return None;
             }
         };
-    };
+        false
+    }).collect::<Vec<_>>();
 
-    if psbt.inputs.iter().all(|input| input.final_script_witness.is_some() ) {
+    let result  = verifies.iter().enumerate()
+                        .map(|(i, v)| format!("{i}:{}", if *v {"✔"} else {"✘"}))
+                        .collect::<Vec<_>>().join(" ");
+    info!("Verify {}: {}", &task.id[..6], result );
+
+    if verifies.iter().all(|a| *a) {
+
         debug!("Completed task {}", &task.id[..6]);
 
         let psbt_bytes = psbt.serialize();
-        let psbt_base64 = encoding::to_base64(&psbt_bytes);
+        let psbt_base64 = to_base64(&psbt_bytes);
         task.psbt = psbt_base64;
         task.status = Status::CLOSE;
         signer.save_signing_task(task);
@@ -630,7 +611,7 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
     }
 
     let psbt_bytes = psbt.serialize();
-    let psbt_base64 = encoding::to_base64(&psbt_bytes);
+    let psbt_base64 = to_base64(&psbt_bytes);
 
     // submit signed psbt to side chain
     let msg = MsgSubmitSignatures {

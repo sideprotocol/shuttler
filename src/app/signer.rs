@@ -533,7 +533,7 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
             // info!(" @@(Received) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
             info.listen_addrs.iter().for_each(|addr| {
                 if !addr.to_string().starts_with("/ip4/127.0.0.1") {
-                    tracing::debug!("Discovered: {addr}/p2p/{peer_id}");
+                    // tracing::debug!("Discovered: {addr}/p2p/{peer_id}");
                     swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
                 }
             });
@@ -541,17 +541,9 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, multiaddr) in list {
                 swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-                if swarm.is_connected(&peer_id) {
-                    return;
-                }
-                swarm.add_peer_address(peer_id, multiaddr);
-                // let opt = DialOpts::peer_id(peer_id)
-                //     .addresses(vec![multiaddr.clone()])
-                //     .condition(PeerCondition::DisconnectedAndNotDialing)
-                //     .build();
-                // if swarm.dial(opt).is_ok() {
-                //     info!("Dailing {multiaddr}");
-                // };  
+                // swarm.add_peer_address(peer_id, multiaddr);
+                // swarm.add_external_address(multiaddr);
+                swarm.behaviour_mut().kad.add_address(&peer_id, multiaddr);
             }
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Expired(list)) => {
