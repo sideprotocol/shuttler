@@ -6,6 +6,8 @@ use libp2p::{gossipsub::IdentTopic, Swarm};
 
 use crate::{app::signer::Signer, protocols::{dkg::{self, prepare_response_for_task}, sign::SignMesage, TSSBehaviour}};
 
+use super::mem_store;
+
 pub const HEART_BEAT_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(60);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -76,6 +78,8 @@ pub async fn sending_heart_beat(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer
         };
         let message = serde_json::to_vec(&alive).unwrap();
         publish_message(swarm, SubscribeTopic::ALIVE, message);
+        
+        mem_store::update_alive_table(alive);
     };
 }
 

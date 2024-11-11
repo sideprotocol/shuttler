@@ -244,6 +244,10 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
 
 pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, msg: SignMesage) {
 
+    if !mem_store::is_white_listed_peer(&msg.sender) {
+        return
+    }
+
     // Ensure the message is not forged.
     match PublicKey::from_slice(&msg.sender.serialize()) {
         Ok(public_key) => {

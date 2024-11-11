@@ -37,7 +37,7 @@ pub fn get_alive_participants(keys: &Vec<&Identifier>) -> usize {
     let alive = keys.iter().filter(|key| {
         let last_seen = table.get(key).unwrap_or(&0u64);
         now() - last_seen < TASK_INTERVAL.as_secs() * 2
-    }).count() + 1;
+    }).count();
     // debug!("alive table: {alive}, {:?}", table);
     alive
 }
