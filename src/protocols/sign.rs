@@ -16,7 +16,7 @@ use tracing::{debug, error, info};
 use frost::{Identifier, round1, round2}; 
 use frost_secp256k1_tr::{self as frost, round1::{SigningCommitments, SigningNonces}};
 use crate::{
-    app::{config::TASK_ROUND_WINDOW, signer::Signer}, 
+    app::{config::TASK_INTERVAL, signer::Signer}, 
     helper::{
         client_side::{get_signing_request_by_txid, send_cosmos_transaction}, encoding::{abbr, from_base64, hash, to_base64}, gossip::publish_signing_package, mem_store, now
     }
@@ -75,12 +75,8 @@ pub struct SignTask {
 impl SignTask {
     pub fn new(id: String, psbt: String, inputs: BTreeMap<Index, TransactionInput>, creation_time: Option<Timestamp>) -> Self {
         let start_time = match creation_time {
-            Some(t) => {
-                t.seconds as u64
-            },
-            None => {
-                now()
-            },
+            Some(t) =>  t.seconds as u64,
+            None => now(),
         };
         Self {
             id,
@@ -147,11 +143,6 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
             }
         };
 
-        // if (&address.to_string()).is_none() {
-        //     debug!("Skip, I am not signer of address: {}", address);
-        //     return;
-        // };
-
         let input = TransactionInput {
             task_id: task_id.clone(),
             index: i,
@@ -193,7 +184,6 @@ pub async fn dispatch_executions(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
                     task.is_signature_submitted = true;
                     task.status = Status::CLOSE;
                     signer.save_signing_task(&task);
-                    // remove_task_variables(&task.id);
                 }
             },
             Status::RESET => {
@@ -202,7 +192,7 @@ pub async fn dispatch_executions(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
                 generate_commitments(swarm, signer, &mut task);
             },
             Status::WIP => {
-                let window = TASK_ROUND_WINDOW.as_secs() * 20; // n = 20, n should large than 3 
+                let window = TASK_INTERVAL.as_secs() * 20; // n = 20, n should large than 3 
                 let retry = (now() - task.start_time) / window;
                 
                 if task.retry != retry {
@@ -224,24 +214,24 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
     }
 
     let mut nonces = BTreeMap::new();
-    let mut broadcast_package = BTreeMap::new();
+    let mut commitments = BTreeMap::new();
 
     task.inputs.iter().for_each(|(index, input)| {
         if let Some((nonce, commitment)) = generate_nonce_and_commitment_by_address(&input.address, signer) {
             nonces.insert(*index, nonce);
-            let mut my_commits = BTreeMap::new();
-            my_commits.insert(signer.identifier().clone(), commitment);
-            broadcast_package.insert(*index, my_commits.clone());
+            let mut input_commit = BTreeMap::new();
+            input_commit.insert(signer.identifier().clone(), commitment);
+            commitments.insert(*index, input_commit.clone());
         }
     });
 
-    // save local variable: nonces
+    // Save nonces to local storage.
     signer.save_signing_local_variable(&task.id, &nonces);
 
-    // publish remote variable: commitment
+    // Publish commitments to other pariticipants
     let mut msg =  SignMesage {
         task_id: task.id.clone(),
-        package: SignPackage::Round1(broadcast_package),
+        package: SignPackage::Round1(commitments),
         nonce: now(),
         sender: signer.identifier().clone(),
         signature: vec![], 
@@ -276,7 +266,7 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
         }
     };
 
-    // Only check first input for efficiency.
+    // Only check the first input, because all other inputs used the same vault address.
     let first = 0;
     let vault = match task.inputs.get(&first) {
         Some(input) => &input.address,
@@ -363,10 +353,8 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
 
             signer.save_signing_signature_shares(&task_id, &remote_sig_shares);
 
-            // Try to aggregrate if the signature shares of all inputs received from the latest retry exceeds the minimum number of signers.
-            // Only check the first input, because all other inputs are in the same package.
-            if let Some(shares) = remote_sig_shares.get_mut(&first) {
-                // sanitize(shares, &participants);
+            if let Some(shares) = remote_sig_shares.get(&first) {
+
                 let alive = mem_store::get_alive_participants(&participants);
                 debug!("Signature shares: {}:{first} {:?}/{}({alive}) from {}", &task_id[..6], shares.len(), participants.len(), abbr(&msg.sender));
                 
@@ -477,7 +465,6 @@ pub fn aggregate_signature_shares(signer: &Signer, task: &mut SignTask) -> Optio
     //     return None;
     // }
 
-    // let stored_nonces = get_sign_local_nonces(&task.id);
     let stored_remote_commitments = signer.get_signing_commitments(&task.id);
     let stored_remote_signature_shares = signer.get_signing_signature_shares(&task.id);
 
