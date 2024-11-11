@@ -214,7 +214,8 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
     }
 
     let mut nonces = BTreeMap::new();
-    let mut commitments = BTreeMap::new();
+    // let mut commitments = BTreeMap::new();
+    let mut commitments = signer.get_signing_commitments(&task.id);
 
     task.inputs.iter().for_each(|(index, input)| {
         if let Some((nonce, commitment)) = generate_nonce_and_commitment_by_address(&input.address, signer) {
@@ -381,6 +382,7 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
         return;
     }
     let stored_remote_commitments = signer.get_signing_commitments(&task.id);
+    let received_remote_shares = signer.get_signing_signature_shares(&task.id);
 
     let mut broadcast_packages = BTreeMap::new();
     task.inputs.iter().for_each(|(index, input)| {
@@ -430,7 +432,11 @@ pub fn generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
                 }
             };
             
-            let mut my_share = BTreeMap::new();
+            // let mut my_share = BTreeMap::new();
+            let mut my_share = match received_remote_shares.get(&index) {
+                Some(s) => s.clone(),
+                None => BTreeMap::new(),
+            };
             my_share.insert(signer.identifier().clone(), signature_shares);
             
             // broadcast my share
