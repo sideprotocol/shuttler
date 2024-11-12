@@ -27,6 +27,7 @@ impl SubscribeTopic {
 pub struct HeartBeatMessage {
     pub identifier: Identifier<Secp256K1Sha256>,
     pub last_seen: u64,
+    pub signature: Vec<u8>,
 }
 
 pub fn subscribe_gossip_topics(swarm: &mut Swarm<TSSBehaviour>) {
@@ -72,9 +73,11 @@ pub async fn sending_heart_beat(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer
         
         // let mut last = mem_store::LastSendingTime.lock().unwrap();
         // sending alive message 
+        let signature = signer.identity_key.sign(blocktime.seconds.to_ne_bytes(), None).to_vec();
         let alive = HeartBeatMessage {
             identifier: signer.identifier().clone(),
-            last_seen: blocktime.seconds as u64
+            last_seen: blocktime.seconds as u64,
+            signature,
         };
         let message = serde_json::to_vec(&alive).unwrap();
         publish_message(swarm, SubscribeTopic::ALIVE, message);
