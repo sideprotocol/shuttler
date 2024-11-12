@@ -18,7 +18,7 @@ use frost_secp256k1_tr::{self as frost, round1::{SigningCommitments, SigningNonc
 use crate::{
     app::{config::TASK_INTERVAL, signer::Signer}, 
     helper::{
-        client_side::{get_signing_request_by_txid, send_cosmos_transaction}, encoding::{abbr, from_base64, hash, to_base64}, gossip::publish_signing_package, mem_store, now
+        client_side::{get_signing_request_by_txid, send_cosmos_transaction}, encoding::{from_base64, hash, to_base64}, gossip::publish_signing_package, mem_store, now
     }
 };
 
@@ -268,11 +268,11 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
     match msg.package {
         SignPackage::Round1(commitments) => {
 
-            // Determine who will participate in this signing
-            // Ensure participants alive and reduce waiting time
-            if !mem_store::is_peer_alive(&msg.sender) {
-                return
-            }
+            // // Determine who will participate in this signing
+            // // Ensure participants alive and reduce waiting time
+            // if !mem_store::is_peer_alive(&msg.sender) {
+            //     return
+            // }
 
             let mut remote_commitments = signer.get_signing_commitments(&task_id);
             // return if msg has received.
@@ -378,8 +378,7 @@ pub fn try_generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &S
                     return
                 }
             }
-            // when number of receved commitments is larger than min_signers
-            // the following code will be executed or re-executed
+            
             let signing_package = frost::SigningPackage::new(
                 signing_commitments, 
                 frost::SigningTarget::new(

@@ -28,12 +28,14 @@ lazy_static! {
     };
 }
 
-const ALIVE_WINDOW: u64 = TASK_INTERVAL.as_secs() * 2;
+pub const ALIVE_WINDOW: u64 = TASK_INTERVAL.as_secs() * 2;
 
 pub fn update_alive_table(alive: HeartBeatMessage) {
-    let mut table= AliveTable.lock().unwrap();
-    table.insert(alive.identifier, alive.last_seen);
-    table.retain(|_, v| {*v + 1800u64 > now()});
+    if alive.last_seen > now() {
+        let mut table= AliveTable.lock().unwrap();
+        table.insert(alive.identifier, alive.last_seen);
+        table.retain(|_, v| {*v + 1800u64 > now()});
+    }
 }
 
 pub fn count_alive_participants(keys: &Vec<&Identifier>) -> usize {
@@ -41,7 +43,7 @@ pub fn count_alive_participants(keys: &Vec<&Identifier>) -> usize {
     
     let alive = keys.iter().filter(|key| {
         let last_seen = table.get(key).unwrap_or(&0u64);
-        now() - last_seen < ALIVE_WINDOW
+        now() < *last_seen
     }).count();
     // debug!("alive table: {alive}, {:?}", table);
     alive
@@ -50,7 +52,7 @@ pub fn count_alive_participants(keys: &Vec<&Identifier>) -> usize {
 pub fn is_peer_alive(identifier: &Identifier) -> bool {
     let table= AliveTable.lock().unwrap();
     let last_seen = table.get(identifier).unwrap_or(&0u64);
-    now() - last_seen < ALIVE_WINDOW
+    now() < *last_seen
 }
 
 pub fn is_peer_trusted_peer(identifier: &Identifier, signer: &Signer) -> bool {
