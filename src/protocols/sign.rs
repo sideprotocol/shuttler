@@ -484,7 +484,7 @@ pub fn try_aggregate_signature_shares(signer: &Signer, task_id: &str) -> Option<
             debug!("Signature share {} {}/{}", &task_id[..6], signature_shares.len(), signing_commitments.len() )
         }
 
-        if signature_shares.len() < keypair.pub_key.verifying_shares().len() || signature_shares.len() < signing_commitments.len() {
+        if signature_shares.len() < keypair.priv_key.min_signers().clone() as usize || signature_shares.len() < signing_commitments.len() {
             return None
         }
 
