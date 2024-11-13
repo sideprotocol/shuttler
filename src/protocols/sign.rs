@@ -501,12 +501,12 @@ pub fn try_aggregate_signature_shares(signer: &Signer, task_id: &str) -> Option<
             signing_commitments.retain(|k, _| {task.participants.contains(k)});
         }
 
-        if *index == 0 {
-            debug!("Signature share {} {}/{}", &task_id[..6], signature_shares.len(), signing_commitments.len() )
-        }
-
         if signature_shares.len() < threshold || signature_shares.len() < signing_commitments.len() {
             return None
+        }
+
+        if *index == 0 {
+            debug!("Signature share {} {}/{}", &task_id[..6], signature_shares.len(), signing_commitments.len() )
         }
 
         signature_shares.retain(|k, _| {signing_commitments.contains_key(k)});
@@ -545,11 +545,13 @@ pub fn try_aggregate_signature_shares(signer: &Signer, task_id: &str) -> Option<
                     },
                     Err(e) => {
                         error!( "{}:{} is invalid: {e}", &task.id[..6], index );
+                        return None
                     }
                 }
             }
             Err(e) => {
                 error!("Signature aggregation error: {:?} {:?}", &task.id[..6], e);
+                return None
             }
         };
     };
