@@ -549,6 +549,12 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
             swarm.behaviour_mut().gossip.add_explicit_peer(&peer);
             swarm.behaviour_mut().kad.add_address(&peer, address);
         }
+        TSSBehaviourEvent::Kad(libp2p::kad::Event::RoutingUpdated { peer, is_new_peer, addresses, .. }) => {
+            debug!("KAD Routing updated for {peer} {is_new_peer}: {:?}", addresses);
+            if is_new_peer {
+                swarm.behaviour_mut().gossip.add_explicit_peer(&peer);
+            }
+        }
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, multiaddr) in list {
                 swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
