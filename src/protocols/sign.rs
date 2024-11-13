@@ -173,6 +173,27 @@ pub async fn dispatch_executions(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
                 if task.is_signature_submitted {
                     continue;
                 }
+
+                // check if I am a sender to submit the txs
+                let address = match task.inputs.get(&0) {
+                    Some(i) => i.address.clone(),
+                    None => continue,
+                };
+
+                let vk = match signer.get_keypair_from_db(&address) {
+                    Some(k) => k,
+                    None => continue,
+                };
+
+                let participants = vk.pub_key.verifying_shares();
+
+                let sender_index = participants.iter().position(|(id, _)| {id == signer.identifier()}).unwrap_or(10000);
+                if (now() - task.start_time) as usize % participants.len() != sender_index {
+                    continue;
+                }
+
+                // submit the transaction if I am the sender.
+
                 let psbt_bytes = from_base64(&task.psbt).unwrap();
                 let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
                     Ok(psbt) => psbt,
