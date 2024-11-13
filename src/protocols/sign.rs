@@ -215,7 +215,7 @@ pub async fn dispatch_executions(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
                 generate_commitments(swarm, signer, &mut task);
             },
             Status::WIP => {
-                let window = TASK_INTERVAL.as_secs() * 20; // n = 20, n should large than 3 
+                let window = TASK_INTERVAL.as_secs() * 10; // n = 20, n should large than 3 
                 let retry = (now() - task.start_time) / window;
                 
                 if task.retry != retry {
