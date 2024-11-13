@@ -49,7 +49,7 @@ pub async fn fetch_signing_requests(
             debug!("In-process signing tasks: {:?} {:?}", tasks_in_process.len(), tasks_in_process);
             signer.list_signing_tasks().iter().for_each(|task| {
                 if !tasks_in_process.contains(&task.id) {
-                    debug!("Removing expired signing task: {}", &task.id[..6]);
+                    debug!("Remove signing task: {}", &task.id[..6]);
                     signer.remove_signing_task(&task.id);
                 }
             });

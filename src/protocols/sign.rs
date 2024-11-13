@@ -70,6 +70,7 @@ pub struct SignTask {
     pub is_signature_submitted: bool,
     pub start_time: u64,
     pub retry: u64,
+    pub participants: Vec<Identifier>
 }
 
 impl SignTask {
@@ -86,6 +87,7 @@ impl SignTask {
             is_signature_submitted: false,
             start_time,
             retry: 0,
+            participants: vec![],
         }
     }
 }
@@ -171,6 +173,27 @@ pub async fn dispatch_executions(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
                 if task.is_signature_submitted {
                     continue;
                 }
+
+                // check if I am a sender to submit the txs
+                let address = match task.inputs.get(&0) {
+                    Some(i) => i.address.clone(),
+                    None => continue,
+                };
+
+                let vk = match signer.get_keypair_from_db(&address) {
+                    Some(k) => k,
+                    None => continue,
+                };
+
+                let participants = vk.pub_key.verifying_shares();
+
+                let sender_index = participants.iter().position(|(id, _)| {id == signer.identifier()}).unwrap_or(10000);
+                if (now() - task.start_time) as usize % participants.len() != sender_index {
+                    continue;
+                }
+
+                // submit the transaction if I am the sender.
+
                 let psbt_bytes = from_base64(&task.psbt).unwrap();
                 let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
                     Ok(psbt) => psbt,
@@ -192,7 +215,7 @@ pub async fn dispatch_executions(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
                 generate_commitments(swarm, signer, &mut task);
             },
             Status::WIP => {
-                let window = TASK_INTERVAL.as_secs() * 20; // n = 20, n should large than 3 
+                let window = TASK_INTERVAL.as_secs() * 10; // n = 20, n should large than 3 
                 let retry = (now() - task.start_time) / window;
                 
                 if task.retry != retry {
@@ -268,12 +291,6 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
     match msg.package {
         SignPackage::Round1(commitments) => {
 
-            // // Determine who will participate in this signing
-            // // Ensure participants alive and reduce waiting time
-            // if !mem_store::is_peer_alive(&msg.sender) {
-            //     return
-            // }
-
             let mut remote_commitments = signer.get_signing_commitments(&task_id);
             // return if msg has received.
             if let Some(exists) = remote_commitments.get(&first) {
@@ -338,7 +355,7 @@ pub fn sanitize<T>(storages: &mut BTreeMap<Identifier, T>, keys: &Vec<&Identifie
 pub fn try_generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task_id: &str) {
 
     // Ensure the task exists locally to prevent forged signature tasks. 
-    let task = match signer.get_signing_task(task_id) {
+    let mut task = match signer.get_signing_task(task_id) {
         Some(t) => t,
         None => return,
     };
@@ -350,7 +367,7 @@ pub fn try_generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &S
     let stored_remote_commitments = signer.get_signing_commitments(&task.id);
 
     let mut broadcast_packages = BTreeMap::new();
-    for (index, input) in task.inputs {
+    for (index, input) in &task.inputs {
         
         // filter packets from unknown parties
         if let Some(keypair) = signer.get_keypair_from_db(&input.address) {
@@ -368,16 +385,17 @@ pub fn try_generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &S
             }
   
             // Only check the first one, because all inputs are in the same package
-            if index == 0 {
+            if *index == 0 {
                 let participants = keypair.pub_key.verifying_shares().keys().collect::<Vec<_>>();
                 let alive = mem_store::count_task_participants(&task_id);
-                debug!("{:?}", alive);
               
                 debug!("Commitments {} {}/[{},{}]", &task.id[..6], received, alive.len(), participants.len());
 
                 if !(received == participants.len() || received == alive.len()) {
                     return
                 }
+                task.participants = alive;
+                signer.save_signing_task(&task);
             }
             
             let signing_package = frost::SigningPackage::new(
@@ -473,17 +491,22 @@ pub fn try_aggregate_signature_shares(signer: &Signer, task_id: &str) -> Option<
             None => return None
         };
 
-        let signing_commitments = match stored_remote_commitments.get(index) {
+        let mut signing_commitments = match stored_remote_commitments.get(index) {
             Some(e) => e.clone(),
             None => return None
         };
+        let threshold = keypair.priv_key.min_signers().clone() as usize;
+
+        if task.participants.len() >= threshold {
+            signing_commitments.retain(|k, _| {task.participants.contains(k)});
+        }
+
+        if signature_shares.len() < threshold || signature_shares.len() < signing_commitments.len() {
+            return None
+        }
 
         if *index == 0 {
             debug!("Signature share {} {}/{}", &task_id[..6], signature_shares.len(), signing_commitments.len() )
-        }
-
-        if signature_shares.len() < keypair.priv_key.min_signers().clone() as usize || signature_shares.len() < signing_commitments.len() {
-            return None
         }
 
         signature_shares.retain(|k, _| {signing_commitments.contains_key(k)});
@@ -522,11 +545,13 @@ pub fn try_aggregate_signature_shares(signer: &Signer, task_id: &str) -> Option<
                     },
                     Err(e) => {
                         error!( "{}:{} is invalid: {e}", &task.id[..6], index );
+                        return None
                     }
                 }
             }
             Err(e) => {
                 error!("Signature aggregation error: {:?} {:?}", &task.id[..6], e);
+                return None
             }
         };
     };
