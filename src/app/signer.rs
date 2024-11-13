@@ -462,6 +462,10 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
                 SwarmEvent::ConnectionEstablished { peer_id, endpoint, ..} => {
                     swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
                     let addr = endpoint.get_remote_address();
+                    let connected = swarm.connected_peers().map(|p| p.clone()).collect::<Vec<_>>();
+                    if connected.len() > 0 {
+                        swarm.behaviour_mut().identify.push(connected);
+                    }
                     info!("Connected to {:?}, ", addr);                  
                 },
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
