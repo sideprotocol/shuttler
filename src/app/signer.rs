@@ -40,7 +40,7 @@ use tokio::select;
 use usize as Index;
 use tracing::{debug, error, info, warn};
 
-use ed25519_compact::SecretKey;
+use ed25519_compact::{PublicKey, SecretKey, Signature};
 
 use lazy_static::lazy_static;
 
@@ -318,6 +318,7 @@ impl Signer {
     pub fn remove_signing_task(&self, task_id: &str) {
         self.db_sign.remove(task_id).expect("Unable to remove task");
         self.remove_signing_task_variables(task_id);
+        mem_store::remove_task_participants(task_id);
     }
 
     pub fn remove_signing_task_variables(&self, task_id: &str) {
@@ -379,11 +380,7 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
     let signer = Signer::new(conf.clone());
 
     for (i, (addr, vkp) ) in signer.list_keypairs().iter().enumerate() {
-        debug!("Vault {i}. {addr}");
-        // maintain a permission white list for heartbeat
-        vkp.pub_key.verifying_shares().keys().for_each(|identifier| {
-            mem_store::update_alive_table(HeartBeatMessage { identifier: identifier.clone(), last_seen: 0 });
-        });
+        debug!("Vault {i}. {addr}, ({}-of-{})", vkp.priv_key.min_signers(), vkp.pub_key.verifying_shares().len());
     }
 
     let libp2p_keypair = Keypair::from_protobuf_encoding(from_base64(&conf.p2p_keypair).unwrap().as_slice()).unwrap();
@@ -410,7 +407,7 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
 
             // Set a custom gossipsub configuration
             let gossipsub_config = gossipsub::ConfigBuilder::default()
-                .heartbeat_interval(Duration::from_secs(10)) // This is set to aid debugging by not cluttering the log space
+                .heartbeat_interval(Duration::from_secs(60)) // This is set to aid debugging by not cluttering the log space
                 .validation_mode(gossipsub::ValidationMode::Strict) // This sets the kind of message validation. The default is Strict (enforce message signing)
                 .message_id_fn(message_id_fn) // content-address messages. No two messages of the same content will be propagated.
                 .max_transmit_size(1000000)
@@ -464,12 +461,8 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
                 },
                 SwarmEvent::ConnectionEstablished { peer_id, endpoint, ..} => {
                     swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-                    let connected = swarm.connected_peers().map(|p| p.clone()).collect::<Vec<_>>();
-                    if connected.len() > 0 {
-                        swarm.behaviour_mut().identify.push(connected);
-                    }
                     let addr = endpoint.get_remote_address();
-                    info!("Connected to {:?}/p2p/{peer_id}, ", addr);                  
+                    info!("Connected to {:?}, ", addr);                  
                 },
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                     info!("Disconnected {peer_id}: {:?}", cause);
@@ -524,7 +517,21 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                 }
             } else if message.topic == SubscribeTopic::ALIVE.topic().hash() {
                 if let Ok(alive) = serde_json::from_slice::<HeartBeatMessage>(&message.data) {
-                    mem_store::update_alive_table( alive );
+                    // Ensure the message is not forged.
+                    match PublicKey::from_slice(&alive.payload.identifier.serialize()) {
+                        Ok(public_key) => {
+                            let sig = Signature::from_slice(&alive.signature).unwrap();
+                            let bytes = serde_json::to_vec(&alive.payload).unwrap();
+                            if public_key.verify(bytes, &sig).is_err() {
+                                debug!("Reject, untrusted package from {:?}", alive.payload.identifier);
+                                return;
+                            }
+                        }
+                        Err(_) => return
+                    }
+                    if mem_store::is_peer_trusted_peer(&alive.payload.identifier, signer) {
+                        mem_store::update_alive_table( alive );
+                    }
                 }
             }
         }
