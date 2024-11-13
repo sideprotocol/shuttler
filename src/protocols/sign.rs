@@ -452,10 +452,11 @@ pub fn try_aggregate_signature_shares(signer: &Signer, task_id: &str) -> Option<
     
     // check whether it's ready for aggregation.
     let first = 0usize;
-    let expected_len = match stored_remote_commitments.get(&first) {
-        Some(c) => c.len(),
+    let commitments = match stored_remote_commitments.get(&first) {
+        Some(c) => c,
         None => return None,
     };
+    let expected_len = commitments.len();
     let received_len = match stored_remote_signature_shares.get(&first) {
         Some(s) => s.len(),
         None => return None,
@@ -463,7 +464,7 @@ pub fn try_aggregate_signature_shares(signer: &Signer, task_id: &str) -> Option<
 
     debug!("Signature Share: {} {}/{}", &task.id[..6], received_len, expected_len );
 
-    if received_len != expected_len {
+    if received_len < expected_len {
         return None;
     }
 
@@ -491,10 +492,12 @@ pub fn try_aggregate_signature_shares(signer: &Signer, task_id: &str) -> Option<
             None => return false
         };
 
-        let signature_shares = match stored_remote_signature_shares.get(index) {
+        let mut signature_shares = match stored_remote_signature_shares.get(index) {
             Some(e) => e.clone(),
             None => return false
         };
+
+        signature_shares.retain(|k, _| {signing_commitments.contains_key(k)});
 
         let sig_target = frost::SigningTarget::new(
             &input.sig_hash,
