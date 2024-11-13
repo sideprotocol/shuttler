@@ -435,8 +435,6 @@ pub fn try_generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &S
 
     received_sign_message(swarm, signer, msg);
 
-    info!("Generated signature share: {}", &task_id[..6]);
-
 }
 
 pub fn try_aggregate_signature_shares(signer: &Signer, task_id: &str) -> Option<Psbt> {
