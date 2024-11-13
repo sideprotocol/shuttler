@@ -367,7 +367,6 @@ pub fn try_generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &S
             if *index == 0 {
                 let participants = keypair.pub_key.verifying_shares().keys().collect::<Vec<_>>();
                 let alive = mem_store::count_task_participants(&task_id);
-                debug!("{:?}", alive);
               
                 debug!("Commitments {} {}/[{},{}]", &task.id[..6], received, alive.len(), participants.len());
 
