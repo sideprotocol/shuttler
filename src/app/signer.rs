@@ -15,7 +15,7 @@ use libp2p::identity::Keypair;
 use libp2p::kad::store::MemoryStore;
 
 use libp2p::swarm::SwarmEvent;
-use libp2p::{ gossipsub, identify, kad, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
+use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
 use serde::Serialize;
 
 use crate::app::config::{self, TASK_INTERVAL};
@@ -462,10 +462,6 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
                 SwarmEvent::ConnectionEstablished { peer_id, endpoint, ..} => {
                     swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
                     let addr = endpoint.get_remote_address();
-                    let connected = swarm.connected_peers().map(|p| p.clone()).collect::<Vec<_>>();
-                    if connected.len() > 0 {
-                        swarm.behaviour_mut().identify.push(connected);
-                    }
                     info!("Connected to {:?}, ", addr);                  
                 },
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
@@ -548,16 +544,6 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                     swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
                 }
             });
-        }
-        TSSBehaviourEvent::Kad(kad::Event::RoutablePeer { peer, address }) => {
-            swarm.behaviour_mut().gossip.add_explicit_peer(&peer);
-            swarm.behaviour_mut().kad.add_address(&peer, address);
-        }
-        TSSBehaviourEvent::Kad(libp2p::kad::Event::RoutingUpdated { peer, is_new_peer, addresses, .. }) => {
-            debug!("KAD Routing updated for {peer} {is_new_peer}: {:?}", addresses);
-            if is_new_peer {
-                swarm.behaviour_mut().gossip.add_explicit_peer(&peer);
-            }
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, multiaddr) in list {
