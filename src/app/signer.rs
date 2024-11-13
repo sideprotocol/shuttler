@@ -15,7 +15,7 @@ use libp2p::identity::Keypair;
 use libp2p::kad::store::MemoryStore;
 
 use libp2p::swarm::SwarmEvent;
-use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
+use libp2p::{ gossipsub, identify, kad, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
 use serde::Serialize;
 
 use crate::app::config::{self, TASK_INTERVAL};
@@ -544,6 +544,10 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
                     swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
                 }
             });
+        }
+        TSSBehaviourEvent::Kad(kad::Event::RoutablePeer { peer, address }) => {
+            swarm.behaviour_mut().gossip.add_explicit_peer(&peer);
+            swarm.behaviour_mut().kad.add_address(&peer, address);
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, multiaddr) in list {
