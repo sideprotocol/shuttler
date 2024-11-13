@@ -450,24 +450,6 @@ pub fn try_aggregate_signature_shares(signer: &Signer, task_id: &str) -> Option<
     let stored_remote_commitments = signer.get_signing_commitments(&task.id);
     let stored_remote_signature_shares = signer.get_signing_signature_shares(&task.id);
     
-    // check whether it's ready for aggregation.
-    let first = 0usize;
-    let commitments = match stored_remote_commitments.get(&first) {
-        Some(c) => c,
-        None => return None,
-    };
-    let expected_len = commitments.len();
-    let received_len = match stored_remote_signature_shares.get(&first) {
-        Some(s) => s.len(),
-        None => return None,
-    };
-
-    debug!("Signature Share: {} {}/{}", &task.id[..6], received_len, expected_len );
-
-    if received_len < expected_len {
-        return None;
-    }
-
     let psbt_bytes = from_base64(&task.psbt).unwrap();
     let mut psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
         Ok(psbt) => psbt,
@@ -477,25 +459,34 @@ pub fn try_aggregate_signature_shares(signer: &Signer, task_id: &str) -> Option<
         }
     };
 
-    let verifies = task.inputs.iter().map(|(index, input)| {
+    let mut verifies = vec![];
+    for (index, input) in &task.inputs {
 
         let keypair = match signer.get_keypair_from_db(&input.address) {
             Some(keypair) => keypair,
             None => {
                 error!("Failed to get keypair for address: {}", input.address);
-                return false;
+                return None;
             }
-        };
-
-        let signing_commitments = match stored_remote_commitments.get(index) {
-            Some(e) => e.clone(),
-            None => return false
         };
 
         let mut signature_shares = match stored_remote_signature_shares.get(index) {
             Some(e) => e.clone(),
-            None => return false
+            None => return None
         };
+
+        let signing_commitments = match stored_remote_commitments.get(index) {
+            Some(e) => e.clone(),
+            None => return None
+        };
+
+        if *index == 0 {
+            debug!("Signature share {} {}/{}", &task_id[..6], signature_shares.len(), signing_commitments.len() )
+        }
+
+        if signature_shares.len() < keypair.pub_key.verifying_shares().len() || signature_shares.len() < signing_commitments.len() {
+            return None
+        }
 
         signature_shares.retain(|k, _| {signing_commitments.contains_key(k)});
 
@@ -529,7 +520,7 @@ pub fn try_aggregate_signature_shares(signer: &Signer, task_id: &str) -> Option<
                         psbt.inputs[*index].final_script_witness = Some(witness);
                         psbt.inputs[*index].partial_sigs = BTreeMap::new();
                         psbt.inputs[*index].sighash_type = None;
-                        return true;
+                        verifies.push(true);
                     },
                     Err(e) => {
                         error!( "{}:{} is invalid: {e}", &task.id[..6], index );
@@ -540,28 +531,24 @@ pub fn try_aggregate_signature_shares(signer: &Signer, task_id: &str) -> Option<
                 error!("Signature aggregation error: {:?} {:?}", &task.id[..6], e);
             }
         };
-        false
-    }).collect::<Vec<_>>();
+    };
 
-    let result  = verifies.iter().enumerate()
+    if verifies.len() ==0 {
+        return None
+    }
+
+    let output  = verifies.iter().enumerate()
                         .map(|(i, v)| format!("{i}:{}", if *v {"✔"} else {"✘"}))
                         .collect::<Vec<_>>().join(" ");
-    info!("Verify {}: {}", &task.id[..6], result );
+    info!("Verify {}: {}", &task.id[..6], output );
 
-    if verifies.iter().all(|a| *a) {
-
-        debug!("Completed task {}", &task.id[..6]);
-
-        let psbt_bytes = psbt.serialize();
-        let psbt_base64 = to_base64(&psbt_bytes);
-        task.psbt = psbt_base64;
-        task.status = Status::CLOSE;
-        signer.save_signing_task(&task);
-        signer.remove_signing_task_variables(&task.id);
-        Some(psbt.to_owned())
-    } else {
-        None
-    }
+    let psbt_bytes = psbt.serialize();
+    let psbt_base64 = to_base64(&psbt_bytes);
+    task.psbt = psbt_base64;
+    task.status = Status::CLOSE;
+    signer.save_signing_task(&task);
+    signer.remove_signing_task_variables(&task.id);
+    Some(psbt.to_owned())
 
 }
 
