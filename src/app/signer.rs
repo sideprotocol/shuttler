@@ -318,6 +318,7 @@ impl Signer {
     pub fn remove_signing_task(&self, task_id: &str) {
         self.db_sign.remove(task_id).expect("Unable to remove task");
         self.remove_signing_task_variables(task_id);
+        mem_store::remove_task_participants(task_id);
     }
 
     pub fn remove_signing_task_variables(&self, task_id: &str) {
@@ -460,12 +461,8 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
                 },
                 SwarmEvent::ConnectionEstablished { peer_id, endpoint, ..} => {
                     swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-                    let connected = swarm.connected_peers().map(|p| p.clone()).collect::<Vec<_>>();
-                    if connected.len() > 0 {
-                        swarm.behaviour_mut().identify.push(connected);
-                    }
                     let addr = endpoint.get_remote_address();
-                    info!("Connected to {:?}/p2p/{peer_id}, ", addr);                  
+                    info!("Connected to {:?}, ", addr);                  
                 },
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                     info!("Disconnected {peer_id}: {:?}", cause);
@@ -521,17 +518,18 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
             } else if message.topic == SubscribeTopic::ALIVE.topic().hash() {
                 if let Ok(alive) = serde_json::from_slice::<HeartBeatMessage>(&message.data) {
                     // Ensure the message is not forged.
-                    match PublicKey::from_slice(&alive.identifier.serialize()) {
+                    match PublicKey::from_slice(&alive.payload.identifier.serialize()) {
                         Ok(public_key) => {
                             let sig = Signature::from_slice(&alive.signature).unwrap();
-                            if public_key.verify(&alive.last_seen.to_ne_bytes(), &sig).is_err() {
-                                debug!("Reject, untrusted package from {:?}", alive.identifier);
+                            let bytes = serde_json::to_vec(&alive.payload).unwrap();
+                            if public_key.verify(bytes, &sig).is_err() {
+                                debug!("Reject, untrusted package from {:?}", alive.payload.identifier);
                                 return;
                             }
                         }
                         Err(_) => return
                     }
-                    if mem_store::is_peer_trusted_peer(&alive.identifier, signer) {
+                    if mem_store::is_peer_trusted_peer(&alive.payload.identifier, signer) {
                         mem_store::update_alive_table( alive );
                     }
                 }
