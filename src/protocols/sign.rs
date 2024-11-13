@@ -188,7 +188,7 @@ pub async fn dispatch_executions(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
                 let participants = vk.pub_key.verifying_shares();
 
                 let sender_index = participants.iter().position(|(id, _)| {id == signer.identifier()}).unwrap_or(10000);
-                if (now() - task.start_time) as usize % participants.len() != sender_index {
+                if (now() - task.start_time - task.start_time % TASK_INTERVAL.as_secs()) as usize % participants.len() != sender_index {
                     continue;
                 }
 
