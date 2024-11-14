@@ -1,3 +1,4 @@
+
 pub mod cipher;
 pub mod encoding;
 pub mod gossip;
@@ -11,8 +12,5 @@ pub mod client_ordinals;
 pub mod client_oracle;
 
 pub fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
+    chrono::Utc::now().timestamp() as u64
 }
