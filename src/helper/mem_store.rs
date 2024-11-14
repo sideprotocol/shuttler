@@ -34,6 +34,7 @@ lazy_static! {
 pub const ALIVE_WINDOW: u64 = TASK_INTERVAL.as_secs() * 2;
 
 pub fn update_alive_table(alive: HeartBeatMessage) {
+    tracing::debug!("{:?} {}", alive.payload.identifier, if alive.payload.last_seen > now() {alive.payload.last_seen - now()} else {0} );
     // if alive.payload.last_seen > now() {
     let mut table= AliveTable.lock().unwrap();
 
