@@ -36,6 +36,12 @@ pub const ALIVE_WINDOW: u64 = TASK_INTERVAL.as_secs() * 2;
 pub fn update_alive_table(alive: HeartBeatMessage) {
     // if alive.payload.last_seen > now() {
     let mut table= AliveTable.lock().unwrap();
+
+    if let Some(t) = table.get(&alive.payload.identifier) {
+        if alive.payload.last_seen < *t {
+            return
+        }
+    }
     table.insert(alive.payload.identifier, alive.payload.last_seen);
     // table.retain(|_, v| {*v + 1800u64 > now()});
 
