@@ -118,8 +118,7 @@ impl Signer {
     }
 
     pub fn peer_id(&self) -> PeerId {
-        let pk = libp2p::identity::PublicKey::try_decode_protobuf(&self.identifier.serialize()).unwrap();
-        pk.to_peer_id()
+        identifier_to_peer_id(&self.identifier)
     }
 
     pub fn p2p_keypair(&self) -> Keypair {
@@ -143,7 +142,7 @@ impl Signer {
         for (_, k) in keypairs {
             for identifier in k.pub_key.verifying_shares().keys() {
                 let local = identifier_to_peer_id(identifier);
-                println!("{:?}={:?} {}", local, peer_id, local==peer_id);
+                // println!("{:?}={:?} {}", local, peer_id, local==peer_id);
                 if local == peer_id {
                     return true;
                 }
