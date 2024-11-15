@@ -6,7 +6,6 @@ use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use std::{fs, path::PathBuf, str::FromStr, sync::Mutex, time::Duration};
-
 use crate::helper::{cipher::random_bytes, encoding::to_base64};
 
 const CONFIG_FILE: &str = "config.toml";
@@ -193,6 +192,21 @@ impl Config {
         Ok(config)
     }
 
+    pub fn generate_priv_validator_key(home: PathBuf) {
+        let rng = rand::thread_rng();
+        let sk = ed25519_consensus::SigningKey::new(rng);
+        let priv_key = tendermint::private_key::PrivateKey::from_ed25519_consensus(sk);
+
+        let key = tendermint_config::PrivValidatorKey {
+            address: tendermint::account::Id::from(priv_key.public_key()),
+            pub_key: priv_key.public_key(),
+            priv_key,
+        };
+
+        let text= serde_json::to_string_pretty(&key).unwrap();
+        fs::write(home.join("priv_validator_key.json"), text).unwrap();
+    }
+
     pub fn default(home_str: &str, port: u32, network: Network) -> Self {
         let entropy = random_bytes(32);
         let mnemonic = bip39::Mnemonic::from_entropy(entropy.as_slice()).expect("failed to create mnemonic");
@@ -202,16 +216,15 @@ impl Config {
         } else {
             home_dir(home_str)
         };
+        Self::generate_priv_validator_key(home.clone());
         Self {
             home,
             p2p_keypair ,
             port: port as u32,
-            bootstrap_nodes: vec!["/ip4/192.248.180.245/tcp/5158/p2p/12D3KooWMpMtmYQKSn1sZaSRn4CAcsraWZVrZ2zdNjEgsEPSd3Pv".to_string()],
+            bootstrap_nodes: vec![],
             log_level: "debug".to_string(),
             mnemonic: mnemonic.to_string(),
             priv_validator_key_path: "priv_validator_key.json".to_string(),
-            // keys: BTreeMap::new(),
-            // pubkeys: BTreeMap::new(),
             bitcoin: BitcoinCfg {
                 network,
                 rpc: "http://192.248.150.102:18332".to_string(),
