@@ -18,9 +18,9 @@ pub async fn time_free_tasks_executor( swarm : &mut Swarm<TSSBehaviour>, signer:
         return
     }
 
-    if signer.config().get_validator_key().is_none() {
-        return;
-    }
+    // if signer.config().get_validator_key().is_none() {
+    //     return;
+    // }
 
     // 1. dkg tasks
     broadcast_dkg_packages(swarm, signer);
