@@ -70,14 +70,14 @@ pub fn remove_task_participants(task_id: &str) {
 pub fn count_task_participants(task_id: &str) -> Vec<Identifier> {
     
     let tp = TaskParticipants.lock().unwrap();
-    // let table= AliveTable.lock().unwrap();
+    let table= AliveTable.lock().unwrap();
     match tp.get(task_id) {
         Some(participants) => participants
             .iter()
-            // .filter(|i| {
-            //     let last_seen = table.get(i).unwrap_or(&0);
-            //     *last_seen > now()
-            // })
+            .filter(|i| {
+                let last_seen = table.get(i).unwrap_or(&0);
+                *last_seen > now()
+            })
             .map(|i| i.clone()).collect::<Vec<_>>(),
         None => vec![],
     }
