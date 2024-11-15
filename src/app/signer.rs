@@ -141,8 +141,8 @@ impl Signer {
         }
         for (_, k) in keypairs {
             if k.pub_key.verifying_shares().keys().any(|k| {
-                let pk = libp2p::identity::PublicKey::try_decode_protobuf(&k.serialize()).unwrap();
-                pk.to_peer_id() == peer_id
+                let pk = PeerId::from_bytes(&k.serialize()).unwrap();
+                pk == peer_id
             }) {
                 return true;
             }
