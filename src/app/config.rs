@@ -4,10 +4,9 @@ use cosmos_sdk_proto::cosmos::auth::v1beta1::{query_client::QueryClient as AuthQ
 
 use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
 use serde::{Deserialize, Serialize};
-use tracing::error;
+use tendermint_config::PrivValidatorKey;
 use std::{fs, path::PathBuf, str::FromStr, sync::Mutex, time::Duration};
-
-use crate::helper::{cipher::random_bytes, encoding::to_base64};
+use crate::helper::cipher::random_bytes;
 
 const CONFIG_FILE: &str = "config.toml";
 
@@ -26,7 +25,7 @@ lazy_static! {
 pub struct Config {
     #[serde(skip_serializing, skip_deserializing)]
     pub home: PathBuf,
-    pub p2p_keypair: String,
+    // pub p2p_keypair: String,
     pub port: u32,
     pub bootstrap_nodes: Vec<String>,
     /// logger level
@@ -104,13 +103,6 @@ pub struct AnyKey {
     pub value: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct PrivValidatorKey {
-    pub address: String,
-    pub pub_key: AnyKey,
-    pub priv_key: AnyKey,
-}
-
 /// relayer account will be used to sign transactions on the side chain,
 /// such as sending block headers, depositing and withdrawing transactions
 pub async fn get_relayer_account(conf: &Config) -> BaseAccount {
@@ -154,24 +146,23 @@ pub fn remove_relayer_account() {
 }
 
 impl Config {
-    pub fn load_validator_key(&self) {
+    pub fn load_validator_key(&self) -> PrivValidatorKey {
         let priv_key_path = if self.priv_validator_key_path.starts_with("/") {
             PathBuf::from(self.priv_validator_key_path.clone())
         } else {
             self.home.join(self.priv_validator_key_path.clone())
         };
-        match fs::read_to_string(priv_key_path.clone()) {
-            Ok(text) => {
-                let prv_key = serde_json::from_str::<PrivValidatorKey>(text.as_str()).expect("Failed to parse priv_validator_key.json");
-                PRIV_VALIDATOR_KEY.lock().unwrap().replace(prv_key.clone());
-            },
-            Err(e) => error!("You are running in Bootstrap mode because the 'priv_validator_key.json' has not been loaded: {}", e)
-        };
+        let text = fs::read_to_string(priv_key_path.clone()).expect("priv_validator_key.json does not exists!");
+    
+        let prv_key = serde_json::from_str::<PrivValidatorKey>(text.as_str()).expect("Failed to parse priv_validator_key.json");
+        // PRIV_VALIDATOR_KEY.lock().unwrap().replace(prv_key.clone());
+        prv_key
+            
     }
 
-    pub fn get_validator_key(&self) -> Option<PrivValidatorKey> {
-        PRIV_VALIDATOR_KEY.lock().unwrap().clone()
-    }
+    // pub fn get_validator_key(&self) -> Option<PrivValidatorKey> {
+    //     PRIV_VALIDATOR_KEY.lock().unwrap().clone()
+    // }
 
     pub fn from_file(app_home: &str) -> Result<Self, std::io::Error> {
         
@@ -193,25 +184,40 @@ impl Config {
         Ok(config)
     }
 
+    pub fn generate_priv_validator_key(home: PathBuf) {
+        let rng = rand::thread_rng();
+        let sk = ed25519_consensus::SigningKey::new(rng);
+        let priv_key = tendermint::private_key::PrivateKey::from_ed25519_consensus(sk);
+
+        let key = tendermint_config::PrivValidatorKey {
+            address: tendermint::account::Id::from(priv_key.public_key()),
+            pub_key: priv_key.public_key(),
+            priv_key,
+        };
+
+        fs::create_dir_all(&home).unwrap();
+        let text= serde_json::to_string_pretty(&key).unwrap();
+        fs::write(home.join("priv_validator_key.json"), text).unwrap();
+    }
+
     pub fn default(home_str: &str, port: u32, network: Network) -> Self {
         let entropy = random_bytes(32);
         let mnemonic = bip39::Mnemonic::from_entropy(entropy.as_slice()).expect("failed to create mnemonic");
-        let p2p_keypair = to_base64(libp2p::identity::Keypair::generate_ed25519().to_protobuf_encoding().unwrap().as_slice());
+        // let p2p_keypair = to_base64(libp2p::identity::Keypair::generate_ed25519().to_protobuf_encoding().unwrap().as_slice());
         let home =  if home_str.starts_with("/") {
             PathBuf::from_str(home_str).unwrap()
         } else {
             home_dir(home_str)
         };
+        Self::generate_priv_validator_key(home.clone());
         Self {
             home,
-            p2p_keypair ,
+            // p2p_keypair ,
             port: port as u32,
-            bootstrap_nodes: vec!["/ip4/192.248.180.245/tcp/5158/p2p/12D3KooWMpMtmYQKSn1sZaSRn4CAcsraWZVrZ2zdNjEgsEPSd3Pv".to_string()],
+            bootstrap_nodes: vec![],
             log_level: "debug".to_string(),
             mnemonic: mnemonic.to_string(),
             priv_validator_key_path: "priv_validator_key.json".to_string(),
-            // keys: BTreeMap::new(),
-            // pubkeys: BTreeMap::new(),
             bitcoin: BitcoinCfg {
                 network,
                 rpc: "http://192.248.150.102:18332".to_string(),

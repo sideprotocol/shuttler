@@ -15,14 +15,13 @@ use libp2p::identity::Keypair;
 use libp2p::kad::store::MemoryStore;
 
 use libp2p::swarm::SwarmEvent;
-use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
+use libp2p::{ gossipsub, identify, kad, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
 use serde::Serialize;
 
 use crate::app::config::{self, TASK_INTERVAL};
 use crate::app::config::Config;
 use crate::helper::bitcoin::get_group_address_by_tweak;
-use crate::helper::cipher::random_bytes;
-use crate::helper::encoding::from_base64;
+use crate::helper::encoding::identifier_to_peer_id;
 use crate::helper::gossip::{subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic};
 use crate::helper::mem_store;
 use crate::protocols::sign::{received_sign_message, SignMesage, SignTask};
@@ -66,19 +65,20 @@ pub struct Signer {
     db_dkg: sled::Db,
     db_dkg_variables: sled::Db,
     db_keypair: sled::Db,
+
 }
 
 impl Signer {
     pub fn new(conf: Config) -> Self {
 
         // load private key from priv_validator_key_path
-        let local_key = match conf.get_validator_key() {
-            Some(validator_key) => {
-                let b = from_base64(&validator_key.priv_key.value).expect("Decode private key failed");
-                SecretKey::from_slice(b.as_slice()).expect("invalid secret key")
-            },
-            None => SecretKey::from_slice(random_bytes(SecretKey::BYTES).as_slice()).expect("invalid secret key")
-        };
+        let priv_validator_key = conf.load_validator_key();
+
+        // let b = serde_json::to_vec(&priv_validator_key.priv_key).unwrap();
+        let mut b = priv_validator_key.priv_key.ed25519_signing_key().unwrap().as_bytes().to_vec();
+
+        b.extend(priv_validator_key.pub_key.to_bytes());
+        let local_key = SecretKey::new(b.as_slice().try_into().unwrap());
 
         let id = frost::Secp256K1ScalarField::deserialize(&local_key.public_key().as_slice().try_into().unwrap()).unwrap();
         let identifier = frost_core::Identifier::new(id).unwrap(); 
@@ -88,7 +88,7 @@ impl Signer {
         let bitcoin_client = Client::new(
             &conf.bitcoin.rpc, 
             Auth::UserPass(conf.bitcoin.user.clone(), conf.bitcoin.password.clone()))
-            .expect("Could not initial bitcoin RPC client");
+            .expect("Could not initial bitcoin RPC client");    
 
         let db_sign = sled::open(conf.get_database_with_name("sign-task")).expect("Counld not create database!");
         let db_sign_variables = sled::open(conf.get_database_with_name("sign-task-variables")).expect("Counld not create database!");
@@ -117,11 +117,38 @@ impl Signer {
         &self.identifier
     }
 
+    pub fn peer_id(&self) -> PeerId {
+        identifier_to_peer_id(&self.identifier)
+    }
+
+    pub fn p2p_keypair(&self) -> Keypair {
+        let raw = &self.identity_key.to_vec()[0..32].to_vec();
+        Keypair::ed25519_from_bytes(raw.clone()).unwrap()
+    }
+
     pub fn validator_address(&self) -> String {
-        match &self.config().get_validator_key() {
-            Some(key) => key.address.clone(),
-            None => "".to_string()
+        self.config().load_validator_key().address.to_string()
+    }
+
+    pub fn is_white_listed_peer(&self, peer_id: PeerId) -> bool {
+
+        if self.config.bootstrap_nodes.iter().any(|addr| {addr.contains(&peer_id.to_base58())}) {
+            return true
         }
+        let keypairs = self.list_keypairs();
+        if keypairs.len() == 0 {
+            return true;
+        }
+        for (_, k) in keypairs {
+            for identifier in k.pub_key.verifying_shares().keys() {
+                let local = identifier_to_peer_id(identifier);
+                // println!("{:?}={:?} {}", local, peer_id, local==peer_id);
+                if local == peer_id {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     pub async fn get_relayer_account(&self) -> BaseAccount {
@@ -376,15 +403,18 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
     info!("Starting TSS Signer Daemon");
 
     // load config
-    conf.load_validator_key();
     let signer = Signer::new(conf.clone());
 
     for (i, (addr, vkp) ) in signer.list_keypairs().iter().enumerate() {
         debug!("Vault {i}. {addr}, ({}-of-{})", vkp.priv_key.min_signers(), vkp.pub_key.verifying_shares().len());
     }
 
-    let libp2p_keypair = Keypair::from_protobuf_encoding(from_base64(&conf.p2p_keypair).unwrap().as_slice()).unwrap();
-    let mut swarm: libp2p::Swarm<TSSBehaviour> = libp2p::SwarmBuilder::with_existing_identity(libp2p_keypair)
+    // let priv_validator_key = conf.load_validator_key();
+    // let bytes = serde_json::to_vec(&priv_validator_key.priv_key).unwrap();
+    // let libp2p_keypair = Keypair::from_protobuf_encoding(bytes.as_slice()).unwrap();
+    // let mut raw = signer.identity_key.as_slice().to_owned();
+    // let libp2p_keypair = Keypair::ed25519_from_bytes(&mut raw).unwrap();
+    let mut swarm: libp2p::Swarm<TSSBehaviour> = libp2p::SwarmBuilder::with_existing_identity(signer.p2p_keypair())
         .with_tokio()
         .with_tcp(
             tcp::Config::default(),
@@ -446,9 +476,6 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
     subscribe_gossip_topics(&mut swarm);
 
     let mut interval_free = tokio::time::interval(TASK_INTERVAL);
-    // let start = Instant::now() + (TASK_ROUND_WINDOW - tokio::time::Duration::from_secs(now() % TASK_ROUND_WINDOW.as_secs()));
-    // let mut interval_aligned = tokio::time::interval_at(start, TASK_ROUND_WINDOW);
-    // let mut alive_interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
 
     loop {
         select! {
@@ -460,9 +487,14 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
                     info!("Listening on {address}/p2p/{}", swarm.local_peer_id());
                 },
                 SwarmEvent::ConnectionEstablished { peer_id, endpoint, ..} => {
-                    swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-                    let addr = endpoint.get_remote_address();
-                    info!("Connected to {:?}, ", addr);                  
+                    if signer.is_white_listed_peer(peer_id) {
+                        swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
+                        let addr = endpoint.get_remote_address();
+                        info!("Connected to {:?}, ", addr);
+                    } else {
+                        let _ = swarm.disconnect_peer_id(peer_id); 
+                        info!("Disconnected (untrusted) {:?}", peer_id); 
+                    }               
                 },
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                     info!("Disconnected {peer_id}: {:?}", cause);
@@ -540,10 +572,16 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
             // info!(" @@(Received) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
             info.listen_addrs.iter().for_each(|addr| {
                 if !addr.to_string().starts_with("/ip4/127.0.0.1") {
-                    // tracing::debug!("Discovered: {addr}/p2p/{peer_id}");
+                    tracing::debug!("Discovered: {addr}/p2p/{peer_id}");
                     swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
                 }
             });
+        }
+        TSSBehaviourEvent::Kad(kad::Event::RoutablePeer { peer, address }) => {
+            debug!("Found Peer {:?}/{:?}", address, peer)
+        }
+        TSSBehaviourEvent::Kad(kad::Event::RoutingUpdated { is_new_peer, addresses, .. }) => {
+            debug!("Routing Peer {:?}/{:?}", addresses, is_new_peer)
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, multiaddr) in list {

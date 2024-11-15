@@ -34,7 +34,9 @@ lazy_static! {
 pub const ALIVE_WINDOW: u64 = TASK_INTERVAL.as_secs() * 2;
 
 pub fn update_alive_table(alive: HeartBeatMessage) {
-    // if alive.payload.last_seen > now() {
+    tracing::debug!("{:?} {}", alive.payload.identifier, if alive.payload.last_seen > now() {alive.payload.last_seen - now()} else {0} );
+    if alive.payload.last_seen < now() { return }
+
     let mut table= AliveTable.lock().unwrap();
 
     if let Some(t) = table.get(&alive.payload.identifier) {
@@ -43,7 +45,7 @@ pub fn update_alive_table(alive: HeartBeatMessage) {
         }
     }
     table.insert(alive.payload.identifier, alive.payload.last_seen);
-    // table.retain(|_, v| {*v + 1800u64 > now()});
+    table.retain(|_, v| {*v + 1800u64 > now()});
 
     let mut tp = TaskParticipants.lock().unwrap();
     alive.payload.task_ids.iter().for_each(|id| {
@@ -68,14 +70,14 @@ pub fn remove_task_participants(task_id: &str) {
 pub fn count_task_participants(task_id: &str) -> Vec<Identifier> {
     
     let tp = TaskParticipants.lock().unwrap();
-    // let table= AliveTable.lock().unwrap();
+    let table= AliveTable.lock().unwrap();
     match tp.get(task_id) {
         Some(participants) => participants
             .iter()
-            // .filter(|i| {
-            //     let last_seen = table.get(i).unwrap_or(&0);
-            //     *last_seen > now()
-            // })
+            .filter(|i| {
+                let last_seen = table.get(i).unwrap_or(&0);
+                *last_seen > now()
+            })
             .map(|i| i.clone()).collect::<Vec<_>>(),
         None => vec![],
     }
