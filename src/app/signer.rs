@@ -21,6 +21,7 @@ use serde::Serialize;
 use crate::app::config::{self, TASK_INTERVAL};
 use crate::app::config::Config;
 use crate::helper::bitcoin::get_group_address_by_tweak;
+use crate::helper::encoding::identifier_to_peer_id;
 use crate::helper::gossip::{subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic};
 use crate::helper::mem_store;
 use crate::protocols::sign::{received_sign_message, SignMesage, SignTask};
@@ -140,9 +141,8 @@ impl Signer {
             return true;
         }
         for (_, k) in keypairs {
-            if k.pub_key.verifying_shares().keys().any(|k| {
-                let pk = PeerId::from_bytes(&k.serialize()).unwrap();
-                pk == peer_id
+            if k.pub_key.verifying_shares().keys().any(|identifier| {
+                identifier_to_peer_id(identifier) == peer_id
             }) {
                 return true;
             }
