@@ -141,10 +141,12 @@ impl Signer {
             return true;
         }
         for (_, k) in keypairs {
-            if k.pub_key.verifying_shares().keys().any(|identifier| {
-                identifier_to_peer_id(identifier) == peer_id
-            }) {
-                return true;
+            for identifier in k.pub_key.verifying_shares().keys() {
+                let local = identifier_to_peer_id(identifier);
+                println!("{:?}={:?} {}", local, peer_id, local==peer_id);
+                if local == peer_id {
+                    return true;
+                }
             }
         }
         false
