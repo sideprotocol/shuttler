@@ -203,6 +203,7 @@ impl Config {
             priv_key,
         };
 
+        fs::create_dir_all(&home).unwrap();
         let text= serde_json::to_string_pretty(&key).unwrap();
         fs::write(home.join("priv_validator_key.json"), text).unwrap();
     }
