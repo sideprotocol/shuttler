@@ -15,7 +15,7 @@ use libp2p::identity::Keypair;
 use libp2p::kad::store::MemoryStore;
 
 use libp2p::swarm::SwarmEvent;
-use libp2p::{ gossipsub, identify, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
+use libp2p::{ gossipsub, identify, kad, mdns, noise, tcp, yamux, Multiaddr, PeerId, Swarm};
 use serde::Serialize;
 
 use crate::app::config::{self, TASK_INTERVAL};
@@ -540,10 +540,16 @@ async fn event_handler(event: TSSBehaviourEvent, swarm: &mut Swarm<TSSBehaviour>
             // info!(" @@(Received) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
             info.listen_addrs.iter().for_each(|addr| {
                 if !addr.to_string().starts_with("/ip4/127.0.0.1") {
-                    // tracing::debug!("Discovered: {addr}/p2p/{peer_id}");
+                    tracing::debug!("Discovered: {addr}/p2p/{peer_id}");
                     swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
                 }
             });
+        }
+        TSSBehaviourEvent::Kad(kad::Event::RoutablePeer { peer, address }) => {
+            debug!("Found Peer {:?}/{:?}", address, peer)
+        }
+        TSSBehaviourEvent::Kad(kad::Event::RoutingUpdated { is_new_peer, addresses, .. }) => {
+            debug!("Routing Peer {:?}/{:?}", addresses, is_new_peer)
         }
         TSSBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
             for (peer_id, multiaddr) in list {
