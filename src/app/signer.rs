@@ -409,11 +409,6 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
         debug!("Vault {i}. {addr}, ({}-of-{})", vkp.priv_key.min_signers(), vkp.pub_key.verifying_shares().len());
     }
 
-    // let priv_validator_key = conf.load_validator_key();
-    // let bytes = serde_json::to_vec(&priv_validator_key.priv_key).unwrap();
-    // let libp2p_keypair = Keypair::from_protobuf_encoding(bytes.as_slice()).unwrap();
-    // let mut raw = signer.identity_key.as_slice().to_owned();
-    // let libp2p_keypair = Keypair::ed25519_from_bytes(&mut raw).unwrap();
     let mut swarm: libp2p::Swarm<TSSBehaviour> = libp2p::SwarmBuilder::with_existing_identity(signer.p2p_keypair())
         .with_tokio()
         .with_tcp(
