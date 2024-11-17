@@ -1,9 +1,10 @@
 use std::{fs::{self, File}, path::PathBuf, time::Duration};
 
-use cosmos_sdk_proto::side::btcbridge::query_server::QueryServer;
+use cosmos_sdk_proto::{cosmos::base::tendermint::v1beta1::Validator, side::btcbridge::query_server::QueryServer};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_server::QueryServer as AuthServer;
 use cosmos_sdk_proto::cosmos::tx::v1beta1::service_server::ServiceServer as TxServer;
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_server::ServiceServer as BlockServer;
+use cosmrs::Any;
 use tempfile::TempDir;
 use tendermint::{account::Id, PrivateKey};
 use tendermint_config::PrivValidatorKey;
@@ -26,6 +27,7 @@ pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32) {
     let home = String::from(testdir.path().to_str().unwrap());    
     let mut participants = vec![];
     
+    let mut validators = vec![];
     for i in 1..=n {
 
         std::thread::sleep(Duration::from_secs(delay as u64));
@@ -43,6 +45,16 @@ pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32) {
         let priv_key = PrivateKey::from_ed25519_consensus(sk);
         println!("{i}.{}", priv_key.public_key().to_hex().to_ascii_lowercase());
 
+        validators.push(Validator{
+            pub_key: Some(Any {
+                type_url: "tendermint/PubKeyEd25519".to_string(),
+                value: priv_key.public_key().to_bytes(),
+            }),
+            address: Id::from(priv_key.public_key()).to_string(),
+            voting_power: 1,
+            proposer_priority: 1,
+        });
+        
         let priv_validator_key = PrivValidatorKey {
             address: Id::from(priv_key.public_key()),
             pub_key: priv_key.public_key(),
@@ -85,20 +97,13 @@ pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32) {
     let s = MockQuery::new(home.clone());
         
     Server::builder()
-        // .max_concurrent_streams(Some(65535))
-        // .concurrency_limit_per_connection(300)
-        // .layer(ConnectionLi)
-        // .add_service(Service::new(greeter))
         .add_service(QueryServer::new(s.clone()))
         .add_service(AuthServer::new(s))
         .add_service(TxServer::new(MockTxService{home: home.clone(), tx}))
-        .add_service(BlockServer::new(MockBlockService{}))
+        .add_service(BlockServer::new(MockBlockService::new(validators)))
+
         .serve(addr)
         .await.unwrap();
-
-    // println!("Press any key to abort!");
-    // let mut buffer = String::new();
-    // io::stdin().read_line(&mut buffer).expect("");
 
     println!("Quited");
 }

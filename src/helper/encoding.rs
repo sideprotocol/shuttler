@@ -1,6 +1,8 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use bitcoin_hashes::sha256;
 use bitcoin_hashes::Hash;
+use frost_core::Field;
+use frost_secp256k1_tr as frost;
 use frost_secp256k1_tr::Identifier;
 use libp2p::PeerId;
 
@@ -26,4 +28,9 @@ pub fn abbr(identifier: &Identifier) -> String {
 pub fn identifier_to_peer_id(identifier: &Identifier) -> PeerId {
     let xkey = libp2p::identity::ed25519::PublicKey::try_from_bytes(&identifier.serialize()).unwrap();
     libp2p::identity::PublicKey::from(xkey).to_peer_id()
+}
+
+pub fn pubkey_to_identifier(key_bytes: &[u8]) -> Identifier {
+    let id = frost::Secp256K1ScalarField::deserialize(key_bytes.try_into().unwrap()).unwrap();
+    Identifier::new(id).unwrap()
 }

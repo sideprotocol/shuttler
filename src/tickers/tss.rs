@@ -10,17 +10,13 @@ use crate::{
     protocols::{dkg::{broadcast_dkg_packages, generate_round1_package, DKGTask}, 
     sign::{save_task_into_signing_queue, dispatch_executions}, Round, TSSBehaviour
 }};
-pub async fn time_free_tasks_executor( swarm : &mut Swarm<TSSBehaviour>, signer: &Signer ) {
+pub async fn time_free_tasks_executor( swarm : &mut Swarm<TSSBehaviour>, signer: &mut Signer ) {
     
-    let connected = swarm.connected_peers().collect::<Vec<_>>();
-    debug!("Connected peers: {:?}", connected);
-    if connected.len() == 0 {
+    signer.sync_candidates_from_validators().await;
+    
+    if swarm.connected_peers().count() == 0 {
         return
     }
-
-    // if signer.config().get_validator_key().is_none() {
-    //     return;
-    // }
 
     // 1. dkg tasks
     broadcast_dkg_packages(swarm, signer);
@@ -35,6 +31,7 @@ pub async fn time_free_tasks_executor( swarm : &mut Swarm<TSSBehaviour>, signer:
 
     // 3. heart beat
     sending_heart_beat(swarm, signer).await;
+    
 }
 
 pub async fn fetch_signing_requests(
@@ -137,7 +134,7 @@ async fn submit_dkg_address(signer: &Signer) {
                     task.submitted = true;
                     signer.save_dkg_task(task);
                 
-                    info!("Sent dkg vault: {:?}", tx_response);
+                    info!("Sent dkg vault: {:?}", tx_response.txhash);
                     continue;
                 }
 

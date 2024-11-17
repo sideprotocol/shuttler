@@ -624,7 +624,7 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
                 error!("Failed to submit signatures: {:?}", tx_response);
                 return
             }
-            info!("Submitted signatures: {:?}", tx_response);
+            info!("Submitted signatures: {:?}", tx_response.txhash);
         },
         Err(e) => {
             error!("Failed to submit signatures: {:?}", e);
