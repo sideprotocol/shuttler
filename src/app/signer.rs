@@ -1,4 +1,5 @@
 
+use bitcoin::{TapNodeHash, XOnlyPublicKey};
 use bitcoincore_rpc::{Auth, Client};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_client::QueryClient as AuthQueryClient;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountRequest};
@@ -182,8 +183,15 @@ impl Signer {
         }
     }
 
-    fn generate_tweak(&self, _pubkey: PublicKeyPackage, index: u16) -> Option<[u8;32]> {
-        Some([index as u8;32])
+    fn generate_tweak(&self, pubkey: PublicKeyPackage, index: u16) -> Option<TapNodeHash> {
+        let x_only_pubkey = XOnlyPublicKey::from_slice(&pubkey.verifying_key().serialize()[1..]).unwrap();
+
+        let mut script = bitcoin::ScriptBuf::new();
+        script.push_slice(x_only_pubkey.serialize());
+        script.push_opcode(bitcoin::opcodes::all::OP_CHECKSIG);
+        script.push_slice((index as u8).to_be_bytes());
+
+        Some(TapNodeHash::from_script(script.as_script(), bitcoin::taproot::LeafVersion::TapScript))
     }
 
     pub fn generate_vault_addresses(&self, pubkey: PublicKeyPackage, key: KeyPackage, address_num: u16) -> Vec<String> {
