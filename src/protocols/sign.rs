@@ -408,7 +408,7 @@ pub fn try_generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &S
                     &input.sig_hash, 
                     frost::SigningParameters{
                         tapscript_merkle_root: match keypair.tweak {
-                            Some(tweak) => Some(tweak.to_vec()),
+                            Some(tweak) => Some(tweak.to_byte_array().to_vec()),
                             None => None,
                         },
                     }
@@ -519,7 +519,7 @@ pub fn try_aggregate_signature_shares(signer: &Signer, task_id: &str) -> Option<
             &input.sig_hash,
             frost::SigningParameters {
                 tapscript_merkle_root:  match keypair.tweak {
-                        Some(tweak) => Some(tweak.to_vec()),
+                        Some(tweak) => Some(tweak.to_byte_array().to_vec()),
                         None => None,
                     },
                 }
