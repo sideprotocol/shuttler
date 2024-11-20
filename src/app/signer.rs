@@ -3,7 +3,6 @@ use bitcoin::{TapNodeHash, XOnlyPublicKey};
 use bitcoincore_rpc::{Auth, Client};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_client::QueryClient as AuthQueryClient;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountRequest};
-use frost_core::Field;
 use frost_secp256k1_tr::keys::dkg::round1::Package;
 use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
 use frost_secp256k1_tr::round1::{SigningCommitments, SigningNonces};
@@ -22,7 +21,7 @@ use serde::Serialize;
 use crate::app::config::{self, TASK_INTERVAL};
 use crate::app::config::Config;
 use crate::helper::bitcoin::get_group_address_by_tweak;
-use crate::helper::encoding::identifier_to_peer_id;
+use crate::helper::encoding::{identifier_to_peer_id, pubkey_to_identifier};
 use crate::helper::gossip::{subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic};
 use crate::helper::mem_store;
 use crate::protocols::sign::{received_sign_message, SignMesage, SignTask};
@@ -44,6 +43,8 @@ use ed25519_compact::{PublicKey, SecretKey, Signature};
 
 use lazy_static::lazy_static;
 
+use super::candidate::Candidate;
+
 lazy_static! {
     static ref BASE_ACCOUNT: Mutex<Option<BaseAccount>> = {
         Mutex::new(None)
@@ -53,6 +54,7 @@ lazy_static! {
 #[derive(Debug)]
 pub struct Signer {
     config: Config,
+    candidates: Candidate, 
     /// Identity key of the signer
     /// This is the private key of sidechain validator that is used to sign messages
     pub identity_key: SecretKey,
@@ -75,15 +77,11 @@ impl Signer {
         // load private key from priv_validator_key_path
         let priv_validator_key = conf.load_validator_key();
 
-        // let b = serde_json::to_vec(&priv_validator_key.priv_key).unwrap();
         let mut b = priv_validator_key.priv_key.ed25519_signing_key().unwrap().as_bytes().to_vec();
-
         b.extend(priv_validator_key.pub_key.to_bytes());
         let local_key = SecretKey::new(b.as_slice().try_into().unwrap());
 
-        let id = frost::Secp256K1ScalarField::deserialize(&local_key.public_key().as_slice().try_into().unwrap()).unwrap();
-        let identifier = frost_core::Identifier::new(id).unwrap(); 
-
+        let identifier = pubkey_to_identifier(local_key.public_key().as_slice());
         info!("Threshold Signature Identifier: {:?}", identifier);
 
         let bitcoin_client = Client::new(
@@ -98,6 +96,7 @@ impl Signer {
         let db_keypair = sled::open(conf.get_database_with_name("keypairs")).expect("Counld not create database!");
 
         Self {
+            candidates: Candidate::new(conf.side_chain.grpc.clone(), &conf.bootstrap_nodes),
             identity_key: local_key,
             identifier,
             bitcoin_client,
@@ -132,24 +131,17 @@ impl Signer {
     }
 
     pub fn is_white_listed_peer(&self, peer_id: PeerId) -> bool {
-
-        if self.config.bootstrap_nodes.iter().any(|addr| {addr.contains(&peer_id.to_base58())}) {
+        // Allow anyone if no candidate is specified.
+        if self.candidates.peers().len() == 0 {
             return true
         }
-        let keypairs = self.list_keypairs();
-        if keypairs.len() == 0 {
-            return true;
-        }
-        for (_, k) in keypairs {
-            for identifier in k.pub_key.verifying_shares().keys() {
-                let local = identifier_to_peer_id(identifier);
-                // println!("{:?}={:?} {}", local, peer_id, local==peer_id);
-                if local == peer_id {
-                    return true;
-                }
-            }
-        }
-        false
+        // Candidates are active validators and bootstrap nodes
+        self.candidates.peers().contains(&peer_id)
+    }
+
+    // Defines who is allowed to participate in the p2p network.
+    pub async fn sync_candidates_from_validators(&mut self){
+        self.candidates.sync_from_validators().await;
     }
 
     pub async fn get_relayer_account(&self) -> BaseAccount {
@@ -411,17 +403,13 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
     info!("Starting TSS Signer Daemon");
 
     // load config
-    let signer = Signer::new(conf.clone());
+    let mut signer = Signer::new(conf.clone());
+    signer.sync_candidates_from_validators().await;
 
     for (i, (addr, vkp) ) in signer.list_keypairs().iter().enumerate() {
         debug!("Vault {i}. {addr}, ({}-of-{})", vkp.priv_key.min_signers(), vkp.pub_key.verifying_shares().len());
     }
 
-    // let priv_validator_key = conf.load_validator_key();
-    // let bytes = serde_json::to_vec(&priv_validator_key.priv_key).unwrap();
-    // let libp2p_keypair = Keypair::from_protobuf_encoding(bytes.as_slice()).unwrap();
-    // let mut raw = signer.identity_key.as_slice().to_owned();
-    // let libp2p_keypair = Keypair::ed25519_from_bytes(&mut raw).unwrap();
     let mut swarm: libp2p::Swarm<TSSBehaviour> = libp2p::SwarmBuilder::with_existing_identity(signer.p2p_keypair())
         .with_tokio()
         .with_tcp(
@@ -494,15 +482,13 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
                 SwarmEvent::NewListenAddr { address, .. } => {
                     info!("Listening on {address}/p2p/{}", swarm.local_peer_id());
                 },
-                SwarmEvent::ConnectionEstablished { peer_id, endpoint, ..} => {
+                SwarmEvent::ConnectionEstablished { peer_id, ..} => {
                     if signer.is_white_listed_peer(peer_id) {
                         swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-                        let addr = endpoint.get_remote_address();
-                        info!("Connected to {:?}, ", addr);
                     } else {
                         let _ = swarm.disconnect_peer_id(peer_id); 
-                        info!("Disconnected (untrusted) {:?}", peer_id); 
-                    }               
+                    }
+                    info!("Connected peers {:?}", swarm.connected_peers().collect::<Vec<_>>());            
                 },
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                     info!("Disconnected {peer_id}: {:?}", cause);
@@ -512,7 +498,7 @@ pub async fn run_signer_daemon(conf: Config, seed: bool) {
                 },
             },
             _ = interval_free.tick() => {
-                time_free_tasks_executor(&mut swarm, &signer).await;
+                time_free_tasks_executor(&mut swarm, &mut signer).await;
             }
             // _ = interval_aligned.tick() => {
             //     time_aligned_tasks_executor(&mut swarm, &signer).await;

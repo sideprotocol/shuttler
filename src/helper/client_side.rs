@@ -2,7 +2,7 @@ use bitcoin::{ consensus::Encodable, key::Secp256k1, secp256k1::Message, sign_me
 use bitcoin_hashes::{sha256d, Hash, HashEngine};
 use cosmrs::{ crypto::secp256k1::SigningKey, tx::{self, Fee, ModeInfo, Raw, SignDoc, SignerInfo, SignerPublicKey}, Coin};
 use cosmos_sdk_proto::{cosmos::{
-    base::{query::v1beta1::PageRequest, tendermint::v1beta1::GetLatestBlockRequest}, tx::v1beta1::{service_client::ServiceClient as TxServiceClient, BroadcastMode, BroadcastTxRequest, BroadcastTxResponse}
+    base::{query::v1beta1::PageRequest, tendermint::v1beta1::{GetLatestBlockRequest, GetLatestValidatorSetRequest, GetLatestValidatorSetResponse}}, tx::v1beta1::{service_client::ServiceClient as TxServiceClient, BroadcastMode, BroadcastTxRequest, BroadcastTxResponse}
 }, side::btcbridge::QueryParamsRequest};
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_client::ServiceClient as TendermintServiceClient;
 use reqwest::Error;
@@ -123,6 +123,18 @@ pub async fn get_signing_requests(host: &str) -> Result<Response<QuerySigningReq
         }),
         status: 1i32
     }).await
+}
+
+pub async fn get_latest_validators(host: &str) -> Result<Response<GetLatestValidatorSetResponse>, Status> {
+    let mut client = match TendermintServiceClient::connect(host.to_string()).await {
+        Ok(c) => c,
+        Err(_) => {
+            return Err(Status::cancelled(format!("Could not connect to {host}")));
+        }
+    };
+    let mut page_request = PageRequest::default();
+    page_request.limit = 100;
+    client.get_latest_validator_set(GetLatestValidatorSetRequest{pagination: Some(page_request)}).await
 }
 
 pub async fn get_signing_request_by_txid(host: &str, txid: String) -> Result<Response<QuerySigningRequestByTxHashResponse>, Status> {

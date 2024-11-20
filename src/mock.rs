@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountResponse};
 use cosmos_sdk_proto::cosmos::base::abci::v1beta1::TxResponse;
+use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::{GetLatestValidatorSetResponse, Validator};
 use cosmos_sdk_proto::side::btcbridge::query_server::Query;
 use cosmos_sdk_proto::side::btcbridge::{DkgParticipant, DkgRequest, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsResponse, QuerySigningRequestsResponse, SigningRequest};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_server::Query as AuthService;
@@ -56,7 +57,25 @@ pub struct MockTxService {
     pub tx: u32,
 }
 
-pub struct MockBlockService;
+pub struct MockBlockService {
+    validators: Vec<Validator>,
+}
+
+impl MockBlockService {
+    pub fn new(validators: Vec<Validator>) -> Self {
+        Self {
+            validators
+        }
+    }
+    async fn mock_latest_validator_sets(&self) -> Result<tonic::Response<GetLatestValidatorSetResponse>, tonic::Status> {
+        let res  = GetLatestValidatorSetResponse { 
+            block_height: 0,
+            validators: self.validators.clone(), 
+            pagination: None 
+        };
+        Ok(tonic::Response::new(res))
+    }
+}
 
 impl MockQuery {
     pub fn new(home: String) -> Self {
@@ -496,7 +515,7 @@ fn get_block_by_height<'life0,'async_trait>(&'life0 self,_request:tonic::Request
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
 fn get_latest_validator_set<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::GetLatestValidatorSetRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::GetLatestValidatorSetResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
-        todo!()
+        Box::pin(self.mock_latest_validator_sets())
     }
 
     #[must_use]
