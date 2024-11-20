@@ -92,8 +92,7 @@ async fn test_cluster() {
         
         fs::create_dir_all(home_i.clone()).expect("initial home i");
 
-        config::update_app_home(home_i.to_str().unwrap());
-        config::Config::default(port+i, network).save().unwrap();
+        config::Config::default(home_i.to_str().unwrap(), port+i, network).save().unwrap();
 
         let rng = rand::thread_rng();
         let sk = ed25519_consensus::SigningKey::new(rng);

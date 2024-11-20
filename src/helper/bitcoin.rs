@@ -21,7 +21,7 @@ pub fn get_group_address(verify_key: &VerifyingKey, network: Network) -> Address
 
 pub fn get_group_address_by_tweak(
     verify_key: &VerifyingKey,
-    tweak: Option<[u8; 32]>,
+    tweak: Option<TapNodeHash>,
     network: Network,
 ) -> Address {
     // let verifying_key_b = json_data.pubkey_package.verifying_key();
@@ -29,11 +29,7 @@ pub fn get_group_address_by_tweak(
     let internal_key = XOnlyPublicKey::from(pubk.inner);
     let secp = Secp256k1::new();
 
-    let merkle_root = match tweak {
-        Some(tweak) => Some(TapNodeHash::assume_hidden(tweak)),
-        None => None,
-    };
-    Address::p2tr(&secp, internal_key, merkle_root, network)
+    Address::p2tr(&secp, internal_key, tweak, network)
 }
 
 pub fn get_address_from_pk_script(pk_script: ScriptBuf, network: Network) -> String {

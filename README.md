@@ -1,4 +1,6 @@
-# TSSigner
+# Shuttler
+
+Shuttler is a client that synchronizes Bitcoin blocks and signs threshold signatures for Bitcoin transactions
 
 The *`TSS`*(**Threshold Signature Scheme**) network is a key building block intended to perform Bitcoin signing in the distributed manner to facilitate the Bitcoin bridge on the [Side Chain](https://github.com/sideprotocol/side)
 
@@ -47,8 +49,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 2. Clone and build
 
 ```
-git clone https://github.com/sideprotocol/tssigner.git
-cd tssigner
+git clone https://github.com/sideprotocol/shuttler.git
+cd shuttler
 cargo build --release
 ```
 

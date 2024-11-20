@@ -9,7 +9,7 @@ use tonic::{Response, Status};
 use tracing::{debug, error, info};
 
 use crate::{
-    app::{config::{get_database_with_name, Config}, relayer::Relayer},
+    app::relayer::Relayer,
     helper::{
         bitcoin::{self as bitcoin_utils}, client_side::{self, send_cosmos_transaction}, encoding::to_base64, 
     },
@@ -19,18 +19,10 @@ use cosmos_sdk_proto::{
     cosmos::tx::v1beta1::BroadcastTxResponse,
     side::btcbridge::{BlockHeader, MsgSubmitBlockHeaders, MsgSubmitDepositTransaction, MsgSubmitFeeRate, MsgSubmitWithdrawTransaction, QueryParamsRequest},
 };
-use lazy_static::lazy_static;
 
 const DB_KEY_BITCOIN_TIP: &str = "bitcoin_tip";
 const DB_KEY_VAULTS: &str = "bitcoin_vaults";
 const DB_KEY_VAULTS_LAST_UPDATE: &str = "bitcoin_vaults_last_update";
-
-lazy_static! {
-    static ref DB: sled::Db = {
-        let path = get_database_with_name("relayer");
-        sled::open(path).unwrap()
-    };
-}
 
 /// Start relayer tasks
 /// 1. Sync BTC blocks
@@ -224,7 +216,7 @@ pub async fn send_block_headers(
 
 pub async fn scan_vault_txs_loop(relayer: &Relayer) {
     let interval = relayer.config().loop_interval;
-    let mut height = get_last_scanned_height(relayer.config()) + 1;
+    let mut height = get_last_scanned_height(relayer ) + 1;
     debug!("Start to scan vault txs from height: {}", height);
 
     loop {
@@ -247,7 +239,7 @@ pub async fn scan_vault_txs_loop(relayer: &Relayer) {
 
         debug!("Scanning height: {:?}, side tip: {:?}", height, side_tip);
         scan_vault_txs_by_height(relayer, height).await;
-        save_last_scanned_height(height);
+        save_last_scanned_height(relayer, height);
         height += 1;
     }
 }
@@ -269,7 +261,7 @@ pub async fn scan_vault_txs_by_height(relayer: &Relayer, height: u64) {
         }
     };
 
-    let vaults = get_cached_vaults(relayer.config().side_chain.grpc.clone()).await;
+    let vaults = get_cached_vaults(relayer ).await;
 
     for (i, tx) in block.txdata.iter().enumerate() {
         debug!(
@@ -472,7 +464,7 @@ pub async fn check_and_handle_tx_by_hash(relayer: &Relayer, hash: &Txid) {
 
     let tx_index = block.txdata.iter().position(|tx_in_block| tx_in_block == &tx).expect("the tx should be included in the block");
 
-    let vaults = get_cached_vaults(relayer.config().side_chain.grpc.clone()).await;
+    let vaults = get_cached_vaults(relayer).await;
 
     check_and_handle_tx(relayer, &block_hash, &block, &tx, tx_index, &vaults).await
 }
@@ -517,38 +509,40 @@ pub async fn send_deposit_tx(
     send_cosmos_transaction(&relayer.config(), any_msg).await
 }
 
-pub(crate) fn get_last_scanned_height(config: &Config) -> u64 {
-    match DB.get(DB_KEY_BITCOIN_TIP) {
+pub(crate) fn get_last_scanned_height(relayer: &Relayer ) -> u64 {
+    match relayer.db_relayer.get(DB_KEY_BITCOIN_TIP) {
         Ok(Some(tip)) => {
-            serde_json::from_slice(&tip).unwrap_or(config.last_scanned_height)
+            serde_json::from_slice(&tip).unwrap_or(relayer.config().last_scanned_height)
         }
         _ => {
-            config.last_scanned_height
+            relayer.config().last_scanned_height
         }
     }
 }
 
-fn save_last_scanned_height(height: u64) {
-    let _ = DB.insert(DB_KEY_BITCOIN_TIP, serde_json::to_vec(&height).unwrap());
+fn save_last_scanned_height(relayer: &Relayer, height: u64) {
+    let _ = relayer.db_relayer.insert(DB_KEY_BITCOIN_TIP, serde_json::to_vec(&height).unwrap());
 }
 
-async fn get_cached_vaults(grpc: String) -> Vec<String> {
-    if let Ok(Some(last_update)) = DB.get(DB_KEY_VAULTS_LAST_UPDATE) {
+async fn get_cached_vaults(relayer: &Relayer) -> Vec<String> {
+    if let Ok(Some(last_update)) = relayer.db_relayer.get(DB_KEY_VAULTS_LAST_UPDATE) {
         let last_update: u64 = serde_json::from_slice(&last_update).unwrap_or(0);
         let now = chrono::Utc::now().timestamp() as u64;
         if now - last_update < 60 * 60 * 24 { // 24 hours
-            if let Ok(Some(vaults)) =  DB.get(DB_KEY_VAULTS) {
+            if let Ok(Some(vaults)) =  relayer.db_relayer.get(DB_KEY_VAULTS) {
                 return serde_json::from_slice(&vaults).unwrap_or(vec![])
             };
         }
     }
+
+    let grpc = relayer.config().side_chain.grpc.clone();
     let mut client = cosmos_sdk_proto::side::btcbridge::query_client::QueryClient::connect(grpc).await.unwrap();
     let x = client.query_params(QueryParamsRequest{}).await.unwrap().into_inner();
     match x.params {
         Some(params) => {
             let vaults = params.vaults.iter().map(|v| v.address.clone()).collect::<Vec<_>>();
-            let _ = DB.insert(DB_KEY_VAULTS, serde_json::to_vec(&vaults).unwrap());
-            let _ = DB.insert(DB_KEY_VAULTS_LAST_UPDATE, serde_json::to_vec(&chrono::Utc::now().timestamp()).unwrap());
+            let _ = relayer.db_relayer.insert(DB_KEY_VAULTS, serde_json::to_vec(&vaults).unwrap());
+            let _ = relayer.db_relayer.insert(DB_KEY_VAULTS_LAST_UPDATE, serde_json::to_vec(&chrono::Utc::now().timestamp()).unwrap());
             vaults
         }
         None => vec![]

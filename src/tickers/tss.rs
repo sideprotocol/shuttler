@@ -6,43 +6,33 @@ use tracing::{debug, error, info};
 
 use crate::{
     app::signer::Signer, 
-    helper::client_side::{get_signing_requests, send_cosmos_transaction}, 
-    protocols::{dkg::{self, broadcast_dkg_packages, generate_round1_package, list_tasks, save_task, DKGTask}, 
-    sign::{self, list_sign_tasks, process_tasks, save_task_into_signing_queue}, Round, TSSBehaviour
+    helper::{client_side::{get_signing_requests, send_cosmos_transaction}, gossip::sending_heart_beat}, 
+    protocols::{dkg::{broadcast_dkg_packages, generate_round1_package, DKGTask}, 
+    sign::{save_task_into_signing_queue, dispatch_executions}, Round, TSSBehaviour
 }};
-pub async fn time_free_tasks_executor(
-    signer: &Signer,
-) {
-    if signer.config().get_validator_key().is_none() {
-        return;
+pub async fn time_free_tasks_executor( swarm : &mut Swarm<TSSBehaviour>, signer: &mut Signer ) {
+    
+    signer.sync_candidates_from_validators().await;
+    
+    if swarm.connected_peers().count() == 0 {
+        return
     }
 
-    // 1. fetch dkg request
+    // 1. dkg tasks
+    broadcast_dkg_packages(swarm, signer);
+    submit_dkg_address(signer).await;
     fetch_dkg_requests(signer).await;
+
+    // 2 signing tasks
+    dispatch_executions(swarm, signer).await;
+    // fetch request for next execution
     fetch_signing_requests(signer).await;
     // broadcast_sign_packages(swarm);
-    submit_dkg_address(signer).await;
+
+    // 3. heart beat
+    sending_heart_beat(swarm, signer).await;
+    
 }
-
-pub async fn time_aligned_tasks_executor(
-    swarm : &mut Swarm<TSSBehaviour>,
-    signer: &Signer,
-) {
-
-    if signer.config().get_validator_key().is_none() {
-        return;
-    }
-
-    debug!("Connected peers: {:?}", swarm.connected_peers().collect::<Vec<_>>());
-
-    // 1. collect dkg packages
-    broadcast_dkg_packages(swarm);
-    // 2. collect signing requests tss packages
-    process_tasks(swarm, signer).await;
-
-}
-
-
 
 pub async fn fetch_signing_requests(
     signer: &Signer,
@@ -53,11 +43,11 @@ pub async fn fetch_signing_requests(
         Ok(response) => {
             let requests = response.into_inner().requests;
             let tasks_in_process = requests.iter().map(|r| r.txid.clone() ).collect::<Vec<_>>();
-            debug!("In-process signing tasks: {:?}", tasks_in_process);
-            list_sign_tasks().iter().for_each(|task| {
+            debug!("In-process signing tasks: {:?} {:?}", tasks_in_process.len(), tasks_in_process);
+            signer.list_signing_tasks().iter().for_each(|task| {
                 if !tasks_in_process.contains(&task.id) {
-                    debug!("Removing expired signing task: {:?}", task.id);
-                    sign::remove_task(&task.id);
+                    debug!("Remove signing task: {}", &task.id[..6]);
+                    signer.remove_signing_task(&task.id);
                 }
             });
             for request in requests {
@@ -87,17 +77,15 @@ async fn fetch_dkg_requests(signer: &Signer) {
         .await
     {
         let requests = requests_response.into_inner().requests;
+        debug!("DKG Requests, {:?}", requests);
         let tasks_in_process = requests.iter().map(|r| format!("dkg-{}", r.id)).collect::<Vec<_>>();
-        list_tasks().iter().for_each(|task| {
+        signer.list_dkg_tasks().iter().for_each(|task| {
             if !tasks_in_process.contains(&task.id) {
                 debug!("Removing completed task: {:?}", task.id);
-                dkg::remove_task(&task.id);
-                dkg::remove_task_variables(&task.id);
+                signer.remove_dkg_task(&task.id);
             }
         });
 
-        let x: Vec<u64> = requests.iter().map(|a| a.id).collect::<Vec<_>>();
-        debug!("In-process DKGs: {:?}", x);
         for request in requests {
             if request
                 .participants
@@ -107,19 +95,19 @@ async fn fetch_dkg_requests(signer: &Signer) {
             {
                 // create a dkg task
                 let task = DKGTask::from_request(&request);
-                if dkg::has_task_preceeded(task.id.as_str()) {
+                if signer.has_task_preceeded(&task.id) {
                     continue;
                 };
-                generate_round1_package(signer.identifier().clone(), &task);
+                generate_round1_package(signer, &task);
                 info!("Start DKG {:?}, {:?}", &task.id, task.participants);
-                dkg::save_task(&task);
+                signer.save_dkg_task(&task);
             }
         }
     };
 }
 
 async fn submit_dkg_address(signer: &Signer) {
-    for task in list_tasks().iter_mut() {
+    for task in signer.list_dkg_tasks().iter_mut() {
         if task.round != Round::Closed {
             continue;
         }
@@ -144,9 +132,9 @@ async fn submit_dkg_address(signer: &Signer) {
                 let tx_response = resp.into_inner().tx_response.unwrap();
                 if tx_response.code == 0 {
                     task.submitted = true;
-                    save_task(task);
+                    signer.save_dkg_task(task);
                 
-                    info!("Sent dkg vault: {:?}", tx_response);
+                    info!("Sent dkg vault: {:?}", tx_response.txhash);
                     continue;
                 }
 

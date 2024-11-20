@@ -1,6 +1,6 @@
 [package]
 name = "shuttler"
-version = "0.1.1"
+version = "0.5.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -21,12 +21,12 @@ bitcoincore-rpc = "0.19.0"
 tokio = { version = "1.39.3", features = ["full"] }
 async-trait = "0.1"
 sled = "0.34.7"
-libp2p = {version = "0.54.1", features = [ "tokio", "gossipsub", "identify", "mdns", "noise", "kad", "macros", "tcp", "yamux", "quic", "cbor"] }
+libp2p = {version = "0.54.1", features = [ "tokio", "gossipsub", "identify", "mdns", "noise", "kad", "macros", "tcp", "yamux", "quic", "cbor", "serde" ] }
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 toml = "0.8.14"
-frost-core = { git="https://github.com/liangping/frost.git", branch = "frost-secp256k1-tr", features=["serde", "serialization", "internals"] }
-frost-secp256k1-tr = { git="https://github.com/liangping/frost.git", branch = "frost-secp256k1-tr", features=["serde", "serialization"] }
+frost-core = { git="https://github.com/sideprotocol/frost.git", features=["serde", "serialization", "internals"] }
+frost-secp256k1-tr = { git="https://github.com/sideprotocol/frost.git", features=["serde", "serialization"] }
 k256 = { version = "0.13.0", features = ["arithmetic", "expose-field", "hash2curve"] }
 rand_core = "0.6"
 rand_chacha = "0.3.1"

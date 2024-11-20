@@ -1,26 +1,19 @@
-use bitcoin::{bip32::{DerivationPath, Xpriv}, key::Secp256k1, Address, CompressedPublicKey, Network, PrivateKey};
+use bitcoin::{bip32::{DerivationPath, Xpriv}, key::Secp256k1, Address, CompressedPublicKey, Network, PrivateKey, TapNodeHash};
 use bip39::{self, Mnemonic};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest};
 
 use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
 use serde::{Deserialize, Serialize};
-use sled::IVec;
-use tracing::error;
+use tendermint_config::PrivValidatorKey;
 use std::{fs, path::PathBuf, str::FromStr, sync::Mutex, time::Duration};
-
-use crate::helper::{cipher::random_bytes, encoding::to_base64};
+use crate::helper::cipher::random_bytes;
 
 const CONFIG_FILE: &str = "config.toml";
 
-pub const TASK_ROUND_WINDOW: Duration = Duration::from_secs(60);
-
+pub const TASK_INTERVAL: Duration = Duration::from_secs(30);
 use lazy_static::lazy_static;
 
 lazy_static! {
-    static ref DB_KEYPAIRS: sled::Db = {
-        let path = get_database_with_name("keypairs");
-        sled::open(path).unwrap()
-    };
     static ref PRIV_VALIDATOR_KEY: Mutex<Option<PrivValidatorKey>> = Mutex::new(None);
     static ref BASE_ACCOUNT: Mutex<Option<BaseAccount>> = {
         Mutex::new(None)
@@ -30,7 +23,9 @@ lazy_static! {
 /// Threshold Signature Configuration
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
-    pub p2p_keypair: String,
+    #[serde(skip_serializing, skip_deserializing)]
+    pub home: PathBuf,
+    // pub p2p_keypair: String,
     pub port: u32,
     pub bootstrap_nodes: Vec<String>,
     /// logger level
@@ -53,10 +48,10 @@ pub struct Config {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Keypair {
+pub struct VaultKeypair {
     pub priv_key: KeyPackage,
     pub pub_key: PublicKeyPackage,
-    pub tweak: Option<[u8; 32]>,
+    pub tweak: Option<TapNodeHash>,
 }
 
 /// Bitcoin Configuration
@@ -108,57 +103,6 @@ pub struct AnyKey {
     pub value: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct PrivValidatorKey {
-    pub address: String,
-    pub pub_key: AnyKey,
-    pub priv_key: AnyKey,
-}
-
-lazy_static! {
-    static ref APPLICATION_PATH: Mutex<String> = Mutex::new(String::from(".shuttler"));
-}
-
-pub fn update_app_home(app_home: &str) {
-    let mut string: std::sync::MutexGuard<String> = APPLICATION_PATH.lock().unwrap();
-    *string = String::from(app_home);
-}
-
-pub fn get_app_home() -> String {
-    APPLICATION_PATH.lock().unwrap().clone()
-}
-
-pub fn get_database_with_name(db_name: &str) -> String {
-    let mut home = APPLICATION_PATH.lock().unwrap().clone();
-    home.push_str("/data/");
-    home.push_str(db_name);
-    home
-}
-
-pub fn list_keypairs() -> Vec<String> {
-    let mut keys = vec![];
-    for key in DB_KEYPAIRS.iter() {
-        keys.push(String::from_utf8(key.unwrap().0.to_vec()).unwrap());
-    }
-    keys
-}
-
-pub fn get_keypair_from_db(address: &str) -> Option<Keypair> {
-    match DB_KEYPAIRS.get(address) {
-        Ok(Some(value)) => {
-            Some(serde_json::from_slice(value.as_ref()).unwrap())
-        },
-        _ => {
-            error!("Not found keypair for address: {}", address);
-            None
-        }
-    }
-}
-pub fn save_keypair_to_db(address: String, keypair: &Keypair) -> sled::Result<Option<IVec>>{
-    let value = serde_json::to_vec(keypair).unwrap();
-    DB_KEYPAIRS.insert(address, value)
-}
-
 /// relayer account will be used to sign transactions on the side chain,
 /// such as sending block headers, depositing and withdrawing transactions
 pub async fn get_relayer_account(conf: &Config) -> BaseAccount {
@@ -202,53 +146,78 @@ pub fn remove_relayer_account() {
 }
 
 impl Config {
-    pub fn load_validator_key(&self) {
+    pub fn load_validator_key(&self) -> PrivValidatorKey {
         let priv_key_path = if self.priv_validator_key_path.starts_with("/") {
-            self.priv_validator_key_path.clone()
+            PathBuf::from(self.priv_validator_key_path.clone())
         } else {
-            format!("{}/{}", get_app_home(), self.priv_validator_key_path)
+            self.home.join(self.priv_validator_key_path.clone())
         };
-        match fs::read_to_string(priv_key_path.clone()) {
-            Ok(text) => {
-                let prv_key = serde_json::from_str::<PrivValidatorKey>(text.as_str()).expect("Failed to parse priv_validator_key.json");
-                PRIV_VALIDATOR_KEY.lock().unwrap().replace(prv_key.clone());
-            },
-            Err(e) => error!("Failed to read priv_validator_key.json: {}", e)
-        };
+        let text = fs::read_to_string(priv_key_path.clone()).expect("priv_validator_key.json does not exists!");
+    
+        let prv_key = serde_json::from_str::<PrivValidatorKey>(text.as_str()).expect("Failed to parse priv_validator_key.json");
+        // PRIV_VALIDATOR_KEY.lock().unwrap().replace(prv_key.clone());
+        prv_key
+            
     }
 
-    pub fn get_validator_key(&self) -> Option<PrivValidatorKey> {
-        PRIV_VALIDATOR_KEY.lock().unwrap().clone()
-    }
+    // pub fn get_validator_key(&self) -> Option<PrivValidatorKey> {
+    //     PRIV_VALIDATOR_KEY.lock().unwrap().clone()
+    // }
 
     pub fn from_file(app_home: &str) -> Result<Self, std::io::Error> {
-        update_app_home(app_home);
-
-        if !home_dir(app_home).join(CONFIG_FILE).exists() {
+        
+        let home = if app_home.starts_with("/") {
+            PathBuf::from(app_home)
+        } else {
+            home_dir(app_home)
+        };
+        if !home.join(CONFIG_FILE).exists() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "Config file not found",
             ));
         }
-        let contents = fs::read_to_string(home_dir(app_home).join(CONFIG_FILE))?;
-        let config: Config = toml::from_str(&contents).expect("Failed to parse config file");
+        let contents = fs::read_to_string(home.join(CONFIG_FILE))?;
+        let mut config: Config = toml::from_str(&contents).expect("Failed to parse config file");
+        config.home = home;
 
         Ok(config)
     }
 
-    pub fn default(port: u32, network: Network) -> Self {
+    pub fn generate_priv_validator_key(home: PathBuf) {
+        let rng = rand::thread_rng();
+        let sk = ed25519_consensus::SigningKey::new(rng);
+        let priv_key = tendermint::private_key::PrivateKey::from_ed25519_consensus(sk);
+
+        let key = tendermint_config::PrivValidatorKey {
+            address: tendermint::account::Id::from(priv_key.public_key()),
+            pub_key: priv_key.public_key(),
+            priv_key,
+        };
+
+        fs::create_dir_all(&home).unwrap();
+        let text= serde_json::to_string_pretty(&key).unwrap();
+        fs::write(home.join("priv_validator_key.json"), text).unwrap();
+    }
+
+    pub fn default(home_str: &str, port: u32, network: Network) -> Self {
         let entropy = random_bytes(32);
         let mnemonic = bip39::Mnemonic::from_entropy(entropy.as_slice()).expect("failed to create mnemonic");
-        let p2p_keypair = to_base64(libp2p::identity::Keypair::generate_ed25519().to_protobuf_encoding().unwrap().as_slice());
+        // let p2p_keypair = to_base64(libp2p::identity::Keypair::generate_ed25519().to_protobuf_encoding().unwrap().as_slice());
+        let home =  if home_str.starts_with("/") {
+            PathBuf::from_str(home_str).unwrap()
+        } else {
+            home_dir(home_str)
+        };
+        Self::generate_priv_validator_key(home.clone());
         Self {
-            p2p_keypair ,
+            home,
+            // p2p_keypair ,
             port: port as u32,
-            bootstrap_nodes: vec!["/ip4/192.248.180.245/tcp/5158/p2p/12D3KooWMpMtmYQKSn1sZaSRn4CAcsraWZVrZ2zdNjEgsEPSd3Pv".to_string()],
+            bootstrap_nodes: vec![],
             log_level: "debug".to_string(),
             mnemonic: mnemonic.to_string(),
             priv_validator_key_path: "priv_validator_key.json".to_string(),
-            // keys: BTreeMap::new(),
-            // pubkeys: BTreeMap::new(),
             bitcoin: BitcoinCfg {
                 network,
                 rpc: "http://192.248.150.102:18332".to_string(),
@@ -284,13 +253,11 @@ impl Config {
     }
 
     pub fn save(&self) -> Result<(), std::io::Error> {
-        let app_home = APPLICATION_PATH.lock().unwrap();
-        let path = home_dir(app_home.as_str());
-        if !path.exists() {
-            fs::create_dir_all(&path)?;
+        if !self.home.exists() {
+            fs::create_dir_all(&self.home)?;
         }
         let contents = self.to_string();
-        fs::write(path.join(CONFIG_FILE), contents)
+        fs::write(self.home.join(CONFIG_FILE), contents)
     }
 
     pub fn relayer_bitcoin_privkey(&self) -> PrivateKey {
@@ -316,26 +283,13 @@ impl Config {
         Address::p2wpkh(&pubkey, self.bitcoin.network).to_string()
     }
 
-    // pub fn signer_priv_key(&self) -> SigningKey {
-    //     // let hdpath = cosmrs::bip32::DerivationPath::from_str("m/44'/118'/0'/0/0").unwrap();
-    //     let hdpath = cosmrs::bip32::DerivationPath::from_str("m/84'/0'/0'/0/0").unwrap();
-    //     let mnemonic = Mnemonic::parse(self.mnemonic.as_str()).expect("Invalid mnemonic");
-    //     SigningKey::derive_from_path(mnemonic.to_seed(""), &hdpath).expect("failded to create signer key")
-    // }
+    pub fn get_database_with_name(&self, db_name: &str) -> String {
+        let mut home = self.home.clone();
+        home.push("data");
+        home.push(db_name);
+        home.display().to_string()
+    }
 
-    // pub fn signer_cosmos_address(&self) -> AccountId {
-    //     self.signer_priv_key().public_key().account_id(&self.side_chain.address_prefix).expect("failed to derive relayer address")
-    // }
-
-    // pub fn signer_bitcoin_address(&self) -> String {
-    //     let pubkey = self.signer_bitcoin_pubkey();
-    //     Address::p2wpkh(&pubkey, self.bitcoin.network).to_string()
-    // }
-
-    // pub fn signer_bitcoin_pubkey(&self) -> CompressedPublicKey {
-    //     let pk_bytes = self.signer_priv_key().public_key().to_bytes();
-    //     CompressedPublicKey::from_slice(pk_bytes.as_slice()).expect("failed to derive relayer address")
-    // }
 }
 
 pub fn home_dir(app_home: &str) -> PathBuf {

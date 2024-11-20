@@ -1,6 +1,6 @@
 use clap::Parser;
 use shuttler::commands::{
-    address, debug, id, init, reset, start, test,
+    address, debug, init, reset, start, test,
     submit_header, submit_tx, Cli, Commands};
 
 #[tokio::main(flavor = "multi_thread", worker_threads=4)]
@@ -11,8 +11,8 @@ async fn main() {
         Commands::Init { port, network } => {
             init::execute(&cli, port.to_owned(), network.to_owned());
         }
-        Commands::Start {relayer, signer} => {
-            start::execute(&cli.home, *relayer, *signer).await;
+        Commands::Start {relayer, signer, seed} => {
+            start::execute(&cli.home, *relayer, *signer, *seed).await;
         }
         Commands::Address => {
             address::execute(&cli);
@@ -29,11 +29,8 @@ async fn main() {
         Commands::Debug { txid } => {
             debug::execute(&cli, txid);
         }
-        Commands::Id => {
-            id::execute(&cli.home);
-        }
-        Commands::Test {bin, n} => {
-            test::execute(bin.clone().leak(), *n).await;
+        Commands::Test {bin, n, tx, delay} => {
+            test::execute(bin.clone().leak(), *n, *tx, *delay).await;
         }
     }
 }

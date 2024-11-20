@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountResponse};
 use cosmos_sdk_proto::cosmos::base::abci::v1beta1::TxResponse;
+use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::{GetLatestValidatorSetResponse, Validator};
 use cosmos_sdk_proto::side::btcbridge::query_server::Query;
 use cosmos_sdk_proto::side::btcbridge::{DkgParticipant, DkgRequest, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsResponse, QuerySigningRequestsResponse, SigningRequest};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_server::Query as AuthService;
@@ -19,8 +20,9 @@ use bitcoin::{
     opcodes, psbt::PsbtSighashType, transaction::Version, Amount, OutPoint, Psbt, Sequence, TxIn,
     TxOut, Address, ScriptBuf, Transaction, Txid
 };
-use bitcoin_hashes::Hash;
+use bitcoin_hashes::{sha256d, Hash};
 
+use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::to_base64;
 
 use crate::helper::now;
@@ -51,10 +53,29 @@ pub struct MockQuery {
 }
 
 pub struct MockTxService {
-    pub home: String
+    pub home: String,
+    pub tx: u32,
 }
 
-pub struct MockBlockService;
+pub struct MockBlockService {
+    validators: Vec<Validator>,
+}
+
+impl MockBlockService {
+    pub fn new(validators: Vec<Validator>) -> Self {
+        Self {
+            validators
+        }
+    }
+    async fn mock_latest_validator_sets(&self) -> Result<tonic::Response<GetLatestValidatorSetResponse>, tonic::Status> {
+        let res  = GetLatestValidatorSetResponse { 
+            block_height: 0,
+            validators: self.validators.clone(), 
+            pagination: None 
+        };
+        Ok(tonic::Response::new(res))
+    }
+}
 
 impl MockQuery {
     pub fn new(home: String) -> Self {
@@ -66,7 +87,7 @@ impl MockQuery {
 
 // produce mock data
 
-fn mock_psbt(home: &str, tx_bytes: &Vec<u8>) {
+fn mock_psbt(home: &str, tx_num: u32, tx_bytes: &Vec<u8>) {
     
     if let Ok(tx) = Tx::from_bytes(tx_bytes) {
         tx.body.messages.iter().for_each(|m| {
@@ -98,14 +119,16 @@ fn mock_psbt(home: &str, tx_bytes: &Vec<u8>) {
                         let _ = fs::write(path_dkg, "");
 
                         // generate psbt
-                        let (txid, psbt) = generate_mock_psbt(addr, Some(num));
-                        srs.push(SR {
-                            address: addr.clone(),
-                            sequence: num as u64,
-                            txid,
-                            psbt,
-                            status: 1,
-                        })
+                        for _i in 0..tx_num {
+                            let (txid, psbt) = generate_mock_psbt(addr, Some(num));
+                            srs.push(SR {
+                                address: addr.clone(),
+                                sequence: num as u64,
+                                txid,
+                                psbt,
+                                status: 1,
+                            })
+                        }
                     });
 
                     if srs.len() == 0 {
@@ -155,14 +178,17 @@ async fn load_signing_requests(home: &str) -> Result<tonic::Response<QuerySignin
         });
     }
 
-    let requests = srs.iter().map(|i| {
+    let requests: Vec<SigningRequest> = srs.iter().map(|i| {
         SigningRequest { 
             address: i.address.clone(), 
             sequence: i.sequence, 
             txid: i.txid.clone(), 
             psbt: i.psbt.clone(), 
             status: i.status,
-            creation_time: Some(Timestamp::default()) 
+            creation_time: Some(Timestamp {
+                seconds: now() as i64,
+                nanos: 0,
+            }) 
         }
     }).collect::<Vec<_>>();
     let res: QuerySigningRequestsResponse = QuerySigningRequestsResponse { requests, pagination: None };
@@ -228,7 +254,10 @@ async fn mock_latest_block() -> Result<tonic::Response<cosmos_sdk_proto::cosmos:
     let mut header = Header::default();
     header.chain_id = "mock-testnet".to_owned();
     header.height = 123;
-    // header.time
+    header.time = Some(cosmos_sdk_proto::tendermint::google::protobuf::Timestamp {
+        seconds: now() as i64,
+        nanos: 0
+    });
     
     let res = cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::GetLatestBlockResponse {
         block_id: None,
@@ -438,7 +467,7 @@ fn get_tx<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_p
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
 fn broadcast_tx<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::cosmos::tx::v1beta1::BroadcastTxRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::cosmos::tx::v1beta1::BroadcastTxResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
-        mock_psbt(self.home.as_str(), &_request.get_ref().tx_bytes);
+        mock_psbt(self.home.as_str(), self.tx, &_request.get_ref().tx_bytes);
 
         let x = mock_broadcast_tx();
         Box::pin(x)
@@ -486,7 +515,7 @@ fn get_block_by_height<'life0,'async_trait>(&'life0 self,_request:tonic::Request
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
 fn get_latest_validator_set<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::GetLatestValidatorSetRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::GetLatestValidatorSetResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
-        todo!()
+        Box::pin(self.mock_latest_validator_sets())
     }
 
     #[must_use]
@@ -514,9 +543,10 @@ fn generate_mock_psbt(addr: &str, input_num: Option<u32>) -> (String, String) {
 
     let mut inputs = Vec::<TxIn>::new();
     for i in 0..num {
+        let hash = sha256d::Hash::hash(&random_bytes(12));
         let tx_in = TxIn {
             previous_output: OutPoint {
-                txid: Txid::all_zeros(),
+                txid: Txid::from_raw_hash(hash),
                 vout: i,
             },
             sequence: Sequence(sequence),

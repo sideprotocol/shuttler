@@ -1,9 +1,8 @@
-
 use bitcoin::{ consensus::Encodable, key::Secp256k1, secp256k1::Message, sign_message::BITCOIN_SIGNED_MSG_PREFIX, PrivateKey};
 use bitcoin_hashes::{sha256d, Hash, HashEngine};
 use cosmrs::{ crypto::secp256k1::SigningKey, tx::{self, Fee, ModeInfo, Raw, SignDoc, SignerInfo, SignerPublicKey}, Coin};
 use cosmos_sdk_proto::{cosmos::{
-    base::tendermint::v1beta1::GetLatestBlockRequest, tx::v1beta1::{service_client::ServiceClient as TxServiceClient, BroadcastMode, BroadcastTxRequest, BroadcastTxResponse}
+    base::{query::v1beta1::PageRequest, tendermint::v1beta1::{GetLatestBlockRequest, GetLatestValidatorSetRequest, GetLatestValidatorSetResponse}}, tx::v1beta1::{service_client::ServiceClient as TxServiceClient, BroadcastMode, BroadcastTxRequest, BroadcastTxResponse}
 }, side::btcbridge::QueryParamsRequest};
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_client::ServiceClient as TendermintServiceClient;
 use reqwest::Error;
@@ -20,7 +19,7 @@ use cosmos_sdk_proto::side::btcbridge::{
 use prost_types::Any;
 use lazy_static::lazy_static;
 
-use crate::app::config;
+use crate::app::config::{self};
 
 lazy_static! {
     static ref lock: Mutex<()> = Mutex::new(());
@@ -88,6 +87,24 @@ pub async fn get_confirmations_on_side(host: &str) -> u64 {
     x.params.unwrap().confirmations as u64
 }
 
+pub async fn get_task_round_window_on_side(host: &str) -> u64 {
+    let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(_) => {
+            return 300 as u64;
+        }
+    };
+    let x = btc_client.query_params(QueryParamsRequest{}).await.unwrap().into_inner();
+    match x.params.unwrap().tss_params.unwrap().signing_epoch_duration {
+        Some(duration) => {
+            return duration.seconds as u64;
+        }
+        None => {
+            return 300;
+        }
+    }
+}
+
 pub async fn get_signing_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {
     let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
@@ -97,9 +114,27 @@ pub async fn get_signing_requests(host: &str) -> Result<Response<QuerySigningReq
     };
 
     btc_client.query_signing_requests(QuerySigningRequestsRequest {
-        pagination: None,
+        pagination: Some(PageRequest {
+            key: vec![],
+            offset: 0,
+            limit: 50,
+            count_total: false,
+            reverse: false,
+        }),
         status: 1i32
     }).await
+}
+
+pub async fn get_latest_validators(host: &str) -> Result<Response<GetLatestValidatorSetResponse>, Status> {
+    let mut client = match TendermintServiceClient::connect(host.to_string()).await {
+        Ok(c) => c,
+        Err(_) => {
+            return Err(Status::cancelled(format!("Could not connect to {host}")));
+        }
+    };
+    let mut page_request = PageRequest::default();
+    page_request.limit = 100;
+    client.get_latest_validator_set(GetLatestValidatorSetRequest{pagination: Some(page_request)}).await
 }
 
 pub async fn get_signing_request_by_txid(host: &str, txid: String) -> Result<Response<QuerySigningRequestByTxHashResponse>, Status> {

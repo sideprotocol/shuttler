@@ -17,11 +17,20 @@ use bitcoin::{transaction, Address, Amount, Network, OutPoint, Psbt, ScriptBuf, 
 use frost_core::keys::KeyPackage;
 use frost_core:: Field;
 use frost_secp256k1_tr as frost;
+use libp2p::PeerId;
 use rand::thread_rng;
 
 use crate::helper::encoding;
 
+#[test]
+fn test_identifer_toid() {
+    let pubkey=  libp2p::identity::Keypair::generate_ed25519().public();
+    let pk = pubkey.to_peer_id();
 
+    let b = pubkey.encode_protobuf();
+    let pk2 = libp2p::identity::PublicKey::try_decode_protobuf(&b).unwrap();
+    assert_eq!(pk, pk2.to_peer_id());
+}
 
 #[test]
 fn test_taproot_signature() {
