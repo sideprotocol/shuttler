@@ -43,7 +43,7 @@ use ed25519_compact::{PublicKey, SecretKey, Signature};
 
 use lazy_static::lazy_static;
 
-use super::candidate::Candidate;
+use super::config_candidate::Candidate;
 
 lazy_static! {
     static ref BASE_ACCOUNT: Mutex<Option<BaseAccount>> = {
