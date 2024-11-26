@@ -1,10 +1,10 @@
-pub mod app;
+pub mod apps;
 pub mod commands;
+pub mod config;
 pub mod helper;
-pub mod protocols;
-pub mod tickers;
 #[cfg(test)]
 pub mod tests;
 pub mod mock;
+pub mod shuttler;
 // pub mod prost;
 // pub mod taproot;

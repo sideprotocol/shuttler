@@ -1,8 +1,7 @@
 
-use tokio::join;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-use crate::app::{config::Config, relayer, signer};
+use crate::{config::Config, shuttler::Shuttler};
 
 pub async fn execute(home: &str, relayer: bool, signer: bool, seed: bool) {
     
@@ -16,27 +15,7 @@ pub async fn execute(home: &str, relayer: bool, signer: bool, seed: bool) {
     if tracing::subscriber::set_global_default(subscriber).is_err() {
         println!("Unable to set global log config!");
     }
-        
 
-    if relayer && !signer {
-        relayer::run_relayer_daemon(conf).await;
-    } else if signer && !relayer {
-        signer::run_signer_daemon(conf, seed).await;
-    } else {
-        let conf2 = conf.clone();
-        let sign_handler = tokio::spawn(async move { signer::run_signer_daemon(conf, seed).await });
-        let relay_handler = tokio::spawn(async move { relayer::run_relayer_daemon(conf2).await });
-        // Start both signer and relayer as default
-        match join!(sign_handler, relay_handler) {
-            (Ok(_), Ok(_)) => {
-                println!("Signer and Relayer started successfully");
-            }
-            (Err(e), _) => {
-                println!("Error starting signer: {:?}", e);
-            }
-            (_, Err(e)) => {
-                println!("Error starting relayer: {:?}", e);
-            }
-        }
-    }
+    let app = Shuttler::new(home, seed, relayer, signer, true);
+    app.start();
 }

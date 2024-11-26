@@ -1,9 +1,15 @@
 
 
-use bitcoincore_rpc::{Auth, Client};
-use crate::{app::config::Config, helper::{client_oracle::OracleClient, client_ordinals::OrdinalsClient}, tickers::relayer};
+use std::time::Duration;
 
-use tracing::info;
+use bitcoincore_rpc::{Auth, Client};
+use tick::{scan_vault_txs_loop, submit_fee_rate_loop, sync_btc_blocks_loop};
+use tokio::join;
+use crate::{config::Config, helper::{client_oracle::OracleClient, client_ordinals::OrdinalsClient}};
+
+use super::{App, Context, SubscribeMessage};
+
+pub mod tick;
 
 #[derive(Debug)]
 pub struct Relayer {
@@ -12,6 +18,24 @@ pub struct Relayer {
     pub ordinals_client: OrdinalsClient,
     pub oracle_client: OracleClient,
     pub db_relayer: sled::Db,
+}
+
+impl App for Relayer {
+    fn on_message(&self, _ctx: &mut Context, _message: &SubscribeMessage) {
+        todo!()
+    }
+
+    async fn ticker(&self) -> tokio::time::Interval {
+        tokio::time::interval(Duration::from_secs(self.config.loop_interval))
+    }
+
+    async fn on_tick(&self, _ctx: &mut Context) {
+        join!(
+            sync_btc_blocks_loop(self),
+            scan_vault_txs_loop(self),
+            submit_fee_rate_loop(self),
+        );
+    }
 }
 
 impl Relayer {
@@ -49,11 +73,3 @@ impl Relayer {
 
 }
 
-pub async fn run_relayer_daemon(conf: Config) {
-    
-    info!("Starting relayer daemon");
-
-    let relayer = Relayer::new(conf);
-    relayer::start_relayer_tasks(&relayer).await;
-
-}

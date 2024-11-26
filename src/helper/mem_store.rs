@@ -9,8 +9,8 @@ use frost_secp256k1_tr::{keys::dkg, Identifier};
 use std::sync::Mutex;
 use lazy_static::lazy_static;
 
-use crate::app::{config::TASK_INTERVAL, signer::Signer};
-
+use crate::apps::signer::Signer;
+use crate::config::TASK_INTERVAL;
 use super::{gossip::HeartBeatMessage, now};
 
 lazy_static! {

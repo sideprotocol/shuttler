@@ -1,4 +1,4 @@
-use crate::app::config::OracleCfg;
+use crate::config::OracleCfg;
 use serde::{Deserialize, Serialize};
 use reqwest::{header, Client, Error};
 

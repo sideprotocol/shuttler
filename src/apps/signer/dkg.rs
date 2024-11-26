@@ -12,8 +12,10 @@ use frost_secp256k1_tr::{self as frost};
 use frost::{keys, Identifier, Secp256K1Sha256};
 
 use frost_core::keys::dkg::round1::Package;
-use super::{Round, TSSBehaviour};
-use crate::{app::signer::Signer, helper::{gossip::publish_dkg_packages, mem_store, now}};
+use super::{broadcast_dkg_packages, Round};
+use crate::apps::Context;
+use crate::helper::{mem_store, now};
+use crate::apps::signer::Signer;
 use crate::helper::cipher::{decrypt, encrypt};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,12 +147,12 @@ pub fn generate_round2_packages(signer: &Signer, task: &mut DKGTask, round1_pack
     Ok(())
 }
 
-pub fn broadcast_dkg_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signer: &Signer) {
+pub fn sync_dkg_task_packages(ctx: &mut Context, signer: &Signer) {
     let tasks = signer.list_dkg_tasks();
     for t in tasks.iter() {
         if t.timestamp as u64 >= now() {
             // publish its packages to other peers
-            publish_dkg_packages(swarm, signer, &t);
+            broadcast_dkg_packages(ctx, signer, &t.id);
         } else {
             // remove the task
             signer.remove_dkg_task(&t.id);
@@ -158,7 +160,7 @@ pub fn broadcast_dkg_packages(swarm: &mut libp2p::Swarm<TSSBehaviour>, signer: &
     }
 }
 
-pub fn prepare_response_for_task(signer: &Signer, task_id: String) -> DKGResponse {
+pub fn prepare_response_for_task(signer: &Signer, task_id: &str) -> DKGResponse {
     let round1_packages = match signer.get_dkg_round1_package(&task_id) {
         Some(packets) => packets,
         _ => {
@@ -176,7 +178,7 @@ pub fn prepare_response_for_task(signer: &Signer, task_id: String) -> DKGRespons
 
     
     let payload = DKGPayload {
-        task_id,
+        task_id: task_id.to_string(),
         round1_packages,
         round2_packages,
     };

@@ -2,14 +2,13 @@ use std::time::Duration;
 
 use bitcoin::{consensus::encode, Address, Block, BlockHash, OutPoint, Transaction, Txid};
 use bitcoincore_rpc::{Error, RpcApi};
-use futures::join;
 use prost_types::Any;
 use tokio::time::sleep;
 use tonic::{Response, Status};
 use tracing::{debug, error, info};
 
 use crate::{
-    app::relayer::Relayer,
+    apps::relayer::Relayer,
     helper::{
         bitcoin::{self as bitcoin_utils}, client_side::{self, send_cosmos_transaction}, encoding::to_base64, 
     },
@@ -27,13 +26,13 @@ const DB_KEY_VAULTS_LAST_UPDATE: &str = "bitcoin_vaults_last_update";
 /// Start relayer tasks
 /// 1. Sync BTC blocks
 /// 2. Scan vault txs
-pub async fn start_relayer_tasks(relayer: &Relayer) {
-    join!(
-        sync_btc_blocks_loop(&relayer),
-        scan_vault_txs_loop(&relayer),
-        submit_fee_rate_loop(&relayer),
-    );
-}
+// pub async fn start_relayer_tasks(relayer: &Relayer) {
+//     join!(
+//         sync_btc_blocks_loop(&relayer),
+//         scan_vault_txs_loop(&relayer),
+//         submit_fee_rate_loop(&relayer),
+//     );
+// }
 
 pub async fn sync_btc_blocks_loop(relayer: &Relayer) {
     let interval = relayer.config().loop_interval;

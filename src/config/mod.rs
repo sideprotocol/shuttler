@@ -13,6 +13,8 @@ const CONFIG_FILE: &str = "config.toml";
 pub const TASK_INTERVAL: Duration = Duration::from_secs(30);
 use lazy_static::lazy_static;
 
+pub mod candidate;
+
 lazy_static! {
     static ref PRIV_VALIDATOR_KEY: Mutex<Option<PrivValidatorKey>> = Mutex::new(None);
     static ref BASE_ACCOUNT: Mutex<Option<BaseAccount>> = {

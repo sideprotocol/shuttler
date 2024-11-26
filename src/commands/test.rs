@@ -11,7 +11,7 @@ use tendermint_config::PrivValidatorKey;
 use tonic::transport::Server;
 use std::process::Command;
 
-use crate::{app::config, mock::{MockBlockService, MockQuery, MockTxService, DKG, DKG_FILE_NAME}};
+use crate::{config, mock::{MockBlockService, MockQuery, MockTxService, DKG, DKG_FILE_NAME}};
 
 pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32) {
     // parameters
