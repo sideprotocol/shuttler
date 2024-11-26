@@ -54,7 +54,6 @@ pub enum Round {
 #[derive(Debug)]
 pub struct Signer {
     config: Config,
-    candidates: Candidate,
     /// Identity key of the signer
     /// This is the private key of sidechain validator that is used to sign messages
     pub identity_key: SecretKey,
@@ -105,7 +104,6 @@ impl Signer {
             .expect("Counld not create database!");
 
         Self {
-            candidates: Candidate::new(conf.side_chain.grpc.clone(), &conf.bootstrap_nodes),
             identity_key: local_key,
             identifier,
             bitcoin_client,
@@ -137,20 +135,6 @@ impl Signer {
 
     pub fn validator_address(&self) -> String {
         self.config().load_validator_key().address.to_string()
-    }
-
-    pub fn is_white_listed_peer(&self, peer_id: PeerId) -> bool {
-        // Allow anyone if no candidate is specified.
-        if self.candidates.peers().len() == 0 {
-            return true;
-        }
-        // Candidates are active validators and bootstrap nodes
-        self.candidates.peers().contains(&peer_id)
-    }
-
-    // Defines who is allowed to participate in the p2p network.
-    pub async fn sync_candidates_from_validators(&mut self) {
-        self.candidates.sync_from_validators().await;
     }
 
     pub async fn get_relayer_account(&self) -> BaseAccount {

@@ -2,7 +2,7 @@ use std::{
     hash::{DefaultHasher, Hash, Hasher}, io, str::FromStr, time::Duration
 };
 
-use ed25519_compact::SecretKey;
+use ed25519_compact::{PublicKey, SecretKey, Signature};
 use futures::StreamExt;
 use libp2p::{
     gossipsub, identify, kad::{self, store::MemoryStore}, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, Multiaddr, PeerId, Swarm
@@ -14,10 +14,10 @@ use crate::{
     apps::{
         oracle::Oracle, relayer::Relayer, signer::Signer, App, Context, SubscribeMessage
     },
-    config::Config,
+    config::{candidate::Candidate, Config},
     helper::{
         encoding::pubkey_to_identifier,
-        gossip::subscribe_gossip_topics,
+        gossip::{subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store,
     },
 };
 
@@ -27,6 +27,7 @@ pub struct Shuttler {
     signer: Option<Signer>,
     oracle: Option<Oracle>,
     seed: bool,
+    candidates: Candidate,
 }
 
 #[derive(NetworkBehaviour)]
@@ -64,6 +65,7 @@ impl Shuttler {
         };
 
         Self {
+            candidates: Candidate::new(conf.side_chain.grpc.clone(), &conf.bootstrap_nodes),
             conf,
             seed,
             relayer,
@@ -72,7 +74,7 @@ impl Shuttler {
         }
     }
 
-    pub async fn start(&self) {
+    pub async fn start(&mut self) {
         // load private key from priv_validator_key_path
         let priv_validator_key = self.conf.load_validator_key();
 
@@ -185,12 +187,12 @@ impl Shuttler {
                     SwarmEvent::NewListenAddr { address, .. } => {
                         info!("Listening on {address}/p2p/{}", context.swarm.local_peer_id());
                     },
-                    SwarmEvent::ConnectionEstablished { ..} => {
-                        // if signer.is_white_listed_peer(peer_id) {
-                        //     swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-                        // } else {
-                        //     let _ = swarm.disconnect_peer_id(peer_id);
-                        // }
+                    SwarmEvent::ConnectionEstablished { peer_id, ..} => {
+                        if self.is_white_listed_peer(&peer_id).await {
+                            context.swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
+                        } else {
+                            let _ = context.swarm.disconnect_peer_id(peer_id);
+                        }
                         info!("Connected peers {:?}", context.swarm.connected_peers().collect::<Vec<_>>());
                     },
                     SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
@@ -222,6 +224,7 @@ impl Shuttler {
     ) {
         match event {
             ShuttlerBehaviourEvent::Gossip(gossipsub::Event::Message { message, .. }) => {
+                update_heartbeat(&message);
                 dispatch_messages(&self.oracle, context, &message);
                 dispatch_messages(&self.signer, context, &message);
                 dispatch_messages(&self.relayer,context, &message);
@@ -265,11 +268,48 @@ impl Shuttler {
             _ => {}
         }
     }
+
+    pub async fn is_white_listed_peer(&mut self, peer_id: &PeerId) -> bool {
+        
+        self.candidates.sync_from_validators().await;
+        // Allow anyone if no candidate is specified.
+        if self.candidates.peers().len() == 0 {
+            return true;
+        }
+        // Candidates are active validators and bootstrap nodes
+        self.candidates.peers().contains(peer_id)
+    }
+
+    // Defines who is allowed to participate in the p2p network.
+    // pub async fn sync_candidates_from_validators(&mut self) {
+    //     self.candidates.sync_from_validators().await;
+    // }
+
 }
 
 fn dispatch_messages<T: App>(app: &Option<T>, context: &mut Context,  message: &SubscribeMessage) {
     if let Some(a) = app {
         a.on_message(context, message);
+    }
+}
+
+fn update_heartbeat(message: &SubscribeMessage) {
+    if message.topic == SubscribeTopic::HEARTBEAT.topic().hash() {
+        if let Ok(alive) = serde_json::from_slice::<HeartBeatMessage>(&message.data) {
+            // Ensure the message is not forged.
+            match PublicKey::from_slice(&alive.payload.identifier.serialize()) {
+                Ok(public_key) => {
+                    let sig = Signature::from_slice(&alive.signature).unwrap();
+                    let bytes = serde_json::to_vec(&alive.payload).unwrap();
+                    if public_key.verify(bytes, &sig).is_err() {
+                        debug!("Reject, untrusted package from {:?}", alive.payload.identifier);
+                        return;
+                    }
+                }
+                Err(_) => return
+            }
+            mem_store::update_alive_table( alive );
+        }
     }
 }
 

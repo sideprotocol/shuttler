@@ -13,7 +13,7 @@ pub const HEART_BEAT_DURATION: tokio::time::Duration = tokio::time::Duration::fr
 pub enum SubscribeTopic {
     DKG,
     SIGNING,
-    ALIVE,
+    HEARTBEAT,
 }
 
 impl SubscribeTopic {
@@ -39,7 +39,7 @@ pub fn subscribe_gossip_topics(swarm: &mut Swarm<ShuttlerBehaviour>) {
     let topics = vec![
         SubscribeTopic::DKG,
         SubscribeTopic::SIGNING,
-        SubscribeTopic::ALIVE,
+        SubscribeTopic::HEARTBEAT,
     ];
     for topic in topics {
         swarm.behaviour_mut().gossip.subscribe(&topic.topic()).expect("Failed to subscribe TSS events");
@@ -59,7 +59,7 @@ pub async fn sending_heart_beat(ctx: &mut Context, signer: &Signer) {
         let signature = signer.identity_key.sign(bytes, None).to_vec();
         let alive = HeartBeatMessage { payload, signature };
         let message = serde_json::to_vec(&alive).unwrap();
-        publish_message(ctx, SubscribeTopic::ALIVE, message);
+        publish_message(ctx, SubscribeTopic::HEARTBEAT, message);
         
         mem_store::update_alive_table(alive);
 }

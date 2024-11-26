@@ -16,6 +16,6 @@ pub async fn execute(home: &str, relayer: bool, signer: bool, seed: bool) {
         println!("Unable to set global log config!");
     }
 
-    let app = Shuttler::new(home, seed, relayer, signer, true);
+    let mut app = Shuttler::new(home, seed, relayer, signer, true);
     app.start().await;
 }
