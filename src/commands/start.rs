@@ -17,5 +17,5 @@ pub async fn execute(home: &str, relayer: bool, signer: bool, seed: bool) {
     }
 
     let app = Shuttler::new(home, seed, relayer, signer, true);
-    app.start();
+    app.start().await;
 }
