@@ -1,4 +1,4 @@
-use std::{fs::{self, File}, path::PathBuf, time::Duration};
+use std::{fs::{self, File}, path::PathBuf, thread, time::Duration};
 
 use cosmos_sdk_proto::{cosmos::base::tendermint::v1beta1::Validator, side::btcbridge::query_server::QueryServer};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_server::QueryServer as AuthServer;
@@ -29,8 +29,6 @@ pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32) {
     
     let mut validators = vec![];
     for i in 1..=n {
-
-        std::thread::sleep(Duration::from_secs(delay as u64));
 
         let mut home_i = PathBuf::new();
         home_i.push(testdir.path());
@@ -66,16 +64,19 @@ pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32) {
         let text= serde_json::to_string_pretty(&priv_validator_key).unwrap();
         fs::write(home_i.join("priv_validator_key.json"), text).unwrap();
 
-        let log = File::create(home_i.join("log.txt")).expect("failed to open log");
+        thread::spawn(move || {
 
-        Command::new(executor)
-            .arg("--home")
-            .arg(home_i.to_str().unwrap())
-            .arg("start")
-            .arg("--signer")
-            .stdout(log)
-            .spawn()
-            .expect("failed to start echo");
+            let log = File::create(home_i.join("log.txt")).expect("failed to open log");
+            std::thread::sleep(Duration::from_secs(delay as u64));
+            Command::new(executor)
+                .arg("--home")
+                .arg(home_i.to_str().unwrap())
+                .arg("start")
+                .arg("--signer")
+                .stdout(log)
+                .spawn()
+                .expect("failed to start echo");
+        });
 
         // child.wait().expect("failed to finish echo");
     }
