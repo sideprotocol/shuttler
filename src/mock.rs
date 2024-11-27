@@ -221,10 +221,8 @@ async fn loading_dkg_request(home: &str) -> Result<tonic::Response<QueryDkgReque
             participants,
             threshold: dkg.threshold,
             vault_types: vec![0], 
-            disable_bridge: false, 
             enable_transfer: true, 
-            target_utxo_num: 100, 
-            fee_rate: "1000".to_string(), 
+            target_utxo_num: 100,
             expiration: Some(timeout), 
             status: DkgRequestStatus::Pending as i32 
         })

@@ -87,24 +87,6 @@ pub async fn get_confirmations_on_side(host: &str) -> u64 {
     x.params.unwrap().confirmations as u64
 }
 
-pub async fn get_task_round_window_on_side(host: &str) -> u64 {
-    let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
-        Ok(client) => client,
-        Err(_) => {
-            return 300 as u64;
-        }
-    };
-    let x = btc_client.query_params(QueryParamsRequest{}).await.unwrap().into_inner();
-    match x.params.unwrap().tss_params.unwrap().signing_epoch_duration {
-        Some(duration) => {
-            return duration.seconds as u64;
-        }
-        None => {
-            return 300;
-        }
-    }
-}
-
 pub async fn get_signing_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {
     let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
