@@ -3,7 +3,6 @@ use std::time::Duration;
 use bitcoin::{consensus::encode, Address, Block, BlockHash, OutPoint, Transaction, Txid};
 use bitcoincore_rpc::{Error, RpcApi};
 use prost_types::Any;
-use tokio::time::sleep;
 use tonic::{Response, Status};
 use tracing::{debug, error, info};
 
@@ -34,86 +33,79 @@ const DB_KEY_VAULTS_LAST_UPDATE: &str = "bitcoin_vaults_last_update";
 //     );
 // }
 
-pub async fn sync_btc_blocks_loop(relayer: &Relayer) {
+pub async fn sync_btc_blocks(relayer: &Relayer) {
     let interval = relayer.config().loop_interval;
 
-    loop {
-        let confirmations = client_side::get_confirmations_on_side(&relayer.config().side_chain.grpc).await;
+    let confirmations = client_side::get_confirmations_on_side(&relayer.config().side_chain.grpc).await;
 
-        let tip_on_bitcoin = match relayer.bitcoin_client.get_block_count() {
-            Ok(height) => height - confirmations + 1,
-            Err(e) => {
-                error!(error=%e);
-                sleep(Duration::from_secs(interval)).await;
-                continue;
-            }
-        };
-    
-        let mut tip_on_side = match client_side::get_bitcoin_tip_on_side(&relayer.config().side_chain.grpc).await {
-            Ok(res) => res.get_ref().height,
-            Err(e) => {
-                error!(error=%e);
-                sleep(Duration::from_secs(interval)).await;
-                continue;
-            }
-        };
-    
-        if tip_on_bitcoin == tip_on_side {
-            debug!(
-                "No new blocks to sync, tip_on_bitcoin: {}, tip_on_side: {}, sleep for {} seconds...",
-                tip_on_bitcoin, tip_on_side, interval
-            );
-            sleep(Duration::from_secs(interval)).await;
-            continue;
+    let tip_on_bitcoin = match relayer.bitcoin_client.get_block_count() {
+        Ok(height) => height - confirmations + 1,
+        Err(e) => {
+            error!(error=%e);
+            return;
         }
-        
-        let batch_relayer_count = relayer.config().batch_relayer_count;
-        let batch = if tip_on_side + batch_relayer_count > tip_on_bitcoin {
-            tip_on_bitcoin
-        } else {
-            tip_on_side + batch_relayer_count
-        };
-        debug!("Syncing blocks from {} to {}", tip_on_side, batch);
-    
-        // check parent blocks hash before syncing blocks
-        for n in 1..=confirmations {
-            check_block_hash_is_corrent(&relayer, tip_on_side + n - confirmations).await;
-        }
+    };
 
-        let mut block_headers: Vec<BlockHeader> = vec![];
-        while tip_on_side < batch {
-            tip_on_side = tip_on_side + 1;
-            let header = match fetch_block_header_by_height(relayer, tip_on_side).await {
-                Ok(header) => header,
-                Err(e) => {
-                    error!("Failed to fetch block header: {:?}", e);
-                    break;
-                }
-            };
-            block_headers.push(header);
+    let mut tip_on_side = match client_side::get_bitcoin_tip_on_side(&relayer.config().side_chain.grpc).await {
+        Ok(res) => res.get_ref().height,
+        Err(e) => {
+            error!(error=%e);
+            return;
         }
-        if block_headers.is_empty() {
-            debug!("Block headers is empty, sleep for {} seconds...", interval);
-            sleep(Duration::from_secs(interval)).await;
-            continue;
-        }
-    
-        // submit block headers in a batch
-        match send_block_headers(relayer, &block_headers).await {
-            Ok(resp) => {
-                let tx_response = resp.into_inner().tx_response.unwrap();
-                if tx_response.code != 0 {
-                    error!("Failed to send block headers: {:?}", tx_response);
-                } else {
-                    info!("Sent block headers: {:?}", tx_response);
-                }
-            }
-            Err(e) => {
-                error!("Failed to send block headers: {:?}", e);
-            }
-        };
-        sleep(Duration::from_secs(interval)).await;
+    };
+
+    if tip_on_bitcoin == tip_on_side {
+        debug!(
+            "No new blocks to sync, tip_on_bitcoin: {}, tip_on_side: {}, sleep for {} seconds...",
+            tip_on_bitcoin, tip_on_side, interval
+        );
+        return
     }
+    
+    let batch_relayer_count = relayer.config().batch_relayer_count;
+    let batch = if tip_on_side + batch_relayer_count > tip_on_bitcoin {
+        tip_on_bitcoin
+    } else {
+        tip_on_side + batch_relayer_count
+    };
+    debug!("Syncing blocks from {} to {}", tip_on_side, batch);
+
+    // check parent blocks hash before syncing blocks
+    for n in 1..=confirmations {
+        check_block_hash_is_corrent(&relayer, tip_on_side + n - confirmations).await;
+    }
+
+    let mut block_headers: Vec<BlockHeader> = vec![];
+    while tip_on_side < batch {
+        tip_on_side = tip_on_side + 1;
+        let header = match fetch_block_header_by_height(relayer, tip_on_side).await {
+            Ok(header) => header,
+            Err(e) => {
+                error!("Failed to fetch block header: {:?}", e);
+                break;
+            }
+        };
+        block_headers.push(header);
+    }
+    if block_headers.is_empty() {
+        debug!("Block headers is empty, sleep for {} seconds...", interval);
+        return;
+    }
+
+    // submit block headers in a batch
+    match send_block_headers(relayer, &block_headers).await {
+        Ok(resp) => {
+            let tx_response = resp.into_inner().tx_response.unwrap();
+            if tx_response.code != 0 {
+                error!("Failed to send block headers: {:?}", tx_response);
+            } else {
+                info!("Sent block headers: {:?}", tx_response);
+            }
+        }
+        Err(e) => {
+            error!("Failed to send block headers: {:?}", e);
+        }
+    };
 }
 
 pub async fn fetch_block_header_by_height(relayer: &Relayer, height: u64) -> Result<BlockHeader, Error> {
@@ -213,34 +205,29 @@ pub async fn send_block_headers(
     send_cosmos_transaction(relayer.config(), any_msg).await
 }
 
-pub async fn scan_vault_txs_loop(relayer: &Relayer) {
+pub async fn scan_vault_txs(relayer: &Relayer) {
     let interval = relayer.config().loop_interval;
-    let mut height = get_last_scanned_height(relayer ) + 1;
+    let height = get_last_scanned_height(relayer ) + 1;
     debug!("Start to scan vault txs from height: {}", height);
 
-    loop {
-        let side_tip =
-            match client_side::get_bitcoin_tip_on_side(&relayer.config().side_chain.grpc).await {
-                Ok(res) => res.get_ref().height,
-                Err(e) => {
-                    error!("Failed to get tip from side chain: {}", e);
-                    sleep(Duration::from_secs(interval)).await;
-                    continue;
-                }
-            };
+    let side_tip =
+        match client_side::get_bitcoin_tip_on_side(&relayer.config().side_chain.grpc).await {
+            Ok(res) => res.get_ref().height,
+            Err(e) => {
+                error!("Failed to get tip from side chain: {}", e);
+                return;
+            }
+        };
 
-        let confirmations = client_side::get_confirmations_on_side(&relayer.config().side_chain.grpc).await;
-        if height > side_tip - confirmations + 1 {
-            debug!("No new txs to sync, height: {}, side tip: {}, sleep for {} seconds...", height, side_tip, interval);
-            sleep(Duration::from_secs(interval)).await;
-            continue;
-        }
-
-        debug!("Scanning height: {:?}, side tip: {:?}", height, side_tip);
-        scan_vault_txs_by_height(relayer, height).await;
-        save_last_scanned_height(relayer, height);
-        height += 1;
+    let confirmations = client_side::get_confirmations_on_side(&relayer.config().side_chain.grpc).await;
+    if height > side_tip - confirmations + 1 {
+        debug!("No new txs to sync, height: {}, side tip: {}, sleep for {} seconds...", height, side_tip, interval);
+        return;
     }
+
+    debug!("Scanning height: {:?}, side tip: {:?}", height, side_tip);
+    scan_vault_txs_by_height(relayer, height).await;
+    save_last_scanned_height(relayer, height);
 }
 
 pub async fn scan_vault_txs_by_height(relayer: &Relayer, height: u64) {
@@ -548,25 +535,21 @@ async fn get_cached_vaults(relayer: &Relayer) -> Vec<String> {
     }
 }
 
-pub async fn submit_fee_rate_loop(relayer: &Relayer) {
-    let submit_fee_rate = relayer.config().oracle.submit_fee_rate;
+pub async fn submit_fee_rate(relayer: &Relayer) {
+    let submit_fee_rate = relayer.config().fee_provider.submit_fee_rate;
     if !submit_fee_rate {
         return;
     }
 
-    let interval = relayer.config().oracle.submit_fee_rate_interval;
-    loop {
-        match relayer.oracle_client.get_fees().await {
-            Ok(bitcoin_fees) => {
-                let fee_rate = bitcoin_fees.fastest_fee;
-                submit_fee_rate_to_side(relayer, fee_rate).await;
-            }
-            Err(e) => {
-                error!("Failed to get fee rates: {}", e);
-            }
+    match relayer.fee_provider_client.get_fees().await {
+        Ok(bitcoin_fees) => {
+            let fee_rate = bitcoin_fees.fastest_fee;
+            submit_fee_rate_to_side(relayer, fee_rate).await;
         }
-        sleep(Duration::from_secs(interval)).await;
-    }
+        Err(e) => {
+            error!("Failed to get fee rates: {}", e);
+        }
+    };
 }
 
 pub async fn submit_fee_rate_to_side(relayer: &Relayer, fee_rate: i64) {

@@ -3,9 +3,9 @@
 use std::time::Duration;
 
 use bitcoincore_rpc::{Auth, Client};
-use tick::{scan_vault_txs_loop, submit_fee_rate_loop, sync_btc_blocks_loop};
+use tick::{scan_vault_txs, submit_fee_rate, sync_btc_blocks};
 use tokio::{join, time::Instant};
-use crate::{config::Config, helper::{client_oracle::OracleClient, client_ordinals::OrdinalsClient}};
+use crate::{config::Config, helper::{client_fee_provider::FeeProviderClient, client_ordinals::OrdinalsClient}};
 
 use super::{App, Context, SubscribeMessage};
 
@@ -17,7 +17,7 @@ pub struct Relayer {
     config: Config,
     pub bitcoin_client: Client,
     pub ordinals_client: OrdinalsClient,
-    pub oracle_client: OracleClient,
+    pub fee_provider_client: FeeProviderClient,
     pub db_relayer: sled::Db,
     pub ticker: tokio::time::Interval,
 }
@@ -37,9 +37,9 @@ impl App for Relayer {
 
     async fn on_tick(&self, _ctx: &mut Context) {
         join!(
-            sync_btc_blocks_loop(self),
-            scan_vault_txs_loop(self),
-            submit_fee_rate_loop(self),
+            sync_btc_blocks(self),
+            scan_vault_txs(self),
+            submit_fee_rate(self),
         );
     }
 }
@@ -59,7 +59,7 @@ impl Relayer {
         ).expect("Could not initial bitcoin RPC client");
 
         let ordinals_client = OrdinalsClient::new(&conf.ordinals.endpoint);
-        let oracle_client = OracleClient::new(&conf.oracle);
+        let fee_provider_client = FeeProviderClient::new(&conf.fee_provider);
 
         let db_relayer = sled::open(conf.get_database_with_name("relayer")).expect("Counld not create database!");
         let ticker = tokio::time::interval(Duration::from_secs(conf.loop_interval as u64));
@@ -68,7 +68,7 @@ impl Relayer {
             // priv_validator_key: validator_key,
             bitcoin_client,
             ordinals_client,
-            oracle_client,
+            fee_provider_client,
             config: conf,
             db_relayer,
             ticker,

@@ -1,9 +1,9 @@
-use crate::config::OracleCfg;
+use crate::config::FeeProviderCfg;
 use serde::{Deserialize, Serialize};
 use reqwest::{header, Client, Error};
 
 #[derive(Debug)]
-pub struct OracleClient {
+pub struct FeeProviderClient {
     client: Client,
     fetch_fee_rate_url: String,
 }
@@ -18,11 +18,11 @@ pub struct BitcoinFees {
     pub minimum_fee: i64,
 }
 
-impl OracleClient {
-    pub fn new(oracle: &OracleCfg) -> Self {
-        OracleClient {
+impl FeeProviderClient {
+    pub fn new(cfg: &FeeProviderCfg) -> Self {
+        FeeProviderClient {
             client: reqwest::Client::new(),
-            fetch_fee_rate_url: oracle.fetch_fee_rate_url.clone(),
+            fetch_fee_rate_url: cfg.fetch_fee_rate_url.clone(),
         }
     }
 
