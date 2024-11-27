@@ -1,10 +1,10 @@
-use crate::app::{config::Config, signer::Signer};
+use crate::{config::Config,apps::signer::Signer};
 
 use super::Cli;
 
 pub fn execute(cli: &Cli) {
     let conf = Config::from_file(&cli.home).unwrap();
-    let signer = Signer::new(conf.clone());
+    let signer = Signer::new(conf.clone(), false);
 
     println!("\n{:?}", signer.identifier());
     println!("{:?}\n", signer.peer_id());

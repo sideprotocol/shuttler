@@ -13,6 +13,8 @@ const CONFIG_FILE: &str = "config.toml";
 pub const TASK_INTERVAL: Duration = Duration::from_secs(30);
 use lazy_static::lazy_static;
 
+pub mod candidate;
+
 lazy_static! {
     static ref PRIV_VALIDATOR_KEY: Mutex<Option<PrivValidatorKey>> = Mutex::new(None);
     static ref BASE_ACCOUNT: Mutex<Option<BaseAccount>> = {
@@ -37,7 +39,7 @@ pub struct Config {
     pub side_chain: CosmosChain,
     
     pub ordinals: OrdinalsCfg,
-    pub oracle: OracleCfg,
+    pub fee_provider: FeeProviderCfg,
 
     pub relay_runes: bool,
 
@@ -85,9 +87,8 @@ pub struct OrdinalsCfg {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct OracleCfg {
+pub struct FeeProviderCfg {
     pub submit_fee_rate: bool,
-    pub submit_fee_rate_interval: u64,
     pub fetch_fee_rate_url: String,
 }
 
@@ -235,9 +236,8 @@ impl Config {
             ordinals: OrdinalsCfg {
                 endpoint: "".to_string(),
             },
-            oracle: OracleCfg {
+            fee_provider: FeeProviderCfg {
                 submit_fee_rate: false,
-                submit_fee_rate_interval: 60,
                 fetch_fee_rate_url: "https://mempool.space/testnet/api/v1/fees/recommended".to_string(),
             },
             relay_runes: false,

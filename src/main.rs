@@ -3,7 +3,7 @@ use shuttler::commands::{
     address, debug, init, reset, start, test,
     submit_header, submit_tx, Cli, Commands};
 
-#[tokio::main(flavor = "multi_thread", worker_threads=4)]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() {
     // Initialize tracing with customization
     let cli = Cli::parse();

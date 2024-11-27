@@ -4,7 +4,7 @@ use bitcoin::Txid;
 use tracing::Level;
 use tracing_subscriber;
 
-use crate::{app::{config::Config, relayer::Relayer}, tickers::relayer};
+use crate::{apps::relayer::{tick::check_and_handle_tx_by_hash, Relayer}, config::Config};
 
 pub async fn execute(home: &str, hash: &String) {
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
@@ -12,7 +12,7 @@ pub async fn execute(home: &str, hash: &String) {
     let txid = Txid::from_str(hash).expect("invalid tx hash");
 
     let conf = Config::from_file(home).unwrap();
-    let relayer = Relayer::new(conf);
+    let relayer = Relayer::new(conf, false);
 
-    relayer::check_and_handle_tx_by_hash(&relayer, &txid).await
+    check_and_handle_tx_by_hash(&relayer, &txid).await
 }

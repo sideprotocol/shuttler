@@ -1,36 +1,34 @@
 
 use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsRequest};
 use cosmrs::Any;
-use libp2p:: Swarm;
 use tracing::{debug, error, info};
 
 use crate::{
-    app::signer::Signer, 
+    apps::{signer::{dkg::{generate_round1_package, DKGTask}, sign::save_task_into_signing_queue, Signer}, Context}, 
     helper::{client_side::{get_signing_requests, send_cosmos_transaction}, gossip::sending_heart_beat}, 
-    protocols::{dkg::{broadcast_dkg_packages, generate_round1_package, DKGTask}, 
-    sign::{save_task_into_signing_queue, dispatch_executions}, Round, TSSBehaviour
-}};
-pub async fn time_free_tasks_executor( swarm : &mut Swarm<TSSBehaviour>, signer: &mut Signer ) {
+};
+
+use super::{dkg::sync_dkg_task_packages, sign::dispatch_executions, Round};
+
+pub async fn tasks_executor(ctx: &mut Context, signer: &Signer ) {
     
-    signer.sync_candidates_from_validators().await;
-    
-    if swarm.connected_peers().count() == 0 {
+    if ctx.swarm.connected_peers().count() == 0 {
         return
     }
 
     // 1. dkg tasks
-    broadcast_dkg_packages(swarm, signer);
+    sync_dkg_task_packages(ctx, signer);
     submit_dkg_address(signer).await;
     fetch_dkg_requests(signer).await;
 
     // 2 signing tasks
-    dispatch_executions(swarm, signer).await;
+    dispatch_executions(ctx, signer).await;
     // fetch request for next execution
     fetch_signing_requests(signer).await;
     // broadcast_sign_packages(swarm);
 
     // 3. heart beat
-    sending_heart_beat(swarm, signer).await;
+    sending_heart_beat(ctx, signer).await;
     
 }
 

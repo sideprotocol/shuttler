@@ -1,4 +1,4 @@
-use crate::app::config;
+use crate::config;
 
 use super::Cli;
 use bitcoin::Network;

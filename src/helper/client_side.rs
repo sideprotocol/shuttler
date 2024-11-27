@@ -19,7 +19,7 @@ use cosmos_sdk_proto::side::btcbridge::{
 use prost_types::Any;
 use lazy_static::lazy_static;
 
-use crate::app::config::{self};
+use crate::config;
 
 lazy_static! {
     static ref lock: Mutex<()> = Mutex::new(());
@@ -302,7 +302,7 @@ pub fn signed_msg_hash(msg: Vec<u8>) -> sha256d::Hash {
 async fn test_signature() {
 
     use cosmos_sdk_proto::side::btcbridge::MsgSubmitSignatures;
-    use crate::app::config::Config;
+    use crate::config::Config;
 
     let conf = Config::from_file(".side3").expect("not found config file");
     let msg = MsgSubmitSignatures {

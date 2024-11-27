@@ -1,6 +1,8 @@
 
 use std::collections::BTreeMap;
 use std::str::FromStr;
+use std::thread;
+use std::time::Duration;
 
 use bitcoin::absolute::LockTime;
 use bitcoin::hashes::Hash;
@@ -19,8 +21,37 @@ use frost_core:: Field;
 use frost_secp256k1_tr as frost;
 use libp2p::PeerId;
 use rand::thread_rng;
+use tokio::{select, signal};
+use tokio::sync::mpsc;
 
 use crate::helper::encoding;
+
+#[tokio::test]
+async fn test_mpsc() {
+    println!("start");
+    let (st, mut rx) = mpsc::channel::<String>(10);
+    for i in 0..5 {
+        let s = st.clone();
+        tokio::spawn(async move {
+            // thread::sleep(Duration::from_secs(2));
+            let r = s.send(format!("message from {i}")).await;
+            println!("send message {:?}", r)
+        });
+    }
+
+    // signal::ctrl_c()
+    loop {
+        select! {
+            received = rx.recv() => {
+                println!("Received: {:?}", received);
+            }
+            _s = signal::ctrl_c() => {
+                break;
+            }
+        }
+    }
+    println!("done");
+}
 
 #[test]
 fn test_identifer_toid() {

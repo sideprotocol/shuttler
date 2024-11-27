@@ -1,4 +1,4 @@
-use std::collections::{btree_map::Keys, BTreeMap};
+use std::collections::BTreeMap;
 
 use bitcoin::{sighash::{self, SighashCache}, Address, Psbt, TapSighashType, Witness};
 use bitcoin_hashes::Hash;
@@ -7,7 +7,6 @@ use cosmos_sdk_proto::side::btcbridge::{MsgSubmitSignatures, SigningRequest, Sig
 use cosmrs::Any;
 
 use ed25519_compact::{PublicKey, Signature};
-use libp2p::Swarm;
 use prost_types::Timestamp;
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
@@ -16,14 +15,15 @@ use tracing::{debug, error, info};
 use frost::{Identifier, round1, round2}; 
 use frost_secp256k1_tr::{self as frost, round1::{SigningCommitments, SigningNonces}};
 use crate::{
-    app::{config::TASK_INTERVAL, signer::Signer}, 
+    apps::{signer::Signer, Context}, config::TASK_INTERVAL,
     helper::{
-        client_side::{get_signing_request_by_txid, send_cosmos_transaction}, encoding::{from_base64, hash, to_base64}, gossip::publish_signing_package, mem_store, now
-    }
+        client_side::{get_signing_request_by_txid, send_cosmos_transaction}, encoding::{from_base64, to_base64}, mem_store, now
+    },
 };
 
-use super::TSSBehaviour;
 use usize as Index;
+
+use super::broadcast_signing_packages;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignRequest {
@@ -165,7 +165,7 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
 
 }
 
-pub async fn dispatch_executions(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer) {
+pub async fn dispatch_executions(ctx: &mut Context, signer: &Signer) {
 
     for mut task in signer.list_signing_tasks() {
         match task.status {
@@ -216,7 +216,7 @@ pub async fn dispatch_executions(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
             Status::RESET => {
                 task.status = Status::WIP;
                 signer.save_signing_task(&task);
-                generate_commitments(swarm, signer, &mut task);
+                generate_commitments(ctx, signer, &mut task);
             },
             Status::WIP => {
                 let window = TASK_INTERVAL.as_secs() * 20; // n = 20, n should large than 3 
@@ -234,7 +234,7 @@ pub async fn dispatch_executions(swarm: &mut Swarm<TSSBehaviour>, signer: &Signe
     };
 }
 
-fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: &SignTask) {
+fn generate_commitments(ctx: &mut Context, signer: &Signer, task: &SignTask) {
 
     if task.status == Status::CLOSE {
         return
@@ -264,12 +264,12 @@ fn generate_commitments(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task: 
         sender: signer.identifier().clone(),
         signature: vec![], 
     };
-    publish_signing_package(swarm, signer, &mut msg);
+    broadcast_signing_packages(ctx, signer, &mut msg);
 
-    received_sign_message(swarm, signer, msg);
+    received_sign_message(ctx, signer, msg);
 }
 
-pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, msg: SignMesage) {
+pub fn received_sign_message(ctx: &mut Context, signer: &Signer, msg: SignMesage) {
 
     // Ensure the message is not forged.
     match PublicKey::from_slice(&msg.sender.serialize()) {
@@ -317,7 +317,7 @@ pub fn received_sign_message(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, m
 
             signer.save_signing_commitments(&task_id, &remote_commitments);
 
-            try_generate_signature_shares(swarm, signer, &task_id);
+            try_generate_signature_shares(ctx, signer, &task_id);
 
         },
         SignPackage::Round2(sig_shares) => {
@@ -356,7 +356,7 @@ pub fn sanitize<T>(storages: &mut BTreeMap<Identifier, T>, keys: &Vec<&Identifie
     }
 }
 
-pub fn try_generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &Signer, task_id: &str) {
+pub fn try_generate_signature_shares(ctx: &mut Context, signer: &Signer, task_id: &str) {
 
     // Ensure the task exists locally to prevent forged signature tasks. 
     let mut task = match signer.get_signing_task(task_id) {
@@ -453,9 +453,9 @@ pub fn try_generate_signature_shares(swarm: &mut Swarm<TSSBehaviour>, signer: &S
         signature: vec![],
     };
 
-    publish_signing_package(swarm, signer, &mut msg);
+    broadcast_signing_packages(ctx, signer, &mut msg);
 
-    received_sign_message(swarm, signer, msg);
+    received_sign_message(ctx, signer, msg);
 
 }
 
@@ -641,9 +641,4 @@ fn generate_nonce_and_commitment_by_address(address: &str, signer: &Signer) -> O
         }
     };
     None
-}
-
-pub fn participants_fingerprint<V>(keys: Keys<'_, Identifier, V>) -> String {
-    let x = keys.map(|c| {c.serialize()}).collect::<Vec<_>>();
-    hash(x.join(&0).as_slice())[..6].to_string()
 }

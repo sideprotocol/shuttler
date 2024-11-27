@@ -1,5 +1,5 @@
 
-use crate::{app::{config::Config, relayer::Relayer}, tickers::relayer};
+use crate::{apps::relayer::{tick::{fetch_block_header_by_height, send_block_headers}, Relayer}, config::Config};
 
 pub async fn execute(home: &str, height: u64) {
 
@@ -9,10 +9,10 @@ pub async fn execute(home: &str, height: u64) {
     }
     
     let conf = Config::from_file(home).unwrap();
-    let relayer = Relayer::new(conf);
-    match relayer::fetch_block_header_by_height(&relayer, height).await {
+    let relayer = Relayer::new(conf, false);
+    match fetch_block_header_by_height(&relayer, height).await {
         Ok(header) => {
-            match relayer::send_block_headers(&relayer, &vec![header]).await {
+            match send_block_headers(&relayer, &vec![header]).await {
                 Ok(_) => {
                     println!("Block header submitted successfully");
                 }
