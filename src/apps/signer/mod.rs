@@ -19,7 +19,7 @@ use sign::{received_sign_message, SignMesage, SignTask};
 use tick::tasks_executor;
 use tokio::time::Instant;
 
-use crate::config::{self, candidate::Candidate, Config, TASK_INTERVAL};
+use crate::config::{self, Config, TASK_INTERVAL};
 use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::encoding::{identifier_to_peer_id, pubkey_to_identifier};
 use crate::helper::gossip::{publish_message, SubscribeTopic};
@@ -27,7 +27,6 @@ use crate::helper::mem_store;
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
-use std::time::Duration;
 use tracing::{error, info};
 use usize as Index;
 
