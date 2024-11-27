@@ -36,10 +36,8 @@ const DB_KEY_VAULTS_LAST_UPDATE: &str = "bitcoin_vaults_last_update";
 pub async fn sync_btc_blocks(relayer: &Relayer) {
     let interval = relayer.config().loop_interval;
 
-    let confirmations = client_side::get_confirmations_on_side(&relayer.config().side_chain.grpc).await;
-
     let tip_on_bitcoin = match relayer.bitcoin_client.get_block_count() {
-        Ok(height) => height - confirmations + 1,
+        Ok(height) => height,
         Err(e) => {
             error!(error=%e);
             return;
@@ -71,6 +69,7 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
     debug!("Syncing blocks from {} to {}", tip_on_side, batch);
 
     // check parent blocks hash before syncing blocks
+    let confirmations = client_side::get_confirmations_on_side(&relayer.config().side_chain.grpc).await;
     for n in 1..=confirmations {
         check_block_hash_is_corrent(&relayer, tip_on_side + n - confirmations).await;
     }
@@ -208,7 +207,6 @@ pub async fn send_block_headers(
 pub async fn scan_vault_txs(relayer: &Relayer) {
     let interval = relayer.config().loop_interval;
     let height = get_last_scanned_height(relayer ) + 1;
-    debug!("Start to scan vault txs from height: {}", height);
 
     let side_tip =
         match client_side::get_bitcoin_tip_on_side(&relayer.config().side_chain.grpc).await {
