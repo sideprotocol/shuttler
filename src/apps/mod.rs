@@ -1,5 +1,5 @@
 use libp2p::Swarm;
-use tokio::time::Interval;
+use tokio::time::Instant;
 
 use crate::shuttler::ShuttlerBehaviour;
 
@@ -10,8 +10,9 @@ pub mod oracle;
 pub type SubscribeMessage = libp2p::gossipsub::Message;
 
 pub trait App {
+    fn enabled(&self) -> bool;
     fn on_message(&self, ctx: &mut Context, message: &SubscribeMessage);
-    fn ticker(&self) -> impl std::future::Future<Output = Interval> + Send;
+    fn tick(&mut self) -> impl std::future::Future<Output = Instant> + Send;
     fn on_tick(&self, ctx: &mut Context) -> impl std::future::Future<Output = ()> + Send;
 }
 

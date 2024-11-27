@@ -1,3 +1,5 @@
+use tokio::time::Instant;
+
 use crate::config::Config;
 
 use super::{App, Context, SubscribeMessage};
@@ -9,7 +11,7 @@ pub struct Oracle {
 }
 
 impl Oracle {
-    pub fn new(conf: Config) -> Self {
+    pub fn new(conf: Config, enabled: bool) -> Self {
         Self {
             config: conf,
         }
@@ -24,7 +26,11 @@ impl App for Oracle {
         todo!()
     }
 
-    async fn ticker(&self) -> tokio::time::Interval {
+    fn enabled(&self) -> bool {
+        false
+    }
+
+    async fn tick(&mut self) -> Instant {
         todo!()
     }
 

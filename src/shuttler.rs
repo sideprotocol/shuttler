@@ -23,9 +23,9 @@ use crate::{
 
 pub struct Shuttler {
     conf: Config,
-    relayer: Option<Relayer>,
-    signer: Option<Signer>,
-    oracle: Option<Oracle>,
+    relayer: Relayer,
+    signer: Signer,
+    oracle: Oracle,
     seed: bool,
     candidates: Candidate,
 }
@@ -48,21 +48,9 @@ impl Shuttler {
     ) -> Self {
         let conf = Config::from_file(home).unwrap();
 
-        let relayer = if start_relayer {
-            Some(Relayer::new(conf.clone()))
-        } else {
-            None
-        };
-        let signer = if start_signer {
-            Some(Signer::new(conf.clone()))
-        } else {
-            None
-        };
-        let oracle = if start_oracle {
-            Some(Oracle::new(conf.clone()))
-        } else {
-            None
-        };
+        let relayer = Relayer::new(conf.clone(), start_relayer);
+        let signer = Signer::new(conf.clone(), start_signer);
+        let oracle =  Oracle::new(conf.clone(), start_oracle);
 
         Self {
             candidates: Candidate::new(conf.side_chain.grpc.clone(), &conf.bootstrap_nodes),
@@ -149,7 +137,7 @@ impl Shuttler {
                         identify,
                         kad,
                     })
-                })
+                }) 
                 .expect("swarm behaviour config failed")
                 .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60000)))
                 .build();
@@ -202,14 +190,14 @@ impl Shuttler {
                         // debug!("Swarm event: {:?}", swarm_event);
                     },
                 },
-                _ = self.relayer.as_ref().unwrap().ticker(), if &self.relayer.is_some() => {
-                    self.relayer.as_ref().unwrap().on_tick(&mut context).await;
+                _ = self.relayer.tick(), if self.relayer.enabled() => {
+                    self.relayer.on_tick(&mut context).await;
                 },
-                _ = self.oracle.as_ref().unwrap().ticker(), if &self.oracle.is_some() => {
-                    self.oracle.as_ref().unwrap().on_tick(&mut context).await;
+                _ = self.oracle.tick(), if &self.oracle.enabled() => {
+                    self.oracle.on_tick(&mut context).await;
                 },
-                _ = self.signer.as_ref().unwrap().ticker(), if &self.signer.is_some() => {
-                    self.signer.as_ref().unwrap().on_tick(&mut context).await;
+                _ = self.signer.tick(), if &self.signer.enabled() => {
+                    self.signer.on_tick(&mut context).await;
                 },
 
             }
@@ -287,9 +275,9 @@ impl Shuttler {
 
 }
 
-fn dispatch_messages<T: App>(app: &Option<T>, context: &mut Context,  message: &SubscribeMessage) {
-    if let Some(a) = app {
-        a.on_message(context, message);
+fn dispatch_messages<T: App>(app: &T, context: &mut Context,  message: &SubscribeMessage) {
+    if app.enabled() {
+        app.on_message(context, message);
     }
 }
 

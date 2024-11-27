@@ -17,6 +17,7 @@ use libp2p::identity::Keypair;
 use libp2p::PeerId;
 use sign::{received_sign_message, SignMesage, SignTask};
 use tick::tasks_executor;
+use tokio::time::Instant;
 
 use crate::config::{self, candidate::Candidate, Config, TASK_INTERVAL};
 use crate::helper::bitcoin::get_group_address_by_tweak;
@@ -26,6 +27,7 @@ use crate::helper::mem_store;
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
+use std::time::Duration;
 use tracing::{error, info};
 use usize as Index;
 
@@ -53,6 +55,7 @@ pub enum Round {
 
 #[derive(Debug)]
 pub struct Signer {
+    enabled: bool,
     config: Config,
     /// Identity key of the signer
     /// This is the private key of sidechain validator that is used to sign messages
@@ -67,10 +70,11 @@ pub struct Signer {
     db_dkg: sled::Db,
     db_dkg_variables: sled::Db,
     db_keypair: sled::Db,
+    ticker: tokio::time::Interval,
 }
 
 impl Signer {
-    pub fn new(conf: Config) -> Self {
+    pub fn new(conf: Config, enabled: bool) -> Self {
         // load private key from priv_validator_key_path
         let priv_validator_key = conf.load_validator_key();
 
@@ -103,7 +107,11 @@ impl Signer {
         let db_keypair = sled::open(conf.get_database_with_name("keypairs"))
             .expect("Counld not create database!");
 
+        let ticker = tokio::time::interval(TASK_INTERVAL);
+
         Self {
+            enabled,
+            ticker,
             identity_key: local_key,
             identifier,
             bitcoin_client,
@@ -469,8 +477,12 @@ impl super::App for Signer {
         }
     }
 
-    async fn ticker(&self) -> tokio::time::Interval {
-        tokio::time::interval(TASK_INTERVAL)
+    fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    async fn tick(&mut self) -> Instant {
+        self.ticker.tick().await
     }
 
     async fn on_tick(&self, ctx: &mut Context) {
