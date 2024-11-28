@@ -193,10 +193,10 @@ impl Shuttler {
                 _ = self.relayer.tick(), if self.relayer.enabled() => {
                     self.relayer.on_tick(&mut context).await;
                 },
-                _ = self.oracle.tick(), if &self.oracle.enabled() => {
+                _ = self.oracle.tick(), if self.oracle.enabled() => {
                     self.oracle.on_tick(&mut context).await;
                 },
-                _ = self.signer.tick(), if &self.signer.enabled() => {
+                _ = self.signer.tick(), if self.signer.enabled() => {
                     self.signer.on_tick(&mut context).await;
                 },
 
