@@ -22,6 +22,20 @@ pub fn taproot_signature_from_frost(frost_signature: frost_adaptor_signature::Si
     }
 }
 
+// pub fn tweak_to_u8(tweak: &Option<TapNodeHash>) -> Option<&[u8]> {
+
+//     let tweek_bytes  = match tweak {
+//         Some(t) => ,
+//         None => vec![],
+//     };
+
+//     if tweek_bytes.len() ==0 { 
+//         None 
+//     } else { 
+//         Some(&tweek_bytes[..])
+//     }
+// }
+
 pub fn get_group_address(verify_key: &VerifyingKey, network: Network) -> Address {
     // let verifying_key_b = json_data.pubkey_package.verifying_key();
     let key_bytes = verify_key.serialize().unwrap();

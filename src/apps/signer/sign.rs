@@ -422,8 +422,8 @@ pub fn try_generate_signature_shares(ctx: &mut Context, signer: &Signer, task_id
 
             let merkle_root = if tweek.len() ==0 { None } else { Some(&tweek[..])};
 
-            let signature_shares = match round2::sign(
-                &signing_package, signer_nonces, &keypair.priv_key,
+            let signature_shares = match round2::sign_with_tweak(
+                &signing_package, signer_nonces, &keypair.priv_key, merkle_root
             ) {
                 Ok(shares) => shares,
                 Err(e) => {
@@ -527,7 +527,7 @@ pub fn try_aggregate_signature_shares(signer: &Signer, task_id: &str) -> Option<
 
         let merkle_root = if tweek.len() == 0 { None } else { Some(&tweek[..])};
 
-        match frost_adaptor_signature::aggregate(&signing_package, &signature_shares, &keypair.pub_key) { 
+        match frost_adaptor_signature::aggregate_with_tweak(&signing_package, &signature_shares, &keypair.pub_key, merkle_root) { 
             Ok(frost_signature) => {
                 match keypair.pub_key.verifying_key().verify(signing_package.message(), &frost_signature) {
                     Ok(_) => {
