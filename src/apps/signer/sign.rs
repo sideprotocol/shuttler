@@ -12,7 +12,7 @@ use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
-use frost_adaptor_signature::{round1, round2, Identifier, SigningPackage}; 
+use frost_adaptor_signature::{keys::Tweak, round1, round2, Identifier, SigningPackage}; 
 use frost_adaptor_signature::round1::{SigningCommitments, SigningNonces};
 use crate::{
     apps::{signer::Signer, Context}, config::TASK_INTERVAL,
@@ -529,7 +529,7 @@ pub fn try_aggregate_signature_shares(signer: &Signer, task_id: &str) -> Option<
 
         match frost_adaptor_signature::aggregate_with_tweak(&signing_package, &signature_shares, &keypair.pub_key, merkle_root) { 
             Ok(frost_signature) => {
-                match keypair.pub_key.verifying_key().verify(signing_package.message(), &frost_signature) {
+                match keypair.pub_key.tweak(merkle_root).verifying_key().verify(signing_package.message(), &frost_signature) {
                     Ok(_) => {
                         let sig_bytes = frost_signature.serialize().unwrap();
                         let signature = bitcoin::secp256k1::schnorr::Signature::from_slice(&sig_bytes).unwrap();
