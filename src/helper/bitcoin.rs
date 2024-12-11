@@ -1,9 +1,8 @@
 use bitcoin::{
-    consensus::encode::serialize, key::Secp256k1, opcodes, Address, Network, PublicKey, ScriptBuf,
-    TapNodeHash, Transaction, Txid, XOnlyPublicKey,
+    consensus::encode::serialize, key::Secp256k1, opcodes, secp256k1::schnorr::Signature, Address, Network, PublicKey, ScriptBuf, TapNodeHash, TapSighashType, Transaction, Txid, XOnlyPublicKey
 };
 use bitcoin_v30::{consensus::encode::deserialize, Transaction as TransactionV30};
-use frost_secp256k1_tr::VerifyingKey;
+use frost_adaptor_signature::VerifyingKey;
 use ordinals::SpacedRune;
 
 use super::merkle_proof;
@@ -11,9 +10,22 @@ use super::merkle_proof;
 // Magic txin sequence for withdrawal txs
 const MAGIC_SEQUENCE: u32 = (1 << 31) + 0xde;
 
+pub fn schnorr_signature_from_frost(frost_signature: frost_adaptor_signature::Signature) -> Signature {
+    let sig_bytes = frost_signature.serialize().unwrap();
+    Signature::from_slice(&sig_bytes).unwrap()
+}
+
+pub fn taproot_signature_from_frost(frost_signature: frost_adaptor_signature::Signature) -> bitcoin::taproot::Signature {
+    bitcoin::taproot::Signature {
+        signature: schnorr_signature_from_frost(frost_signature),
+        sighash_type: TapSighashType::Default
+    }
+}
+
 pub fn get_group_address(verify_key: &VerifyingKey, network: Network) -> Address {
     // let verifying_key_b = json_data.pubkey_package.verifying_key();
-    let pubk = PublicKey::from_slice(&verify_key.serialize()[..]).unwrap();
+    let key_bytes = verify_key.serialize().unwrap();
+    let pubk = PublicKey::from_slice(&key_bytes ).unwrap();
     let internal_key = XOnlyPublicKey::from(pubk.inner);
     let secp = Secp256k1::new();
     Address::p2tr(&secp, internal_key, None, network)
@@ -23,9 +35,9 @@ pub fn get_group_address_by_tweak(
     verify_key: &VerifyingKey,
     tweak: Option<TapNodeHash>,
     network: Network,
-) -> Address {
-    // let verifying_key_b = json_data.pubkey_package.verifying_key();
-    let pubk = PublicKey::from_slice(&verify_key.serialize()[..]).unwrap();
+) -> Address {    
+    let key_bytes = verify_key.serialize().unwrap();
+    let pubk = PublicKey::from_slice(&key_bytes ).unwrap();
     let internal_key = XOnlyPublicKey::from(pubk.inner);
     let secp = Secp256k1::new();
 

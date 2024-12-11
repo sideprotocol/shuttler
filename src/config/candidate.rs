@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use frost_secp256k1_tr::Identifier;
+use frost_adaptor_signature::Identifier;
 use libp2p::PeerId;
 use tracing::warn;
 

@@ -1,9 +1,9 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use bitcoin_hashes::sha256;
 use bitcoin_hashes::Hash;
-use frost_core::Field;
-use frost_secp256k1_tr as frost;
-use frost_secp256k1_tr::Identifier;
+use frost_adaptor_signature::Field;
+use frost_adaptor_signature::Identifier;
+use frost_adaptor_signature::Secp256K1ScalarField;
 use libp2p::PeerId;
 
 pub fn to_base64(input: &[u8]) -> String {
@@ -31,6 +31,6 @@ pub fn identifier_to_peer_id(identifier: &Identifier) -> PeerId {
 }
 
 pub fn pubkey_to_identifier(key_bytes: &[u8]) -> Identifier {
-    let id = frost::Secp256K1ScalarField::deserialize(key_bytes.try_into().unwrap()).unwrap();
+    let id = Secp256K1ScalarField::deserialize(key_bytes.try_into().unwrap()).unwrap();
     Identifier::new(id).unwrap()
 }

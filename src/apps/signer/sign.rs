@@ -12,8 +12,8 @@ use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
-use frost::{Identifier, round1, round2}; 
-use frost_secp256k1_tr::{self as frost, round1::{SigningCommitments, SigningNonces}};
+use frost_adaptor_signature::{round1, round2, Identifier, SigningPackage}; 
+use frost_adaptor_signature::round1::{SigningCommitments, SigningNonces};
 use crate::{
     apps::{signer::Signer, Context}, config::TASK_INTERVAL,
     helper::{
@@ -402,17 +402,10 @@ pub fn try_generate_signature_shares(ctx: &mut Context, signer: &Signer, task_id
                 signer.save_signing_task(&task);
             }
             
-            let signing_package = frost::SigningPackage::new(
+            let signing_package = SigningPackage::new(
                 signing_commitments, 
-                frost::SigningTarget::new(
-                    &input.sig_hash, 
-                    frost::SigningParameters{
-                        tapscript_merkle_root: match keypair.tweak {
-                            Some(tweak) => Some(tweak.to_byte_array().to_vec()),
-                            None => None,
-                        },
-                    }
-                ));
+                &input.sig_hash
+                );
 
             let signer_nonces = match stored_nonces.get(&index) {
                 Some(d) => d,
@@ -422,8 +415,15 @@ pub fn try_generate_signature_shares(ctx: &mut Context, signer: &Signer, task_id
                 },
             };
 
-            let signature_shares = match frost::round2::sign(
-                &signing_package, signer_nonces, &keypair.priv_key
+            let tweek  = match keypair.tweak {
+                Some(tweak) => tweak.to_byte_array().to_vec(),
+                None => vec![],
+            };
+
+            let merkle_root = if tweek.len() ==0 { None } else { Some(&tweek[..])};
+
+            let signature_shares = match round2::sign(
+                &signing_package, signer_nonces, &keypair.priv_key,
             ) {
                 Ok(shares) => shares,
                 Err(e) => {
@@ -514,30 +514,28 @@ pub fn try_aggregate_signature_shares(signer: &Signer, task_id: &str) -> Option<
         }
 
         signature_shares.retain(|k, _| {signing_commitments.contains_key(k)});
-
-        let sig_target = frost::SigningTarget::new(
-            &input.sig_hash,
-            frost::SigningParameters {
-                tapscript_merkle_root:  match keypair.tweak {
-                        Some(tweak) => Some(tweak.to_byte_array().to_vec()),
-                        None => None,
-                    },
-                }
-        );
         
-        let signing_package = frost::SigningPackage::new(
+        let signing_package = SigningPackage::new(
             signing_commitments,
-            sig_target
+            &input.sig_hash
         );
 
-        match frost::aggregate(&signing_package, &signature_shares, &keypair.pub_key) {
-            Ok(signature) => {
-                match keypair.pub_key.verifying_key().verify(signing_package.sig_target().clone(), &signature) {
-                    Ok(_) => {
-                        let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&signature.serialize()).unwrap();
+        let tweek  = match keypair.tweak {
+            Some(tweak) => tweak.to_byte_array().to_vec(),
+            None => vec![],
+        };
 
-                        psbt.inputs[*index].tap_key_sig = Option::Some(bitcoin::taproot::Signature {
-                            signature: sig,
+        let merkle_root = if tweek.len() == 0 { None } else { Some(&tweek[..])};
+
+        match frost_adaptor_signature::aggregate(&signing_package, &signature_shares, &keypair.pub_key) { 
+            Ok(frost_signature) => {
+                match keypair.pub_key.verifying_key().verify(signing_package.message(), &frost_signature) {
+                    Ok(_) => {
+                        let sig_bytes = frost_signature.serialize().unwrap();
+                        let signature = bitcoin::secp256k1::schnorr::Signature::from_slice(&sig_bytes).unwrap();
+
+                        psbt.inputs[*index].tap_key_sig = Some(bitcoin::taproot::Signature {
+                            signature,
                             sighash_type: TapSighashType::Default,
                         });
         
@@ -637,7 +635,7 @@ fn generate_nonce_and_commitment_by_address(address: &str, signer: &Signer) -> O
     if let Some(key) = signer.get_keypair_from_db(address) {
         if key.pub_key.verifying_shares().contains_key(signer.identifier()) {
             let mut rng = thread_rng();
-            return Some(frost::round1::commit(key.priv_key.signing_share(), &mut rng));
+            return Some(round1::commit(key.priv_key.signing_share(), &mut rng));
         }
     };
     None

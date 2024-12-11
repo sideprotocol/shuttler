@@ -2,7 +2,7 @@ use bitcoin::{bip32::{DerivationPath, Xpriv}, key::Secp256k1, Address, Compresse
 use bip39::{self, Mnemonic};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{query_client::QueryClient as AuthQueryClient, BaseAccount, QueryAccountRequest};
 
-use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
+use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 use serde::{Deserialize, Serialize};
 use tendermint_config::PrivValidatorKey;
 use std::{fs, path::PathBuf, str::FromStr, sync::Mutex, time::Duration};

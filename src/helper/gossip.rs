@@ -1,6 +1,5 @@
 
-use frost_core::Identifier;
-use frost_secp256k1_tr::Secp256K1Sha256;
+use frost_adaptor_signature::Identifier;
 use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +29,7 @@ pub struct HeartBeatMessage {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct HeartBeatPayload {
-    pub identifier: Identifier<Secp256K1Sha256>,
+    pub identifier: Identifier,
     pub last_seen: u64,
     pub task_ids: Vec<String>,
 }

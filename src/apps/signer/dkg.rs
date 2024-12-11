@@ -8,10 +8,9 @@ use rand::thread_rng;
 use tracing::{debug, error, info};
 use serde::{Deserialize, Serialize};
 
-use frost_secp256k1_tr::{self as frost};
-use frost::{keys, Identifier, Secp256K1Sha256};
+use frost_adaptor_signature as frost;
+use frost::{keys, Identifier, keys::dkg::round1::Package};
 
-use frost_core::keys::dkg::round1::Package;
 use super::{broadcast_dkg_packages, Round};
 use crate::apps::Context;
 use crate::helper::{mem_store, now};
@@ -98,7 +97,7 @@ pub fn generate_round1_package(signer: &Signer, task: &DKGTask) {
      }
 }
 
-pub fn generate_round2_packages(signer: &Signer, task: &mut DKGTask, round1_packages: BTreeMap<Identifier, Package<Secp256K1Sha256>>) -> Result<(), DKGError> {
+pub fn generate_round2_packages(signer: &Signer, task: &mut DKGTask, round1_packages: BTreeMap<Identifier, Package>) -> Result<(), DKGError> {
 
     let task_id = task.id.clone();
 

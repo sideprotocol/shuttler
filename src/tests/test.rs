@@ -16,10 +16,9 @@ use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::sign_message::MessageSignature;
 use bitcoin::{transaction, Address, Amount, Network, OutPoint, Psbt, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness, XOnlyPublicKey
 };
-use frost_core::keys::KeyPackage;
-use frost_core:: Field;
-use frost_secp256k1_tr as frost;
-use libp2p::PeerId;
+use frost_adaptor_signature::keys::KeyPackage;
+use frost_adaptor_signature as frost;
+use frost_adaptor_signature:: Field;
 use rand::thread_rng;
 use tokio::{select, signal};
 use tokio::sync::mpsc;
@@ -146,11 +145,11 @@ fn test_taproot_signature() {
     for participant_identifier in nonces_map.keys() {
         let key_package = &key_packages[participant_identifier];
 
-        let nonces = &nonces_map[participant_identifier];
+        let signer_nonces = &nonces_map[participant_identifier];
 
         // Each participant generates their signature share.
         // ANCHOR: round2_sign
-        let signature_share = frost::round2::sign(&signing_package, nonces, key_package).expect("msg");
+        let signature_share = frost::round2::sign(&signing_package, signer_nonces, key_package).expect("msg");
         // ANCHOR_END: round2_sign
 
         // In practice, the signature share must be sent to the Coordinator
@@ -165,7 +164,7 @@ fn test_taproot_signature() {
 
     // Aggregate (also verifies the signature shares)
     // ANCHOR: aggregate
-    let group_signature = frost::aggregate(&signing_package, &signature_shares, &pubkey_package).expect("msg");
+    let group_signature = frost_adaptor_signature::aggregate(&signing_package, &signature_shares, &pubkey_package).expect("msg");
     // ANCHOR_END: aggregate
 
 
@@ -179,7 +178,7 @@ fn test_taproot_signature() {
     // ANCHOR_END: verify
     assert!(is_signature_valid);
 
-    let pubkey_bytes = pubkey_package.verifying_key().serialize();
+    let pubkey_bytes = pubkey_package.verifying_key().serialize().unwrap();
     let pubk = bitcoin::PublicKey::from_slice(&pubkey_bytes).expect("unable to create pubkey");
 
 
@@ -187,8 +186,9 @@ fn test_taproot_signature() {
     let utpk = UntweakedPublicKey::from(pubk.inner);
     let (tpk, _) = utpk.tap_tweak(&secp, None);
     // let addr = Address::p2tr(&secp, tpk., None, Network::Bitcoin);
-    let sig_b = group_signature.serialize();
-    let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&sig_b[1..]).unwrap();
+    let sig_b = group_signature.serialize().unwrap();
+    
+    let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&sig_b).unwrap();
     let msg = Message::from_digest_slice(message).unwrap();
     match secp.verify_schnorr(&sig, &msg, &tpk.to_inner()) {
         Ok(_) => println!("Signature is valid"),

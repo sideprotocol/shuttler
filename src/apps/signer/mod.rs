@@ -5,12 +5,11 @@ use bitcoin::{TapNodeHash, XOnlyPublicKey};
 use bitcoincore_rpc::{Auth, Client};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_client::QueryClient as AuthQueryClient;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountRequest};
-use frost::Identifier;
-use frost_secp256k1_tr as frost;
-use frost_secp256k1_tr::keys::dkg::round1::Package;
-use frost_secp256k1_tr::keys::{KeyPackage, PublicKeyPackage};
-use frost_secp256k1_tr::round1::{SigningCommitments, SigningNonces};
-use frost_secp256k1_tr::round2::SignatureShare;
+use frost_adaptor_signature::Identifier;
+use frost_adaptor_signature::keys::dkg::round1::Package;
+use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
+use frost_adaptor_signature::round1::{SigningCommitments, SigningNonces};
+use frost_adaptor_signature::round2::SignatureShare;
 
 use libp2p::identity::Keypair;
 
@@ -177,8 +176,11 @@ impl Signer {
     }
 
     fn generate_tweak(&self, pubkey: PublicKeyPackage, index: u16) -> Option<TapNodeHash> {
-        let x_only_pubkey =
-            XOnlyPublicKey::from_slice(&pubkey.verifying_key().serialize()[1..]).unwrap();
+        let key_bytes = match pubkey.verifying_key().serialize() {
+            Ok(b) => b,
+            Err(_) => return None,
+        };
+        let x_only_pubkey = XOnlyPublicKey::from_slice(&key_bytes[1..]).unwrap();
 
         let mut script = bitcoin::ScriptBuf::new();
         script.push_slice(x_only_pubkey.serialize());

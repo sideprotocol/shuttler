@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use frost_secp256k1_tr::{keys::dkg, Identifier};
+use frost_adaptor_signature::{keys::dkg, Identifier};
 use std::sync::Mutex;
 use lazy_static::lazy_static;
 
