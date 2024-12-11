@@ -2057,8 +2057,8 @@ dependencies = [
 
 [[package]]
 name = "frost-adaptor-signature"
-version = "0.1.0"
-source = "git+https://github.com/sideprotocol/frost-adaptor-signature.git?branch=master#39550398b40844589338a3b7b6c89c1f81eb2b7a"
+version = "0.1.1"
+source = "git+https://github.com/sideprotocol/frost-adaptor-signature.git?branch=master#11dcacb34f64f886962eb95ae19b743646658b91"
 dependencies = [
  "frost-core",
  "frost-secp256k1-tr",
