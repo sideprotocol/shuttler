@@ -177,21 +177,6 @@ pub fn sync_dkg_task_packages(ctx: &mut Context, signer: &Signer) {
 }
 
 pub fn prepare_response_for_task(ctx: &Context, task_id: &str, round1_packages: BTreeMap<Identifier, Package>, round2_packages: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>) -> DKGResponse {
-    // let round1_packages = match signer.get_dkg_round1_package(&task_id) {
-    //     Some(packets) => packets,
-    //     _ => {
-    //         debug!("No DKG Round 1 packets found: {task_id}");
-    //         BTreeMap::new()
-    //     },
-    // };
-    // let round2_packages = match signer.get_dkg_round2_package(&task_id) {
-    //     Some(packets) => packets,
-    //     _ => {
-    //         debug!("No DKG Round 2 packets found: {task_id}");
-    //         BTreeMap::new()
-    //     },
-    // };
-
     
     let payload = DKGPayload {
         task_id: task_id.to_string(),
