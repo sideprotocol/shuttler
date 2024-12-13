@@ -1,3 +1,5 @@
+use ed25519_compact::SecretKey;
+use frost_adaptor_signature::Identifier;
 use libp2p::Swarm;
 use tokio::time::Instant;
 
@@ -17,5 +19,7 @@ pub trait App {
 }
 
 pub struct Context {
-    pub swarm: Swarm<ShuttlerBehaviour>
+    pub swarm: Swarm<ShuttlerBehaviour>,
+    pub identifier: Identifier,
+    pub node_key: SecretKey,
 }
