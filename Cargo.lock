@@ -636,7 +636,7 @@ dependencies = [
  "rustversion",
  "serde",
  "sync_wrapper 1.0.2",
- "tower 0.5.1",
+ "tower 0.5.2",
  "tower-layer",
  "tower-service",
 ]
@@ -1310,7 +1310,7 @@ dependencies = [
 [[package]]
 name = "cosmos-sdk-proto"
 version = "0.23.0-pre"
-source = "git+https://github.com/sideprotocol/cosmos-rust?branch=main#0fc7272985badbb826cbdb85414264b3bd406c08"
+source = "git+https://github.com/sideprotocol/cosmos-rust?branch=side-lending#7243ef5cf44190df028bac4a9edc8174b51b574a"
 dependencies = [
  "prost",
  "prost-types",
@@ -1321,7 +1321,7 @@ dependencies = [
 [[package]]
 name = "cosmrs"
 version = "0.18.0-pre"
-source = "git+https://github.com/sideprotocol/cosmos-rust?branch=main#0fc7272985badbb826cbdb85414264b3bd406c08"
+source = "git+https://github.com/sideprotocol/cosmos-rust?branch=side-lending#7243ef5cf44190df028bac4a9edc8174b51b574a"
 dependencies = [
  "bip32",
  "cosmos-sdk-proto",
@@ -2248,7 +2248,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f2f12607f92c69b12ed746fabf9ca4f5c482cba46679c1a75b874ed7c26adb"
 dependencies = [
  "futures-io",
- "rustls 0.23.19",
+ "rustls 0.23.20",
  "rustls-pki-types",
 ]
 
@@ -2772,7 +2772,7 @@ dependencies = [
  "http 1.2.0",
  "hyper 1.5.1",
  "hyper-util",
- "rustls 0.23.19",
+ "rustls 0.23.20",
  "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.26.1",
@@ -3575,7 +3575,7 @@ dependencies = [
  "quinn",
  "rand 0.8.5",
  "ring 0.17.8",
- "rustls 0.23.19",
+ "rustls 0.23.20",
  "socket2 0.5.8",
  "thiserror 1.0.69",
  "tokio",
@@ -3669,7 +3669,7 @@ dependencies = [
  "libp2p-identity",
  "rcgen 0.11.3",
  "ring 0.17.8",
- "rustls 0.23.19",
+ "rustls 0.23.20",
  "rustls-webpki 0.101.7",
  "thiserror 1.0.69",
  "x509-parser 0.16.0",
@@ -4429,7 +4429,7 @@ checksum = "1e401f977ab385c9e4e3ab30627d6f26d00e2c73eef317493c4ec6d468726cf8"
 dependencies = [
  "cfg-if",
  "libc",
- "redox_syscall 0.5.7",
+ "redox_syscall 0.5.8",
  "smallvec 1.13.2",
  "windows-targets 0.52.6",
 ]
@@ -4774,7 +4774,7 @@ dependencies = [
  "quinn-proto",
  "quinn-udp",
  "rustc-hash",
- "rustls 0.23.19",
+ "rustls 0.23.20",
  "socket2 0.5.8",
  "thiserror 2.0.6",
  "tokio",
@@ -4792,7 +4792,7 @@ dependencies = [
  "rand 0.8.5",
  "ring 0.17.8",
  "rustc-hash",
- "rustls 0.23.19",
+ "rustls 0.23.20",
  "rustls-pki-types",
  "slab",
  "thiserror 2.0.6",
@@ -4974,9 +4974,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.5.7"
+version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b6dfecf2c74bce2466cabf93f6664d6998a69eb21e39f4207930065b27b771f"
+checksum = "03a862b389f93e68874fbf580b9de08dd02facb9a788ebadaf4a3fd33cf58834"
 dependencies = [
  "bitflags 2.6.0",
 ]
@@ -5346,9 +5346,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.19"
+version = "0.23.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "934b404430bb06b3fae2cba809eb45a1ab1aecd64491213d7c3301b88393f8d1"
+checksum = "5065c3f250cbd332cd894be57c40fa52387247659b14a2d6041d121547903b1b"
 dependencies = [
  "once_cell",
  "ring 0.17.8",
@@ -5597,9 +5597,9 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "1.0.23"
+version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61697e0a1c7e512e84a621326239844a24d8207b4669b41bc18b32ea5cbf988b"
+checksum = "3cb6eb87a131f756572d7fb904f6e7b68633f09cca868c5df1c4b8d1a694bbba"
 
 [[package]]
 name = "serde"
@@ -6513,7 +6513,7 @@ version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f6d0975eaace0cf0fcadee4e4aaa5da15b5c079146f2cffb67c113be122bf37"
 dependencies = [
- "rustls 0.23.19",
+ "rustls 0.23.20",
  "tokio",
 ]
 
@@ -6628,14 +6628,14 @@ dependencies = [
 
 [[package]]
 name = "tower"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2873938d487c3cfb9aed7546dc9f2711d867c9f90c46b889989a2cb84eba6b4f"
+checksum = "d039ad9159c98b70ecfd540b2573b97f7f52c3e8d9f8ad57a24b916a536975f9"
 dependencies = [
  "futures-core",
  "futures-util",
  "pin-project-lite",
- "sync_wrapper 0.1.2",
+ "sync_wrapper 1.0.2",
  "tower-layer",
  "tower-service",
 ]

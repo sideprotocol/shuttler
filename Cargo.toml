@@ -48,8 +48,8 @@ chrono = "0.4"
 prost = "0.13.1"
 prost-types = "0.13.1"
 tendermint = {version="0.39.1", features=["rust-crypto"]}
-cosmrs = { git = "https://github.com/sideprotocol/cosmos-rust", branch = "main", features=["grpc"]}
-cosmos-sdk-proto  = { git = "https://github.com/sideprotocol/cosmos-rust", branch = "main", features=["grpc"] }
+cosmrs = { git = "https://github.com/sideprotocol/cosmos-rust", branch = "side-lending", features=["grpc"]}
+cosmos-sdk-proto  = { git = "https://github.com/sideprotocol/cosmos-rust", branch = "side-lending", features=["grpc"] }
 # Optional dependencies
 tonic = { version = "0.12.1", features = ["codegen", "prost"] }
 void = "1.0"
