@@ -102,9 +102,9 @@ pub fn generate_round1_package(ctx: &mut Context, signer: &Signer, task: &mut DK
 
         signer.save_dkg_round1_package(&task.id, &round1_packages);
 
-        received_round1_packages(ctx, task, round1_packages, signer);
+        received_round1_packages(ctx, task, round1_packages.clone(), signer);
 
-        broadcast_dkg_packages(ctx, signer, &task.id);
+        broadcast_dkg_packages(ctx, &task.id, round1_packages, BTreeMap::new());
      } else {
         error!("error in DKG round 1: {:?}", task.id);
      }
@@ -152,9 +152,9 @@ pub fn generate_round2_packages(ctx: &mut Context, signer: &Signer, task: &mut D
 
             signer.save_dkg_round2_package(&task.id, &merged);
 
-            received_round2_packages(ctx, task, merged, &signer);
+            received_round2_packages(ctx, task, merged.clone(), &signer);
 
-            broadcast_dkg_packages(ctx, signer, &task.id);
+            broadcast_dkg_packages(ctx, &task.id, BTreeMap::new(), merged);
         }
         Err(e) => {
             return Err(DKGError(e.to_string()));
@@ -176,21 +176,21 @@ pub fn sync_dkg_task_packages(ctx: &mut Context, signer: &Signer) {
     }
 }
 
-pub fn prepare_response_for_task(ctx: &Context, signer: &Signer, task_id: &str) -> DKGResponse {
-    let round1_packages = match signer.get_dkg_round1_package(&task_id) {
-        Some(packets) => packets,
-        _ => {
-            debug!("No DKG Round 1 packets found: {task_id}");
-            BTreeMap::new()
-        },
-    };
-    let round2_packages = match signer.get_dkg_round2_package(&task_id) {
-        Some(packets) => packets,
-        _ => {
-            debug!("No DKG Round 2 packets found: {task_id}");
-            BTreeMap::new()
-        },
-    };
+pub fn prepare_response_for_task(ctx: &Context, task_id: &str, round1_packages: BTreeMap<Identifier, Package>, round2_packages: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>) -> DKGResponse {
+    // let round1_packages = match signer.get_dkg_round1_package(&task_id) {
+    //     Some(packets) => packets,
+    //     _ => {
+    //         debug!("No DKG Round 1 packets found: {task_id}");
+    //         BTreeMap::new()
+    //     },
+    // };
+    // let round2_packages = match signer.get_dkg_round2_package(&task_id) {
+    //     Some(packets) => packets,
+    //     _ => {
+    //         debug!("No DKG Round 2 packets found: {task_id}");
+    //         BTreeMap::new()
+    //     },
+    // };
 
     
     let payload = DKGPayload {
@@ -269,8 +269,16 @@ pub fn received_round2_packages(ctx: &mut Context, task: &mut DKGTask, packets: 
     }
 
     // store round 1 packets
-    let mut local = signer.get_dkg_round2_package(&task.id).map_or(BTreeMap::new(), |v| v); 
-    local.extend(packets);
+    let mut local = signer.get_dkg_round2_package(&task.id).unwrap_or(BTreeMap::new()); 
+    packets.iter().for_each(|(k, v)| {
+        match local.get_mut(k) {
+            Some(lv) => lv.extend(v.clone()),
+            None => {
+                local.insert(k.clone(), v.clone());
+            },
+        }
+    });
+
     signer.save_dkg_round2_package(&task.id, &local);
 
      debug!("Received round2 packets: {} {:?}", task.id, local.keys());

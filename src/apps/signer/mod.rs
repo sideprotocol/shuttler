@@ -448,8 +448,8 @@ impl super::App for Signer {
     }
 }
 
-pub fn broadcast_dkg_packages(ctx: &mut Context, signer: &Signer, task_id: &str) {
-    let response = prepare_response_for_task(ctx, signer, task_id);
+pub fn broadcast_dkg_packages(ctx: &mut Context, task_id: &str, round1_packages: BTreeMap<Identifier, Package>, round2_packages: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>) {
+    let response = prepare_response_for_task(ctx, task_id, round1_packages, round2_packages );
     // debug!("Broadcasting: {:?}", response.);
     let message = serde_json::to_vec(&response).expect("Failed to serialize DKG package");
     publish_message(ctx, SubscribeTopic::DKG, message);
