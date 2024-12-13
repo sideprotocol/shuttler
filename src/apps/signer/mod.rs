@@ -11,16 +11,12 @@ use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 use frost_adaptor_signature::round1::{SigningCommitments, SigningNonces};
 use frost_adaptor_signature::round2::SignatureShare;
 
-use libp2p::identity::Keypair;
-
-use libp2p::PeerId;
 use sign::{received_sign_message, SignMesage, SignTask};
 use tick::tasks_executor;
 use tokio::time::Instant;
 
 use crate::config::{self, Config, TASK_INTERVAL};
 use crate::helper::bitcoin::get_group_address_by_tweak;
-use crate::helper::encoding::{identifier_to_peer_id, pubkey_to_identifier};
 use crate::helper::gossip::{publish_message, SubscribeTopic};
 use crate::helper::mem_store;
 
@@ -28,8 +24,6 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 use tracing::{error, info};
 use usize as Index;
-
-use ed25519_compact::SecretKey;
 
 use lazy_static::lazy_static;
 
@@ -55,13 +49,6 @@ pub enum Round {
 pub struct Signer {
     enabled: bool,
     config: Config,
-    /// Identity key of the signer
-    /// This is the private key of sidechain validator that is used to sign messages
-    pub identity_key: SecretKey,
-    /// Identifier of the signer
-    /// Identifier is derived from the public key of the identity key
-    /// used to identify the signer in the threshold signature scheme
-    identifier: Identifier,
     pub bitcoin_client: Client,
     db_sign_variables: sled::Db,
     db_sign: sled::Db,
@@ -73,21 +60,6 @@ pub struct Signer {
 
 impl Signer {
     pub fn new(conf: Config, enabled: bool) -> Self {
-        // load private key from priv_validator_key_path
-        let priv_validator_key = conf.load_validator_key();
-
-        let mut b = priv_validator_key
-            .priv_key
-            .ed25519_signing_key()
-            .unwrap()
-            .as_bytes()
-            .to_vec();
-        b.extend(priv_validator_key.pub_key.to_bytes());
-        let local_key = SecretKey::new(b.as_slice().try_into().unwrap());
-
-        let identifier = pubkey_to_identifier(local_key.public_key().as_slice());
-        info!("Threshold Signature Identifier: {:?}", identifier);
-
         let bitcoin_client = Client::new(
             &conf.bitcoin.rpc,
             Auth::UserPass(conf.bitcoin.user.clone(), conf.bitcoin.password.clone()),
@@ -110,8 +82,6 @@ impl Signer {
         Self {
             enabled,
             ticker,
-            identity_key: local_key,
-            identifier,
             bitcoin_client,
             config: conf,
             db_dkg,
@@ -124,19 +94,6 @@ impl Signer {
 
     pub fn config(&self) -> &Config {
         &self.config
-    }
-
-    pub fn identifier(&self) -> &Identifier {
-        &self.identifier
-    }
-
-    pub fn peer_id(&self) -> PeerId {
-        identifier_to_peer_id(&self.identifier)
-    }
-
-    pub fn p2p_keypair(&self) -> Keypair {
-        let raw = &self.identity_key.to_vec()[0..32].to_vec();
-        Keypair::ed25519_from_bytes(raw.clone()).unwrap()
     }
 
     pub fn validator_address(&self) -> String {
@@ -224,7 +181,7 @@ impl Signer {
         addrs
     }
 
-    pub fn get_complete_dkg_signature(&self, id: u64, vaults: &[String]) -> String {
+    pub fn get_complete_dkg_signature(&self, ctx: &Context, id: u64, vaults: &[String]) -> String {
         let mut sig_msg = id.to_be_bytes().to_vec();
 
         for v in vaults {
@@ -233,7 +190,7 @@ impl Signer {
 
         sig_msg = hex::decode(sha256::digest(sig_msg)).unwrap();
 
-        hex::encode(self.identity_key.sign(sig_msg, None))
+        hex::encode(ctx.node_key.sign(sig_msg, None))
     }
 
     fn save_dkg_package<T: Serialize>(&self, key: String, package: &BTreeMap<Identifier, T>) {
@@ -468,7 +425,7 @@ impl super::App for Signer {
         // debug!("Received {:?}", message);
         if message.topic == SubscribeTopic::DKG.topic().hash() {
             if let Ok(response) = serde_json::from_slice::<DKGResponse>(&message.data) {
-                received_dkg_response(response, self);                   
+                received_dkg_response(ctx, response, self);                   
             }
         } else if message.topic == SubscribeTopic::SIGNING.topic().hash() {
             // debug!("Gossip Received {:?}", msg);
@@ -487,20 +444,20 @@ impl super::App for Signer {
     }
 
     async fn on_tick(&self, ctx: &mut Context) {
-        tasks_executor(ctx, self).await
+        tasks_executor(ctx, &self).await
     }
 }
 
 pub fn broadcast_dkg_packages(ctx: &mut Context, signer: &Signer, task_id: &str) {
-    let response = prepare_response_for_task(signer, task_id);
+    let response = prepare_response_for_task(ctx, signer, task_id);
     // debug!("Broadcasting: {:?}", response.);
     let message = serde_json::to_vec(&response).expect("Failed to serialize DKG package");
     publish_message(ctx, SubscribeTopic::DKG, message);
 }
 
-pub fn broadcast_signing_packages(ctx: &mut Context, signer: &Signer, message: &mut SignMesage) {
+pub fn broadcast_signing_packages(ctx: &mut Context, message: &mut SignMesage) {
     let raw = serde_json::to_vec(&message.package).unwrap();
-    let signaure = signer.identity_key.sign(raw, None).to_vec();
+    let signaure = ctx.node_key.sign(raw, None).to_vec();
     message.signature = signaure;
 
     // tracing::debug!("Broadcasting: {:?}", message);

@@ -1,6 +1,7 @@
 use bitcoin::{
     consensus::encode::serialize, key::Secp256k1, opcodes, secp256k1::schnorr::Signature, Address, Network, PublicKey, ScriptBuf, TapNodeHash, TapSighashType, Transaction, Txid, XOnlyPublicKey
 };
+use bitcoin_hashes::Hash;
 use bitcoin_v30::{consensus::encode::deserialize, Transaction as TransactionV30};
 use frost_adaptor_signature::VerifyingKey;
 use ordinals::SpacedRune;
@@ -22,19 +23,12 @@ pub fn taproot_signature_from_frost(frost_signature: frost_adaptor_signature::Si
     }
 }
 
-// pub fn tweak_to_u8(tweak: &Option<TapNodeHash>) -> Option<&[u8]> {
-
-//     let tweek_bytes  = match tweak {
-//         Some(t) => ,
-//         None => vec![],
-//     };
-
-//     if tweek_bytes.len() ==0 { 
-//         None 
-//     } else { 
-//         Some(&tweek_bytes[..])
-//     }
-// }
+pub fn convert_tweak(tweak: &Option<TapNodeHash>) -> Option<&[u8]> {
+    match tweak {
+        Some(tnh) => Some(tnh.as_byte_array()),
+        None => None,
+    }
+}
 
 pub fn get_group_address(verify_key: &VerifyingKey, network: Network) -> Address {
     // let verifying_key_b = json_data.pubkey_package.verifying_key();

@@ -16,14 +16,14 @@ pub async fn tasks_executor(ctx: &mut Context, signer: &Signer ) {
         return
     }
 
-    // 1. dkg tasks
+    // // 1. dkg tasks
     sync_dkg_task_packages(ctx, signer);
-    submit_dkg_address(signer).await;
-    fetch_dkg_requests(signer).await;
+    submit_dkg_address(ctx, signer).await;
+    fetch_dkg_requests(ctx, signer).await;
 
-    // 2 signing tasks
+    // // 2 signing tasks
     dispatch_executions(ctx, signer).await;
-    // fetch request for next execution
+    // // fetch request for next execution
     fetch_signing_requests(signer).await;
     // broadcast_sign_packages(swarm);
 
@@ -59,7 +59,7 @@ pub async fn fetch_signing_requests(
     };
 }
 
-async fn fetch_dkg_requests(signer: &Signer) {
+async fn fetch_dkg_requests(ctx: &mut Context, signer: &Signer) {
     let host = signer.config().side_chain.grpc.clone();
     let mut client = match BtcQueryClient::connect(host.to_owned()).await {
         Ok(client) => client,
@@ -92,11 +92,11 @@ async fn fetch_dkg_requests(signer: &Signer) {
                 .is_some()
             {
                 // create a dkg task
-                let task = DKGTask::from_request(&request);
+                let mut task = DKGTask::from_request(&request);
                 if signer.has_task_preceeded(&task.id) {
                     continue;
                 };
-                generate_round1_package(signer, &task);
+                generate_round1_package(ctx, signer, &mut task);
                 info!("Start DKG {:?}, {:?}", &task.id, task.participants);
                 signer.save_dkg_task(&task);
             }
@@ -104,7 +104,7 @@ async fn fetch_dkg_requests(signer: &Signer) {
     };
 }
 
-async fn submit_dkg_address(signer: &Signer) {
+async fn submit_dkg_address(ctx: &mut Context, signer: &Signer) {
     for task in signer.list_dkg_tasks().iter_mut() {
         if task.round != Round::Closed {
             continue;
@@ -121,7 +121,7 @@ async fn submit_dkg_address(signer: &Signer) {
             sender: signer.config().relayer_bitcoin_address(),
             vaults: task.dkg_vaults.clone(),
             consensus_address: signer.validator_address(),
-            signature: signer.get_complete_dkg_signature(task_id, &task.dkg_vaults),
+            signature: signer.get_complete_dkg_signature(ctx, task_id, &task.dkg_vaults),
         };
 
         let any = Any::from_msg(&cosm_msg).unwrap();

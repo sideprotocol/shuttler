@@ -10,6 +10,7 @@ pub mod client_bitcoin;
 pub mod client_side;
 pub mod client_ordinals;
 pub mod client_fee_provider;
+pub mod store;
 
 pub fn now() -> u64 {
     chrono::Utc::now().timestamp() as u64

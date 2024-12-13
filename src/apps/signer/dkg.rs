@@ -17,9 +17,17 @@ use crate::helper::{mem_store, now};
 use crate::apps::signer::Signer;
 use crate::helper::cipher::{decrypt, encrypt};
 
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DKGType {
+    GroupKey,
+    Nonce,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DKGTask {
     pub id: String,
+    pub use_case: DKGType,
     pub participants: Vec<String>,
     pub threshold: u16,
     pub round: Round,
@@ -32,6 +40,7 @@ pub struct DKGTask {
 impl DKGTask {
     pub fn from_request(request: &DkgRequest) -> Self {
         Self {
+            use_case: DKGType::GroupKey,
             id: format!("dkg-{}", request.id),
             participants: request.participants.iter().map(|p| {
                 p.consensus_address.clone()
@@ -71,7 +80,7 @@ pub struct DKGPayload {
     pub round2_packages: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>,
 }
 
-pub fn generate_round1_package(signer: &Signer, task: &DKGTask) {
+pub fn generate_round1_package(ctx: &mut Context, signer: &Signer, task: &mut DKGTask) {
 
     if signer.has_task_preceeded(&task.id) {
         debug!("DKG has already preceeded: {}", task.id);
@@ -80,7 +89,7 @@ pub fn generate_round1_package(signer: &Signer, task: &DKGTask) {
 
     let mut rng = thread_rng();
     if let Ok((secret_packet, round1_package)) = frost::keys::dkg::part1(
-        signer.identifier().clone(),
+        ctx.identifier.clone(),
         task.participants.len() as u16,
         task.threshold as u16,
         &mut rng,
@@ -89,15 +98,19 @@ pub fn generate_round1_package(signer: &Signer, task: &DKGTask) {
         mem_store::set_dkg_round1_secret_packet(task.id.to_string().as_str(), secret_packet);
 
         let mut round1_packages = BTreeMap::new();
-        round1_packages.insert(signer.identifier().clone(), round1_package);
+        round1_packages.insert(ctx.identifier.clone(), round1_package);
 
         signer.save_dkg_round1_package(&task.id, &round1_packages);
+
+        received_round1_packages(ctx, task, round1_packages, signer);
+
+        broadcast_dkg_packages(ctx, signer, &task.id);
      } else {
         error!("error in DKG round 1: {:?}", task.id);
      }
 }
 
-pub fn generate_round2_packages(signer: &Signer, task: &mut DKGTask, round1_packages: BTreeMap<Identifier, Package>) -> Result<(), DKGError> {
+pub fn generate_round2_packages(ctx: &mut Context, signer: &Signer, task: &mut DKGTask, round1_packages: BTreeMap<Identifier, Package>) -> Result<(), DKGError> {
 
     let task_id = task.id.clone();
 
@@ -113,7 +126,7 @@ pub fn generate_round2_packages(signer: &Signer, task: &mut DKGTask, round1_pack
     }
 
     let mut cloned = round1_packages.clone();
-    cloned.remove(signer.identifier());
+    cloned.remove(&ctx.identifier);
 
     match frost::keys::dkg::part2(secret_package, &cloned) {
         Ok((round2_secret_package, round2_packages)) => {
@@ -125,7 +138,7 @@ pub fn generate_round2_packages(signer: &Signer, task: &mut DKGTask, round1_pack
                 let bz = receiver_identifier.serialize();
                 let target = x25519::PublicKey::from_ed25519(&ed25519_compact::PublicKey::from_slice(bz.as_slice()).unwrap()).unwrap();
     
-                let share_key = target.dh(&x25519::SecretKey::from_ed25519(&signer.identity_key).unwrap()).unwrap();
+                let share_key = target.dh(&x25519::SecretKey::from_ed25519(&ctx.node_key).unwrap()).unwrap();
     
                 let byte = round2_package.serialize().unwrap();
                 let packet = encrypt(byte.as_slice(), share_key.as_slice().try_into().unwrap());
@@ -135,9 +148,13 @@ pub fn generate_round2_packages(signer: &Signer, task: &mut DKGTask, round1_pack
 
             // convert it to <sender, <receiver, Vec<u8>>
             let mut merged = BTreeMap::new();
-            merged.insert(signer.identifier().clone(), output_packages);
+            merged.insert(ctx.identifier.clone(), output_packages);
 
             signer.save_dkg_round2_package(&task.id, &merged);
+
+            received_round2_packages(ctx, task, merged, &signer);
+
+            broadcast_dkg_packages(ctx, signer, &task.id);
         }
         Err(e) => {
             return Err(DKGError(e.to_string()));
@@ -151,7 +168,7 @@ pub fn sync_dkg_task_packages(ctx: &mut Context, signer: &Signer) {
     for t in tasks.iter() {
         if t.timestamp as u64 >= now() {
             // publish its packages to other peers
-            broadcast_dkg_packages(ctx, signer, &t.id);
+            // broadcast_dkg_packages(ctx, signer, &t.id);
         } else {
             // remove the task
             signer.remove_dkg_task(&t.id);
@@ -159,7 +176,7 @@ pub fn sync_dkg_task_packages(ctx: &mut Context, signer: &Signer) {
     }
 }
 
-pub fn prepare_response_for_task(signer: &Signer, task_id: &str) -> DKGResponse {
+pub fn prepare_response_for_task(ctx: &Context, signer: &Signer, task_id: &str) -> DKGResponse {
     let round1_packages = match signer.get_dkg_round1_package(&task_id) {
         Some(packets) => packets,
         _ => {
@@ -183,12 +200,12 @@ pub fn prepare_response_for_task(signer: &Signer, task_id: &str) -> DKGResponse 
     };
     
     let raw = serde_json::to_vec(&payload).unwrap();
-    let signature = signer.identity_key.sign(raw, None).to_vec();
+    let signature = ctx.node_key.sign(raw, None).to_vec();
     
-    DKGResponse{ payload, nonce: now(), sender: signer.identifier().clone(), signature }
+    DKGResponse{ payload, nonce: now(), sender: ctx.identifier.clone(), signature }
 }
 
-pub fn received_dkg_response(response: DKGResponse, signer: &Signer) {
+pub fn received_dkg_response(ctx: &mut Context, response: DKGResponse, signer: &Signer) {
     let task_id = response.payload.task_id.clone();
     let mut task = match signer.get_dkg_task(&task_id) {
         Some(task) => task,
@@ -204,13 +221,13 @@ pub fn received_dkg_response(response: DKGResponse, signer: &Signer) {
     }
 
     if task.round == Round::Round1 {
-        received_round1_packages(&mut task, response.payload.round1_packages, signer)
+        received_round1_packages(ctx, &mut task, response.payload.round1_packages, signer)
     } else if task.round == Round::Round2 {
-        received_round2_packages(&mut task, response.payload.round2_packages, signer)
+        received_round2_packages(ctx, &mut task, response.payload.round2_packages, signer)
     }
 }
 
-pub fn received_round1_packages(task: &mut DKGTask, packets: BTreeMap<Identifier, keys::dkg::round1::Package>, signer: &Signer) {
+pub fn received_round1_packages(ctx: &mut Context, task: &mut DKGTask, packets: BTreeMap<Identifier, keys::dkg::round1::Package>, signer: &Signer) {
 
     // store round 1 packets
     let mut local = signer.get_dkg_round1_package(&task.id).map_or(BTreeMap::new(), |v|v);
@@ -229,7 +246,7 @@ pub fn received_round1_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
     if task.participants.len() == local.len() {
         
         info!("Received round1 packets from all participants: {}", task.id);
-        match generate_round2_packages(&signer, task, local) {
+        match generate_round2_packages(ctx, &signer, task, local) {
             Ok(_) => {
                 task.round = Round::Round2;
                 signer.save_dkg_task(&task);
@@ -244,7 +261,7 @@ pub fn received_round1_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
     }
 }
 
-pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>, signer: &Signer) {
+pub fn received_round2_packages(ctx: &mut Context, task: &mut DKGTask, packets: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>, signer: &Signer) {
 
     if task.round == Round::Closed {
         debug!("DKG is already closed: {}", task.id);
@@ -264,12 +281,12 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
         let mut round2_packages = BTreeMap::new();
         local.iter().for_each(|(sender, packages)| {
             packages.iter().for_each(|(receiver, packet)| {
-                if receiver == signer.identifier() {
+                if receiver == &ctx.identifier {
                     let packet = packet.clone();
                     
                     let bz = sender.serialize();
                     let source = x25519::PublicKey::from_ed25519(&ed25519_compact::PublicKey::from_slice(bz.as_slice()).unwrap()).unwrap();
-                    let share_key = source.dh(&x25519::SecretKey::from_ed25519(&signer.identity_key).unwrap()).unwrap();
+                    let share_key = source.dh(&x25519::SecretKey::from_ed25519(&ctx.node_key).unwrap()).unwrap();
 
                     let packet = decrypt(packet.as_slice(), share_key.as_slice().try_into().unwrap());
                     let received_round2_package = frost::keys::dkg::round2::Package::deserialize(&packet).unwrap();
@@ -294,7 +311,7 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
         // let mut round1_packages_cloned = round1_packages.clone();
         // remove self
         // frost does not need its own package to compute the threshold key
-        round1_packages.remove(signer.identifier()); 
+        round1_packages.remove(&ctx.identifier); 
 
         match frost::keys::dkg::part3(
             &round2_secret_package,

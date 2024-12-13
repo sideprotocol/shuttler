@@ -17,7 +17,7 @@ use frost_adaptor_signature::round1::{SigningCommitments, SigningNonces};
 use crate::{
     apps::{signer::Signer, Context}, config::TASK_INTERVAL,
     helper::{
-        client_side::{get_signing_request_by_txid, send_cosmos_transaction}, encoding::{from_base64, to_base64}, mem_store, now
+        bitcoin::convert_tweak, client_side::{get_signing_request_by_txid, send_cosmos_transaction}, encoding::{from_base64, to_base64}, mem_store, now
     },
 };
 
@@ -187,7 +187,7 @@ pub async fn dispatch_executions(ctx: &mut Context, signer: &Signer) {
 
                 let participants = vk.pub_key.verifying_shares();
 
-                let sender_index = participants.iter().position(|(id, _)| {id == signer.identifier()}).unwrap_or(0);
+                let sender_index = participants.iter().position(|(id, _)| {id == &ctx.identifier}).unwrap_or(0);
                 
                 let current = now();
                 let d = TASK_INTERVAL.as_secs();
@@ -248,7 +248,7 @@ fn generate_commitments(ctx: &mut Context, signer: &Signer, task: &SignTask) {
         if let Some((nonce, commitment)) = generate_nonce_and_commitment_by_address(&input.address, signer) {
             nonces.insert(*index, nonce);
             let mut input_commit = BTreeMap::new();
-            input_commit.insert(signer.identifier().clone(), commitment);
+            input_commit.insert(ctx.identifier.clone(), commitment);
             commitments.insert(*index, input_commit.clone());
         }
     });
@@ -261,10 +261,10 @@ fn generate_commitments(ctx: &mut Context, signer: &Signer, task: &SignTask) {
         task_id: task.id.clone(),
         package: SignPackage::Round1(commitments),
         nonce: now(),
-        sender: signer.identifier().clone(),
+        sender: ctx.identifier.clone(),
         signature: vec![], 
     };
-    broadcast_signing_packages(ctx, signer, &mut msg);
+    broadcast_signing_packages(ctx, &mut msg);
 
     received_sign_message(ctx, signer, msg);
 }
@@ -415,15 +415,10 @@ pub fn try_generate_signature_shares(ctx: &mut Context, signer: &Signer, task_id
                 },
             };
 
-            let tweek  = match keypair.tweak {
-                Some(tweak) => tweak.to_byte_array().to_vec(),
-                None => vec![],
-            };
-
-            let merkle_root = if tweek.len() ==0 { None } else { Some(&tweek[..])};
+            let tweek  = convert_tweak(&keypair.tweak);
 
             let signature_shares = match round2::sign_with_tweak(
-                &signing_package, signer_nonces, &keypair.priv_key, merkle_root
+                &signing_package, signer_nonces, &keypair.priv_key, tweek
             ) {
                 Ok(shares) => shares,
                 Err(e) => {
@@ -433,7 +428,7 @@ pub fn try_generate_signature_shares(ctx: &mut Context, signer: &Signer, task_id
             };
             
             let mut my_share = BTreeMap::new();
-            my_share.insert(signer.identifier().clone(), signature_shares);
+            my_share.insert(ctx.identifier.clone(), signature_shares);
             
             // broadcast my share
             broadcast_packages.insert(index.clone(), my_share.clone());
@@ -449,11 +444,11 @@ pub fn try_generate_signature_shares(ctx: &mut Context, signer: &Signer, task_id
         task_id: task.id.clone(),
         package: SignPackage::Round2(broadcast_packages),
         nonce: now(),
-        sender: signer.identifier().clone(),
+        sender: ctx.identifier.clone(),
         signature: vec![],
     };
 
-    broadcast_signing_packages(ctx, signer, &mut msg);
+    broadcast_signing_packages(ctx, &mut msg);
 
     received_sign_message(ctx, signer, msg);
 
@@ -520,16 +515,11 @@ pub fn try_aggregate_signature_shares(signer: &Signer, task_id: &str) -> Option<
             &input.sig_hash
         );
 
-        let tweek  = match keypair.tweak {
-            Some(tweak) => tweak.to_byte_array().to_vec(),
-            None => vec![],
-        };
+        let tweek  = convert_tweak(&keypair.tweak);
 
-        let merkle_root = if tweek.len() == 0 { None } else { Some(&tweek[..])};
-
-        match frost_adaptor_signature::aggregate_with_tweak(&signing_package, &signature_shares, &keypair.pub_key, merkle_root) { 
+        match frost_adaptor_signature::aggregate_with_tweak(&signing_package, &signature_shares, &keypair.pub_key, tweek) { 
             Ok(frost_signature) => {
-                match keypair.pub_key.tweak(merkle_root).verifying_key().verify(signing_package.message(), &frost_signature) {
+                match keypair.pub_key.tweak(tweek).verifying_key().verify(signing_package.message(), &frost_signature) {
                     Ok(_) => {
                         let sig_bytes = frost_signature.serialize().unwrap();
                         let signature = bitcoin::secp256k1::schnorr::Signature::from_slice(&sig_bytes).unwrap();
@@ -633,10 +623,8 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
 
 fn generate_nonce_and_commitment_by_address(address: &str, signer: &Signer) -> Option<(SigningNonces, SigningCommitments)> {
     if let Some(key) = signer.get_keypair_from_db(address) {
-        if key.pub_key.verifying_shares().contains_key(signer.identifier()) {
-            let mut rng = thread_rng();
-            return Some(round1::commit(key.priv_key.signing_share(), &mut rng));
-        }
+        let mut rng = thread_rng();
+        return Some(round1::commit(key.priv_key.signing_share(), &mut rng));
     };
     None
 }

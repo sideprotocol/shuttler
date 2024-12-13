@@ -50,12 +50,12 @@ pub async fn sending_heart_beat(ctx: &mut Context, signer: &Signer) {
         let last_seen = now() + mem_store::ALIVE_WINDOW;
         let task_ids = signer.list_signing_tasks().iter().map(|a| a.id.clone()).collect::<Vec<_>>();
         let payload = HeartBeatPayload {
-            identifier: signer.identifier().clone(),
+            identifier: ctx.identifier.clone(),
             last_seen,
             task_ids,
         };
         let bytes = serde_json::to_vec(&payload).unwrap();
-        let signature = signer.identity_key.sign(bytes, None).to_vec();
+        let signature = ctx.node_key.sign(bytes, None).to_vec();
         let alive = HeartBeatMessage { payload, signature };
         let message = serde_json::to_vec(&alive).unwrap();
         publish_message(ctx, SubscribeTopic::HEARTBEAT, message);

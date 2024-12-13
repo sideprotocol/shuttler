@@ -5,7 +5,7 @@ use std::{
 use ed25519_compact::{PublicKey, SecretKey, Signature};
 use futures::StreamExt;
 use libp2p::{
-    gossipsub, identify, kad::{self, store::MemoryStore}, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, Multiaddr, PeerId, Swarm
+    gossipsub, identify, identity::Keypair, kad::{self, store::MemoryStore}, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, Multiaddr, PeerId, Swarm
 };
 use tokio::select;
 use tracing::{debug, info, warn};
@@ -73,16 +73,14 @@ impl Shuttler {
             .as_bytes()
             .to_vec();
         b.extend(priv_validator_key.pub_key.to_bytes());
-        let local_key = SecretKey::new(b.as_slice().try_into().unwrap());
-
-        let identifier = pubkey_to_identifier(local_key.public_key().as_slice());
+        let node_key = SecretKey::new(b.as_slice().try_into().unwrap());
+        let identifier = pubkey_to_identifier(node_key.public_key().as_slice());
         info!("Threshold Signature Identifier: {:?}", identifier);
 
-        let raw = local_key.to_vec()[0..32].to_vec();
-        let p2p_key = libp2p::identity::Keypair::ed25519_from_bytes(raw.clone()).unwrap();
+        let raw = node_key.to_vec()[0..32].to_vec();
 
         let mut swarm: libp2p::Swarm<ShuttlerBehaviour> =
-            libp2p::SwarmBuilder::with_existing_identity(p2p_key)
+            libp2p::SwarmBuilder::with_existing_identity(Keypair::ed25519_from_bytes(raw).unwrap())
                 .with_tokio()
                 .with_tcp(
                     tcp::Config::default(),
@@ -163,7 +161,7 @@ impl Shuttler {
         dail_bootstrap_nodes(&mut swarm, &self.conf);
         subscribe_gossip_topics(&mut swarm);
 
-        let mut context = Context{swarm};
+        let mut context = Context{swarm, identifier, node_key};
 
         loop {
             select! {
