@@ -1,6 +1,7 @@
 use std::{fs::{self, File}, path::PathBuf, thread, time::Duration};
 
-use cosmos_sdk_proto::{cosmos::base::tendermint::v1beta1::Validator, side::btcbridge::query_server::QueryServer};
+use side_proto::side::btcbridge::query_server::QueryServer;
+use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::Validator;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_server::QueryServer as AuthServer;
 use cosmos_sdk_proto::cosmos::tx::v1beta1::service_server::ServiceServer as TxServer;
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_server::ServiceServer as BlockServer;

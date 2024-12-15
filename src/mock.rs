@@ -5,15 +5,13 @@ use std::str::FromStr;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountResponse};
 use cosmos_sdk_proto::cosmos::base::abci::v1beta1::TxResponse;
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::{GetLatestValidatorSetResponse, Validator};
-use cosmos_sdk_proto::side::btcbridge::query_server::Query;
-use cosmos_sdk_proto::side::btcbridge::{DkgParticipant, DkgRequest, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsResponse, QuerySigningRequestsResponse, SigningRequest};
+use side_proto::side::btcbridge::{query_server::Query, DkgParticipant, DkgRequest, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsResponse, QuerySigningRequestsResponse, SigningRequest};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_server::Query as AuthService;
 use cosmos_sdk_proto::cosmos::tx::v1beta1::service_server::Service as TxService;
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_server::Service as BlockService;
+use cosmos_sdk_proto::tendermint::types::{Block, Header};
 
-use cosmos_sdk_proto::tendermint::v0_34::types::{Block, Header};
 use cosmrs::{Any, Tx};
-use prost_types::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use bitcoin::{
@@ -21,6 +19,7 @@ use bitcoin::{
     TxOut, Address, ScriptBuf, Transaction, Txid
 };
 use bitcoin_hashes::{sha256d, Hash};
+use side_proto::Timestamp;
 
 use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::to_base64;
@@ -275,118 +274,118 @@ async fn mock_latest_block() -> Result<tonic::Response<cosmos_sdk_proto::cosmos:
 impl Query for MockQuery {
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_params<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QueryParamsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QueryParamsResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_params<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QueryParamsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QueryParamsResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_chain_tip<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QueryChainTipRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QueryChainTipResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_chain_tip<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QueryChainTipRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QueryChainTipResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_block_header_by_height<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QueryBlockHeaderByHeightRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QueryBlockHeaderByHeightResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_block_header_by_height<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QueryBlockHeaderByHeightRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QueryBlockHeaderByHeightResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_block_header_by_hash<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QueryBlockHeaderByHashRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QueryBlockHeaderByHashResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_block_header_by_hash<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QueryBlockHeaderByHashRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QueryBlockHeaderByHashResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_fee_rate<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QueryFeeRateRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QueryFeeRateResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_fee_rate<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QueryFeeRateRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QueryFeeRateResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_withdrawal_network_fee<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QueryWithdrawalNetworkFeeRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QueryWithdrawalNetworkFeeResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_withdrawal_network_fee<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QueryWithdrawalNetworkFeeRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QueryWithdrawalNetworkFeeResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_withdraw_requests_by_address<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QueryWithdrawRequestsByAddressRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QueryWithdrawRequestsByAddressResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_withdraw_requests_by_address<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QueryWithdrawRequestsByAddressRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QueryWithdrawRequestsByAddressResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_withdraw_requests_by_tx_hash<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QueryWithdrawRequestsByTxHashRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QueryWithdrawRequestsByTxHashResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_withdraw_requests_by_tx_hash<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QueryWithdrawRequestsByTxHashRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QueryWithdrawRequestsByTxHashResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_pending_btc_withdraw_requests<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QueryPendingBtcWithdrawRequestsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QueryPendingBtcWithdrawRequestsResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_pending_btc_withdraw_requests<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QueryPendingBtcWithdrawRequestsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QueryPendingBtcWithdrawRequestsResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_signing_requests<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QuerySigningRequestsRequest> ,) ->  
-    ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QuerySigningRequestsResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_signing_requests<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QuerySigningRequestsRequest> ,) ->  
+    ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QuerySigningRequestsResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         let x = load_signing_requests(&self.home.as_str());
         Box::pin(x)
     }
 
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_signing_requests_by_address<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QuerySigningRequestsByAddressRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QuerySigningRequestsByAddressResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_signing_requests_by_address<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QuerySigningRequestsByAddressRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QuerySigningRequestsByAddressResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_signing_request_by_tx_hash<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QuerySigningRequestByTxHashRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QuerySigningRequestByTxHashResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_signing_request_by_tx_hash<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QuerySigningRequestByTxHashRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QuerySigningRequestByTxHashResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_utx_os<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QueryUtxOsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QueryUtxOsResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_utx_os<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QueryUtxOsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QueryUtxOsResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_utx_os_by_address<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QueryUtxOsByAddressRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QueryUtxOsByAddressResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_utx_os_by_address<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QueryUtxOsByAddressRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QueryUtxOsByAddressResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_utxo_count_and_balances_by_address<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QueryUtxoCountAndBalancesByAddressRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QueryUtxoCountAndBalancesByAddressResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_utxo_count_and_balances_by_address<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QueryUtxoCountAndBalancesByAddressRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QueryUtxoCountAndBalancesByAddressResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_dkg_request<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QueryDkgRequestRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QueryDkgRequestResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_dkg_request<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QueryDkgRequestRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QueryDkgRequestResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_dkg_requests<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QueryDkgRequestsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QueryDkgRequestsResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_dkg_requests<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QueryDkgRequestsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QueryDkgRequestsResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         let x = loading_dkg_request(&self.home.as_str());
         Box::pin(x)
     }
 
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_all_dkg_requests<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QueryAllDkgRequestsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QueryAllDkgRequestsResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_all_dkg_requests<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QueryAllDkgRequestsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QueryAllDkgRequestsResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn query_dkg_completion_requests<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QueryDkgCompletionRequestsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QueryDkgCompletionRequestsResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn query_dkg_completion_requests<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QueryDkgCompletionRequestsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QueryDkgCompletionRequestsResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 }
@@ -447,6 +446,12 @@ fn address_bytes_to_string<'life0,'async_trait>(&'life0 self,_request:tonic::Req
 fn address_string_to_bytes<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::cosmos::auth::v1beta1::AddressStringToBytesRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::cosmos::auth::v1beta1::AddressStringToBytesResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
+
+    #[must_use]
+#[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
+fn account_info<'life0,'async_trait>(&'life0 self,request:tonic::Request<cosmos_sdk_proto::cosmos::auth::v1beta1::QueryAccountInfoRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<cosmos_sdk_proto::cosmos::auth::v1beta1::QueryAccountInfoResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+        todo!()
+    }
 }
 
 impl TxService for MockTxService {
@@ -480,6 +485,30 @@ fn get_txs_event<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmo
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
 fn get_block_with_txs<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::cosmos::tx::v1beta1::GetBlockWithTxsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::cosmos::tx::v1beta1::GetBlockWithTxsResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+        todo!()
+    }
+
+    #[must_use]
+#[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
+fn tx_decode<'life0,'async_trait>(&'life0 self,request:tonic::Request<cosmos_sdk_proto::cosmos::tx::v1beta1::TxDecodeRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<cosmos_sdk_proto::cosmos::tx::v1beta1::TxDecodeResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+        todo!()
+    }
+
+    #[must_use]
+#[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
+fn tx_encode<'life0,'async_trait>(&'life0 self,request:tonic::Request<cosmos_sdk_proto::cosmos::tx::v1beta1::TxEncodeRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<cosmos_sdk_proto::cosmos::tx::v1beta1::TxEncodeResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+        todo!()
+    }
+
+    #[must_use]
+#[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
+fn tx_encode_amino<'life0,'async_trait>(&'life0 self,request:tonic::Request<cosmos_sdk_proto::cosmos::tx::v1beta1::TxEncodeAminoRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<cosmos_sdk_proto::cosmos::tx::v1beta1::TxEncodeAminoResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+        todo!()
+    }
+
+    #[must_use]
+#[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
+fn tx_decode_amino<'life0,'async_trait>(&'life0 self,request:tonic::Request<cosmos_sdk_proto::cosmos::tx::v1beta1::TxDecodeAminoRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<cosmos_sdk_proto::cosmos::tx::v1beta1::TxDecodeAminoResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 }

@@ -96,9 +96,9 @@ impl Signer {
         &self.config
     }
 
-    pub fn validator_address(&self) -> String {
-        self.config().load_validator_key().address.to_string()
-    }
+    // pub fn validator_address(&self) -> String {
+    //     self.config().load_validator_key().address.to_string()
+    // }
 
     pub async fn get_relayer_account(&self) -> BaseAccount {
         let cache = BASE_ACCOUNT.lock().unwrap().clone().map(|account| account);

@@ -161,7 +161,8 @@ impl Shuttler {
         dail_bootstrap_nodes(&mut swarm, &self.conf);
         subscribe_gossip_topics(&mut swarm);
 
-        let mut context = Context{swarm, identifier, node_key};
+        let mut context = Context{swarm, identifier, node_key, 
+            validator_hex_address: priv_validator_key.address.to_string()};
 
         loop {
             select! {

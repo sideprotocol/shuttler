@@ -22,4 +22,11 @@ pub struct Context {
     pub swarm: Swarm<ShuttlerBehaviour>,
     pub identifier: Identifier,
     pub node_key: SecretKey,
+    pub validator_hex_address: String,
 }
+
+// impl Context {
+//     pub fn validator_address(&self) -> String {
+//         self.config().load_validator_key().address.to_string()
+//     }
+// }

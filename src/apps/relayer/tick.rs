@@ -1,8 +1,5 @@
-use std::time::Duration;
-
 use bitcoin::{consensus::encode, Address, Block, BlockHash, OutPoint, Transaction, Txid};
 use bitcoincore_rpc::{Error, RpcApi};
-use prost_types::Any;
 use tonic::{Response, Status};
 use tracing::{debug, error, info};
 
@@ -13,10 +10,13 @@ use crate::{
     },
 };
 
-use cosmos_sdk_proto::{
-    cosmos::tx::v1beta1::BroadcastTxResponse,
-    side::btcbridge::{BlockHeader, MsgSubmitBlockHeaders, MsgSubmitDepositTransaction, MsgSubmitFeeRate, MsgSubmitWithdrawTransaction, QueryParamsRequest},
+use cosmos_sdk_proto::{Any, cosmos::tx::v1beta1::BroadcastTxResponse };
+use side_proto::side::btcbridge::{
+    BlockHeader, MsgSubmitBlockHeaders, MsgSubmitDepositTransaction, 
+    MsgSubmitFeeRate, MsgSubmitWithdrawTransaction, QueryParamsRequest,
+    query_client::QueryClient as BTCBridgeClient,
 };
+
 
 const DB_KEY_BITCOIN_TIP: &str = "bitcoin_tip";
 const DB_KEY_VAULTS: &str = "bitcoin_vaults";
@@ -520,7 +520,7 @@ async fn get_cached_vaults(relayer: &Relayer) -> Vec<String> {
     }
 
     let grpc = relayer.config().side_chain.grpc.clone();
-    let mut client = cosmos_sdk_proto::side::btcbridge::query_client::QueryClient::connect(grpc).await.unwrap();
+    let mut client = BTCBridgeClient::connect(grpc).await.unwrap();
     let x = client.query_params(QueryParamsRequest{}).await.unwrap().into_inner();
     match x.params {
         Some(params) => {

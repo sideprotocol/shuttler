@@ -3,11 +3,10 @@ use std::collections::BTreeMap;
 use bitcoin::{sighash::{self, SighashCache}, Address, Psbt, TapSighashType, Witness};
 use bitcoin_hashes::Hash;
 use bitcoincore_rpc::RpcApi;
-use cosmos_sdk_proto::side::btcbridge::{MsgSubmitSignatures, SigningRequest, SigningStatus};
+use side_proto::{Timestamp,side::btcbridge::{MsgSubmitSignatures, SigningRequest, SigningStatus}};
 use cosmrs::Any;
 
 use ed25519_compact::{PublicKey, Signature};
-use prost_types::Timestamp;
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};

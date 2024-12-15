@@ -1,22 +1,22 @@
 use bitcoin::{ consensus::Encodable, key::Secp256k1, secp256k1::Message, sign_message::BITCOIN_SIGNED_MSG_PREFIX, PrivateKey};
 use bitcoin_hashes::{sha256d, Hash, HashEngine};
 use cosmrs::{ crypto::secp256k1::SigningKey, tx::{self, Fee, ModeInfo, Raw, SignDoc, SignerInfo, SignerPublicKey}, Coin};
-use cosmos_sdk_proto::{cosmos::{
-    base::{query::v1beta1::PageRequest, tendermint::v1beta1::{GetLatestBlockRequest, GetLatestValidatorSetRequest, GetLatestValidatorSetResponse}}, tx::v1beta1::{service_client::ServiceClient as TxServiceClient, BroadcastMode, BroadcastTxRequest, BroadcastTxResponse}
-}, side::btcbridge::QueryParamsRequest};
+use cosmos_sdk_proto::{Any, cosmos::{
+    base::{query::v1beta1::PageRequest, tendermint::v1beta1::{GetLatestBlockRequest, GetLatestValidatorSetRequest, GetLatestValidatorSetResponse}}, 
+    tx::v1beta1::{service_client::ServiceClient as TxServiceClient, BroadcastMode, BroadcastTxRequest, BroadcastTxResponse}
+}};
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_client::ServiceClient as TendermintServiceClient;
 use reqwest::Error;
 use tokio::sync::Mutex;
 use tonic::{Response, Status};
-use cosmos_sdk_proto::side::btcbridge::{
-    query_client::QueryClient as BtcQueryClient,
+use side_proto::side::btcbridge::{
+    query_client::QueryClient as BtcQueryClient, QueryParamsRequest,
     QueryBlockHeaderByHeightRequest, QueryBlockHeaderByHeightResponse,
     QueryChainTipRequest, QueryChainTipResponse, 
     QuerySigningRequestsRequest, QuerySigningRequestsResponse, 
     QuerySigningRequestByTxHashRequest, QuerySigningRequestByTxHashResponse
 };
 
-use prost_types::Any;
 use lazy_static::lazy_static;
 
 use crate::config;
@@ -189,7 +189,7 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
     let memo = "tss_signer";
 
     // Create transaction body from the MsgSend, memo, and timeout height.
-    let tx_body = tx::Body::new(vec![msg], memo, timeout_height);
+    let tx_body = tx::Body::new(vec![msg].into_iter(), memo, timeout_height);
 
     let signing_key = SigningKey::from_slice(&sender_private_key.to_bytes()).unwrap();
     let mut any = signing_key.public_key().to_any().unwrap();
@@ -283,7 +283,7 @@ pub fn signed_msg_hash(msg: Vec<u8>) -> sha256d::Hash {
 #[tokio::test]
 async fn test_signature() {
 
-    use cosmos_sdk_proto::side::btcbridge::MsgSubmitSignatures;
+    use side_proto::side::btcbridge::MsgSubmitSignatures;
     use crate::config::Config;
 
     let conf = Config::from_file(".side3").expect("not found config file");
