@@ -48,6 +48,7 @@ pub enum Round {
 #[derive(Debug)]
 pub struct Signer {
     enabled: bool,
+    // deprecated
     config: Config,
     pub bitcoin_client: Client,
     db_sign_variables: sled::Db,

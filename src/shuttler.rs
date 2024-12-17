@@ -39,7 +39,7 @@ pub struct ShuttlerBehaviour {
 }
 
 impl Shuttler {
-    pub fn new(
+    pub async fn new(
         home: &str,
         seed: bool,
         start_relayer: bool,
@@ -50,7 +50,7 @@ impl Shuttler {
 
         let relayer = Relayer::new(conf.clone(), start_relayer);
         let signer = Signer::new(conf.clone(), start_signer);
-        let oracle =  Oracle::new(conf.clone(), start_oracle);
+        let oracle =  Oracle::new(conf.clone(), start_oracle).await;
 
         Self {
             candidates: Candidate::new(conf.side_chain.grpc.clone(), &conf.bootstrap_nodes),
@@ -161,8 +161,7 @@ impl Shuttler {
         dail_bootstrap_nodes(&mut swarm, &self.conf);
         subscribe_gossip_topics(&mut swarm);
 
-        let mut context = Context{swarm, identifier, node_key, 
-            validator_hex_address: priv_validator_key.address.to_string()};
+        let mut context = Context::new(swarm, identifier, node_key, self.conf.clone(), priv_validator_key.address.to_string());
 
         loop {
             select! {

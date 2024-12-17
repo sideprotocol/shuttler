@@ -21,15 +21,8 @@ use crate::helper::cipher::{decrypt, encrypt};
 
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DKGType {
-    GroupKey,
-    Nonce,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DKGTask {
     pub id: String,
-    pub use_case: DKGType,
     pub participants: Vec<String>,
     pub threshold: u16,
     pub round: Round,
@@ -42,7 +35,6 @@ pub struct DKGTask {
 impl DKGTask {
     pub fn from_request(request: &DkgRequest) -> Self {
         Self {
-            use_case: DKGType::GroupKey,
             id: format!("dkg-{}", request.id),
             participants: request.participants.iter().map(|p| {
                 p.consensus_address.clone()
@@ -61,7 +53,6 @@ impl DKGTask {
 
     pub fn from_announceemnt(request: &DlcAnnouncement, keyshare: &VaultKeypair) -> Self {
         Self {
-            use_case: DKGType::Nonce,
             id: format!("dkg-{}", request.id),
             participants: keyshare.pub_key.verifying_shares().keys().map(|a| to_base64(&a.serialize()) ).collect::<Vec<_>>(), 
             threshold: *keyshare.priv_key.min_signers(),
@@ -322,11 +313,7 @@ pub fn received_round2_packages(ctx: &mut Context, task: &mut DKGTask, packets: 
         // frost does not need its own package to compute the threshold key
         round1_packages.remove(&ctx.identifier); 
 
-        match frost::keys::dkg::part3(
-            &round2_secret_package,
-            &round1_packages,
-            &round2_packages,
-        ) {
+        match frost::keys::dkg::part3(&round2_secret_package, &round1_packages, &round2_packages ) {
             Ok((key, pubkey)) => { 
                 // generate vault addresses and save its key share
                 let address_with_tweak = signer.generate_vault_addresses(pubkey, key, task.address_num);

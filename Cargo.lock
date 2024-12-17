@@ -595,7 +595,7 @@ dependencies = [
  "futures-util",
  "http 0.2.12",
  "http-body 0.4.6",
- "hyper 0.14.31",
+ "hyper 0.14.32",
  "itoa",
  "matchit",
  "memchr",
@@ -689,7 +689,7 @@ dependencies = [
  "futures-util",
  "http 0.2.12",
  "http-body 0.4.6",
- "hyper 0.14.31",
+ "hyper 0.14.32",
  "pin-project-lite",
  "rustls 0.21.12",
  "rustls-pemfile 1.0.4",
@@ -800,18 +800,18 @@ dependencies = [
 
 [[package]]
 name = "bit-set"
-version = "0.5.3"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0700ddab506f33b20a03b13996eccd309a48e5ff77d0d95926aa0210fb4e95f1"
+checksum = "08807e080ed7f9d5433fa9b275196cfc35414f66a0c79d864dc51a0d825231a3"
 dependencies = [
  "bit-vec",
 ]
 
 [[package]]
 name = "bit-vec"
-version = "0.6.3"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
+checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
 
 [[package]]
 name = "bitcoin"
@@ -1234,12 +1234,12 @@ checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
 
 [[package]]
 name = "colored"
-version = "2.1.0"
+version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbf2150cce219b664a8a70df7a1f933836724b503f8a413af9365b4dcc4d90b8"
+checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1253,15 +1253,15 @@ dependencies = [
 
 [[package]]
 name = "console"
-version = "0.15.8"
+version = "0.15.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e1f83fc076bd6dd27517eacdf25fef6c4dfe5f1d7448bafaaf3a26f13b5e4eb"
+checksum = "ea3c6ecd8059b57859df5c69830340ed3c41d30e3da0c1cbed90a96ac853041b"
 dependencies = [
  "encode_unicode",
- "lazy_static",
  "libc",
- "unicode-width 0.1.14",
- "windows-sys 0.52.0",
+ "once_cell",
+ "unicode-width",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1400,9 +1400,9 @@ checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 
 [[package]]
 name = "crossbeam-deque"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "613f8cc01fe9cf1a3eb3d7f488fd2fa8388403e97039e2f73692932e291a770d"
+checksum = "9dd111b7b7f7d55b72c0a6ae361660ee5853c9af73f70c3c2ef6858b950e2e51"
 dependencies = [
  "crossbeam-epoch",
  "crossbeam-utils",
@@ -1419,9 +1419,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-utils"
-version = "0.8.20"
+version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22ec99545bb0ed0ea7bb9b8e1e9122ea386ff8a48c0922e43f36d45ab09e0e80"
+checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
 name = "crunchy"
@@ -1869,9 +1869,9 @@ checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
 
 [[package]]
 name = "encode_unicode"
-version = "0.3.6"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a357d28ed41a50f9c765dbfe56cbc04a64e53e5fc58ba79fbc34c10ef3df831f"
+checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
 
 [[package]]
 name = "encoding_rs"
@@ -2720,9 +2720,9 @@ checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
 
 [[package]]
 name = "hyper"
-version = "0.14.31"
+version = "0.14.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c08302e8fa335b151b788c775ff56e7a03ae64ff85c548ee820fecb70356e85"
+checksum = "41dfc780fdec9373c01bae43289ea34c972e40ee3c9f6b3c8801a35f35586ce7"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -2744,9 +2744,9 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "1.5.1"
+version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97818827ef4f364230e16705d4706e2897df2bb60617d6ca15d598025a3c481f"
+checksum = "256fb8d4bd6413123cc9d91832d78325c48ff41677595be797d90f42969beae0"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -2771,7 +2771,7 @@ checksum = "08afdbb5c31130e3034af566421053ab03787c640246a446327f550d11bcb333"
 dependencies = [
  "futures-util",
  "http 1.2.0",
- "hyper 1.5.1",
+ "hyper 1.5.2",
  "hyper-util",
  "rustls 0.23.20",
  "rustls-pki-types",
@@ -2786,7 +2786,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b90d566bffbce6a75bd8b09a05aa8c2cb1fabb6cb348f8840c9e4c90a0d83b0"
 dependencies = [
- "hyper 1.5.1",
+ "hyper 1.5.2",
  "hyper-util",
  "pin-project-lite",
  "tokio",
@@ -2800,7 +2800,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6183ddfa99b85da61a140bea0efc93fdf56ceaa041b37d553518030827f9905"
 dependencies = [
  "bytes",
- "hyper 0.14.31",
+ "hyper 0.14.32",
  "native-tls",
  "tokio",
  "tokio-native-tls",
@@ -2814,7 +2814,7 @@ checksum = "70206fc6890eaca9fde8a0bf71caa2ddfc9fe045ac9e5c70df101a7dbde866e0"
 dependencies = [
  "bytes",
  "http-body-util",
- "hyper 1.5.1",
+ "hyper 1.5.2",
  "hyper-util",
  "native-tls",
  "tokio",
@@ -2833,7 +2833,7 @@ dependencies = [
  "futures-util",
  "http 1.2.0",
  "http-body 1.0.1",
- "hyper 1.5.1",
+ "hyper 1.5.2",
  "pin-project-lite",
  "socket2 0.5.8",
  "tokio",
@@ -3053,7 +3053,7 @@ dependencies = [
  "bytes",
  "futures",
  "http 0.2.12",
- "hyper 0.14.31",
+ "hyper 0.14.32",
  "log",
  "rand 0.8.5",
  "tokio",
@@ -3098,7 +3098,7 @@ dependencies = [
  "console",
  "number_prefix",
  "portable-atomic",
- "unicode-width 0.2.0",
+ "unicode-width",
  "web-time",
 ]
 
@@ -3280,12 +3280,6 @@ name = "libc"
 version = "0.2.168"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5aaeb2981e0606ca11d79718f8bb01164f1d6ed75080182d3abf017e6d244b6d"
-
-[[package]]
-name = "libm"
-version = "0.2.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8355be11b20d696c8f18f6cc018c4e372165b1fa8126cef092399c9951984ffa"
 
 [[package]]
 name = "libp2p"
@@ -4162,7 +4156,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
- "libm",
 ]
 
 [[package]]
@@ -4303,7 +4296,7 @@ dependencies = [
  "html-escaper",
  "http 0.2.12",
  "humantime",
- "hyper 0.14.31",
+ "hyper 0.14.32",
  "indicatif",
  "lazy_static",
  "log",
@@ -4675,9 +4668,9 @@ dependencies = [
 
 [[package]]
 name = "proptest"
-version = "1.5.0"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4c2511913b88df1637da85cc8d96ec8e43a3f8bb8ccb71ee1ac240d6f3df58d"
+checksum = "14cae93065090804185d3b75f0bf93b8eeda30c7a9b4a33d3bdb3988d6229e50"
 dependencies = [
  "bit-set",
  "bit-vec",
@@ -5051,7 +5044,7 @@ dependencies = [
  "h2 0.3.26",
  "http 0.2.12",
  "http-body 0.4.6",
- "hyper 0.14.31",
+ "hyper 0.14.32",
  "hyper-tls 0.5.0",
  "ipnet",
  "js-sys",
@@ -5092,7 +5085,7 @@ dependencies = [
  "http 1.2.0",
  "http-body 1.0.1",
  "http-body-util",
- "hyper 1.5.1",
+ "hyper 1.5.2",
  "hyper-rustls",
  "hyper-tls 0.6.0",
  "hyper-util",
@@ -5872,8 +5865,8 @@ dependencies = [
 
 [[package]]
 name = "side-proto"
-version = "0.1.0-dev"
-source = "git+https://github.com/sideprotocol/side-rust#6ba4a64cbc42531210ed26a5fd6b38beca72b191"
+version = "0.1.0-dev2"
+source = "git+https://github.com/sideprotocol/side-rust#f25af7dd6f654e364ff78bd16e3c7bc4690bfeb1"
 dependencies = [
  "cosmos-sdk-proto",
  "cosmrs",
@@ -6561,7 +6554,7 @@ dependencies = [
  "http 1.2.0",
  "http-body 1.0.1",
  "http-body-util",
- "hyper 1.5.1",
+ "hyper 1.5.2",
  "hyper-timeout",
  "hyper-util",
  "percent-encoding",
@@ -6757,12 +6750,6 @@ checksum = "5c5713f0fc4b5db668a2ac63cdb7bb4469d8c9fed047b1d0292cc7b0ce2ba921"
 dependencies = [
  "tinyvec",
 ]
-
-[[package]]
-name = "unicode-width"
-version = "0.1.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
 
 [[package]]
 name = "unicode-width"

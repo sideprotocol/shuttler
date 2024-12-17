@@ -14,6 +14,7 @@ pub mod tick;
 #[derive(Debug)]
 pub struct Relayer {
     enabled: bool,
+    // deprecated
     config: Config,
     pub bitcoin_client: Client,
     pub ordinals_client: OrdinalsClient,

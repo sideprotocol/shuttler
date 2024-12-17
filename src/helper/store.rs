@@ -1,23 +1,17 @@
-use std::{marker::PhantomData, path::Path};
+use std::{collections::BTreeMap, marker::PhantomData, path::Path};
 
 use serde::{Deserialize, Serialize};
 use sled::Db;
 
 pub trait Store<K, V> where K: AsRef<[u8]>, V: Serialize + for<'a> Deserialize<'a> {
-    fn save(&self, key: &K, value: &V) -> bool;
+    fn save(&mut self, key: &K, value: &V) -> bool;
     fn list(&self) -> Vec<V>;
-    fn remove(&self, key: &K) -> bool;
+    fn remove(&mut self, key: &K) -> bool;
     fn get(&self, key: &K) -> Option<V>;
     fn exists(&self, key: &K) -> bool;
 }
 
-pub fn new_store<K, V>(path: String) -> impl Store<K, V> where K: AsRef<[u8]>, V: Serialize + for<'a> Deserialize<'a>  {
-    SledStore::<K, V>::new(path)
-}
-
 pub type DefaultStore<K, V> = SledStore<K, V>;
-
-pub struct Value<T>(T);
 
 pub struct SledStore<K, V> where K: AsRef<[u8]>, V: Serialize + for<'a> Deserialize<'a> {
     inner: Db,
@@ -26,7 +20,7 @@ pub struct SledStore<K, V> where K: AsRef<[u8]>, V: Serialize + for<'a> Deserial
 }
 
 impl<K, V> SledStore<K, V> where K: AsRef<[u8]>, V: Serialize + for<'a> Deserialize<'a> {
-    pub fn new(path: String) -> Self {
+    pub fn new<P: AsRef<Path>>(path: P) -> Self {
         let inner = sled::open(path).unwrap();
         Self {
             inner,
@@ -37,7 +31,7 @@ impl<K, V> SledStore<K, V> where K: AsRef<[u8]>, V: Serialize + for<'a> Deserial
 }
 
 impl<K, V> Store<K, V> for SledStore<K, V> where K: AsRef<[u8]>, V: Serialize + for<'a> Deserialize<'a> {
-    fn save(&self, key: &K, value: &V) -> bool {
+    fn save(&mut self, key: &K, value: &V) -> bool {
         let value = serde_json::to_vec(value).unwrap();
         self.inner
             .insert(key, value)
@@ -54,7 +48,7 @@ impl<K, V> Store<K, V> for SledStore<K, V> where K: AsRef<[u8]>, V: Serialize + 
         .collect()
     }
 
-    fn remove(&self, key: &K) -> bool {
+    fn remove(&mut self, key: &K) -> bool {
         self.inner.remove(key).is_ok()
     }
 
@@ -70,3 +64,37 @@ impl<K, V> Store<K, V> for SledStore<K, V> where K: AsRef<[u8]>, V: Serialize + 
     }
 }
 
+pub struct MemStore<K, V> where K: AsRef<[u8]> + Ord + Clone, V: Serialize + for<'a> Deserialize<'a> + Clone {
+    inner: BTreeMap<K, V>,
+}
+
+
+impl<K, V> MemStore<K, V> where K: AsRef<[u8]> + Ord + Clone, V: Serialize + for<'a> Deserialize<'a> + Clone {
+    pub fn new() -> Self {
+        Self {
+            inner: BTreeMap::new()
+        }
+    }
+}
+
+impl<K, V> Store<K, V> for MemStore<K, V> where K: AsRef<[u8]> + Ord + Clone, V: Serialize + for<'a> Deserialize<'a> + Clone {
+    fn save(&mut self, key: &K, value: &V) -> bool {
+        self.inner.insert(key.clone(), value.clone()).is_some()
+    }
+
+    fn list(&self) -> Vec<V> {
+        self.inner.values().map(|v| v.clone()).collect::<Vec<_>>()
+    }
+
+    fn remove(&mut self, key: &K) -> bool {
+        self.inner.remove(key).is_some()
+    }
+
+    fn get(&self, key: &K) -> Option<V> {
+        self.inner.get(key).map(|v| v.clone())
+    }
+
+    fn exists(&self, key: &K) -> bool {
+        self.inner.contains_key(key)
+    }
+}

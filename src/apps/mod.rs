@@ -3,7 +3,7 @@ use frost_adaptor_signature::Identifier;
 use libp2p::Swarm;
 use tokio::time::Instant;
 
-use crate::shuttler::ShuttlerBehaviour;
+use crate::{config::{Config, VaultKeypair}, helper::store::DefaultStore, shuttler::ShuttlerBehaviour};
 
 pub mod signer;
 pub mod relayer;
@@ -23,10 +23,22 @@ pub struct Context {
     pub identifier: Identifier,
     pub node_key: SecretKey,
     pub validator_hex_address: String,
+    pub conf: Config,
+    pub keystore: DefaultStore<String, VaultKeypair>
 }
 
-// impl Context {
+impl Context {
+    pub fn new(swarm: Swarm<ShuttlerBehaviour>, identifier: Identifier, node_key: SecretKey, conf: Config, validator_hex_address:String) -> Self {
+        Self { 
+            swarm, 
+            identifier, 
+            node_key, 
+            validator_hex_address, 
+            keystore: DefaultStore::new(conf.get_database_with_name("keypairs")),
+            conf, 
+        }
+    }
 //     pub fn validator_address(&self) -> String {
 //         self.config().load_validator_key().address.to_string()
 //     }
-// }
+}

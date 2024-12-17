@@ -6,5 +6,6 @@ pub mod helper;
 pub mod tests;
 pub mod mock;
 pub mod shuttler;
+pub mod protocols;
 // pub mod prost;
 // pub mod taproot;

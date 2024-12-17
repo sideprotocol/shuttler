@@ -1,16 +1,16 @@
-use std::collections::BTreeMap;
 
-use rand::thread_rng;
 use serde::{Deserialize, Serialize};
+use side_proto::{cosmos::base::query::v1beta1::PageRequest, side::dlc::{AnnouncementStatus, DlcAnnouncement, QueryAnnouncementsRequest, QueryCountNoncesRequest, QueryNoncesRequest, QueryParamsRequest}};
 
-use crate::helper::{mem_store, store::Store};
 
+use crate::{apps::Context, config::VaultKeypair, helper::{cipher::encrypt, mem_store, store::Store}, protocols::dkg::{DKGTask, KeyHander, Round}};
+use tracing::error;
 use super::Oracle;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NonceGeneration {
     pub index: u64,
-    pub oracle_group_address: String,
+    pub oracle_pubkey: String,
     pub nonce: String,
     pub event_id: Option<String>,
     pub generate_at: u64,
@@ -18,52 +18,58 @@ pub struct NonceGeneration {
 
 impl NonceGeneration {
     pub fn id(&self) -> String {
-        format!("{}-{}", self.oracle_group_address, self.index)
+        format!("{}-{}", self.oracle_pubkey, self.index)
+    }
+}
+
+impl Into<DKGTask> for NonceGeneration {
+    fn into(self) -> DKGTask {
+        DKGTask {
+            id: self.id(),
+            participants: todo!(),
+            threshold: todo!(),
+            round: todo!(),
+        }
     }
 }
 
 impl Oracle {
-    pub async fn fetch_new_announcement(&self) {
-        let new_task = NonceGeneration {
-            index: 1,
-            oracle_group_address: "aaaa".to_string(),
-            nonce: "".to_string(),
-            event_id: Some("".to_string()),
-            generate_at: 1234,
+    pub async fn fetch_new_nonce_generation(&mut self, ctx: &mut Context ) {
+        let response = self.dlc_client.count_nonces(QueryCountNoncesRequest{}).await;
+        let nonces = match response {
+            Ok(resp) => resp.into_inner(),
+            Err(e) => return,
         };
-        self.db_nonce.save(&new_task.nonce, &new_task);
+        let response2 = self.dlc_client.params(QueryParamsRequest{}).await;
+        let param = match response2 {
+            Ok(resp) => match resp.into_inner().params {
+                Some(p) => p,
+                None => return,
+            },
+            Err(e) => return,
+        };
+        if nonces.counts.len() != param.recommended_oracles.len() && nonces.indexs.len() != nonces.counts.len() {return};
+
+        param.recommended_oracles.iter().zip(nonces.counts.iter()).zip(nonces.indexs.iter()).for_each(|((oracle, count), index)| {
+            if count >= &param.nonce_queue_size { return }
+            if let Some(keyshare) = self.db_keyshare.get(oracle) {
+                let mut task = new_task(&keyshare, oracle, index);
+                self.nonce_generator.generate(ctx, &mut task);
+            }
+        });
     }
 
-    pub fn generate_round1_package(&self, task: NonceGeneration) {
-        let keypair = match self.db_keypair.get(&task.oracle_group_address) {
-            Some(k) => k,
-            None => return,
-        };
-
-        if !keypair.pub_key.verifying_shares().contains_key(&self.identifier) {
-            return;
-        }
-
-        let mut rng = thread_rng();
-        if let Ok((secret_packet, round1_package)) = frost_adaptor_signature::keys::dkg::part1(
-            self.identifier,
-            keypair.pub_key.verifying_shares().len() as u16,
-            *keypair.priv_key.min_signers(),
-            &mut rng,
-        ) {
-            tracing::debug!("round1_secret_package: {:?}-{}", task.oracle_group_address, task.index);
-            mem_store::set_dkg_round1_secret_packet(&task.id(), secret_packet);
-
-            let mut round1_packages = BTreeMap::new();
-            round1_packages.insert(self.identifier, round1_package);
-
-            self.db_dkg_round1.save(&task.id(), &round1_packages);
-        } else {
-            tracing::error!("error in DKG round 1: {:?}", task.id());
-        }
-    }
-
-    
 }
+
+fn new_task(keyshare: &VaultKeypair, oracle: &String, index: &u64) -> DKGTask {
+    let participants = keyshare.pub_key.verifying_shares().keys().map(|k| {hex::encode(k.serialize())}).collect();
+    DKGTask {
+        id: format!("{}-{}", oracle, index),
+        participants,
+        threshold: keyshare.priv_key.min_signers().clone(),
+        round: Round::Round1,
+    }
+}
+
 
 
