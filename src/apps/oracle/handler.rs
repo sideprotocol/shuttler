@@ -1,4 +1,4 @@
-use crate::{apps::Context, config::VaultKeypair, helper::{bitcoin::{generate_tweak, get_group_address_by_tweak}, store::Store}, protocols::dkg::{KeyHander, DKG}};
+use crate::{apps::Context, config::VaultKeypair, helper::store::Store, protocols::dkg::{KeyHander, DKG}};
 
 
 pub struct NonceHandler {}

@@ -1,26 +1,17 @@
 use std::{collections::BTreeMap, marker::PhantomData};
 
-use chrono::serde::ts_nanoseconds::deserialize;
-use frost_adaptor_signature::{keys::Tweak, round1, round2, Group, Identifier, Secp256K1Group, SigningPackage};
+use frost_adaptor_signature::{keys::Tweak, round1::{self, SigningNonces}, round2::{self, SignatureShare}, Group, Identifier, Secp256K1Group, SigningPackage};
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 pub use tracing::error;
 use usize as Index;
-use crate::{apps::Context, helper::{bitcoin::convert_tweak, encoding, gossip::{publish_message, SubscribeTopic}, mem_store, store::{MemStore, Store}}};
+use crate::{apps::Context, config::VaultKeypair, helper::{bitcoin::convert_tweak, encoding::{self, hex_to_projective_point}, gossip::{publish_message, SubscribeTopic}, mem_store, store::{MemStore, Store}}};
 
 use ed25519_compact::{PublicKey, Signature};
 pub type Round1Store = MemStore<String, BTreeMap<Index,BTreeMap<Identifier,round1::SigningCommitments>>>;
 pub type Round2Store = MemStore<String, BTreeMap<Index,BTreeMap<Identifier,round2::SignatureShare>>>;
 pub type NonceStore = MemStore<String, BTreeMap<Index, round1::SigningNonces>>;
-
-pub struct StandardSigner<H>{
-    db_task: MemStore<String, SignTask>,
-    db_round1: Round1Store,
-    db_round2: Round2Store,
-    db_nonce: NonceStore,
-    _p: PhantomData<H>,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignMesage {
@@ -52,12 +43,30 @@ pub struct Input {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+enum SignMode {
+    Sign,
+    SignWithTweak,
+    SignWithGroupcommitment,
+    SignWithAdaptorPoint,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignTask {
     id: String,
+    mode: SignMode,
     adaptor_point: String,
+    group_commitment: String,
     status: Status,
     inputs: Vec<Input>,
     participants: Vec<Identifier>,
+}
+
+pub struct StandardSigner<H>{
+    db_task: MemStore<String, SignTask>,
+    db_round1: Round1Store,
+    db_round2: Round2Store,
+    db_nonce: NonceStore,
+    _p: PhantomData<H>,
 }
 
 impl<H> StandardSigner<H> {
@@ -105,7 +114,7 @@ impl<H> StandardSigner<H> {
         self.received_sign_message(ctx, msg);
     }
 
-    pub fn received_sign_message(&mut self, ctx: &mut Context, msg: SignMesage) {
+    fn received_sign_message(&mut self, ctx: &mut Context, msg: SignMesage) {
 
         // Ensure the message is not forged.
         match PublicKey::from_slice(&msg.sender.serialize()) {
@@ -186,7 +195,7 @@ impl<H> StandardSigner<H> {
         }
     }
 
-    pub fn try_generate_signature_shares(&mut self, ctx: &mut Context, task_id: &String) {
+    fn try_generate_signature_shares(&mut self, ctx: &mut Context, task_id: &String) {
 
         // Ensure the task exists locally to prevent forged signature tasks. 
         let mut task = match self.db_task.get(task_id) {
@@ -245,37 +254,9 @@ impl<H> StandardSigner<H> {
                     },
                 };
 
-                let signature_shares = if &task.adaptor_point.len() > &0usize {
-                    // adatpor signature
-                    let b = hex::decode(&task.adaptor_point).unwrap();
-                    let adaptor_point = match <Secp256K1Group as Group>::deserialize(&b[..].try_into().unwrap()) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            error!("adaptor point is invalid: {}", e);
-                            return;
-                        },
-                    };
-                    match round2::sign_with_adaptor_point(
-                        &signing_package, signer_nonces, &keypair.priv_key, &adaptor_point,
-                    ) {
-                        Ok(shares) => shares,
-                        Err(e) => {
-                            error!("Error: {:?}", e);
-                            return;
-                        }
-                    }
-                } else {
-                    // regular signature
-                    let tweek  = convert_tweak(&keypair.tweak);
-                    match round2::sign_with_tweak(
-                        &signing_package, signer_nonces, &keypair.priv_key, tweek
-                    ) {
-                        Ok(shares) => shares,
-                        Err(e) => {
-                            error!("Error: {:?}", e);
-                            return;
-                        }
-                    }
+                let signature_shares = match partial_sign(&task, &keypair, &signing_package, &signer_nonces, ) {
+                    Ok(s) => s,
+                    Err(_e) => return,
                 };
                 
                 let mut my_share = BTreeMap::new();
@@ -304,7 +285,7 @@ impl<H> StandardSigner<H> {
 
     }
 
-    pub fn try_aggregate_signature_shares(&mut self, ctx: &mut Context, task_id: &String) {
+    fn try_aggregate_signature_shares(&mut self, ctx: &mut Context, task_id: &String) {
 
         // Ensure the task exists locally to prevent forged signature tasks. 
         let mut task = match self.db_task.get(task_id) {
@@ -356,55 +337,16 @@ impl<H> StandardSigner<H> {
                 &input.message
             );
 
-            if task.adaptor_point.len() > 0 {
-
-                let adaptor_point = match encoding::hex_to_adaptor_point(&task.adaptor_point) {
-                    Ok(p) => p,
-                    Err(_e) => return,
-                };
-
-                match frost_adaptor_signature::aggregate_with_adaptor_point(&signing_package, &signature_shares, &keypair.pub_key, &adaptor_point) {
-                    Ok(frost_signature) => {
-                        match frost_signature.verify_signature(signing_package.message(), &keypair.pub_key.verifying_key(), &adaptor_point) {
-                            Ok(_) => {
-                                verifies.push(true);
-                                input.adaptor_signature = Some(frost_signature);
-                            },
-                            Err(e) => {
-                                error!( "{}:{} is invalid: {e}", &task.id[..6], index );
-                                return
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        error!("Signature aggregation error: {:?} {:?}", &task.id[..6], e);
-                        return
-                    }
+            match aggregate(&signing_package, &signature_shares, &keypair, &task.mode, &task.adaptor_point) {
+                Ok(s) => {
+                    verifies.push(true);
+                    input.signature = Some(s);
+                },
+                Err(e) => {
+                    error!("aggregate error: {}", e);
+                    return
                 }
-
-            } else {
-
-                let tweek  = convert_tweak(&keypair.tweak);
-
-                match frost_adaptor_signature::aggregate_with_tweak(&signing_package, &signature_shares, &keypair.pub_key, tweek) { 
-                    Ok(frost_signature) => {
-                        match keypair.pub_key.tweak(tweek).verifying_key().verify(signing_package.message(), &frost_signature) {
-                            Ok(_) => {
-                                verifies.push(true);
-                                input.signature = Some(frost_signature);
-                            },
-                            Err(e) => {
-                                error!( "{}:{} is invalid: {e}", &task.id[..6], index );
-                                return
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Signature aggregation error: {:?} {:?}", &task.id[..6], e);
-                        return
-                    }
-                };
-            }
+            };
         };
 
         if verifies.len() ==0 {
@@ -424,10 +366,67 @@ impl<H> StandardSigner<H> {
 
     }
 
+}
+
+
+fn partial_sign(task: &SignTask, keypair: &VaultKeypair, signing_package: &SigningPackage, signer_nonces: &SigningNonces) -> Result<SignatureShare, frost_adaptor_signature::Error>  {
+    match task.mode {
+        SignMode::Sign => {
+            round2::sign(signing_package, signer_nonces, &keypair.priv_key)
+        },
+        SignMode::SignWithTweak => {
+            let tweek  = convert_tweak(&keypair.tweak);
+            round2::sign_with_tweak(
+                signing_package, signer_nonces, &keypair.priv_key, tweek
+            )
+        },
+        SignMode::SignWithGroupcommitment => {
+            let group_commitment = hex_to_projective_point(&task.group_commitment).unwrap();
+            round2::sign_with_dkg_nonce(signing_package, signer_nonces, &keypair.priv_key, &group_commitment)
+        },
+        SignMode::SignWithAdaptorPoint => {
+            // adatpor signature
+            let adaptor_point = match hex_to_projective_point(&task.adaptor_point) {
+                Ok(p) => p,
+                Err(_) => panic!("Invalid adaptor point"),
+            };
+            round2::sign_with_adaptor_point(
+                signing_package, signer_nonces, &keypair.priv_key, &adaptor_point,
+            )
+        },
+    }
+}
+
+fn aggregate(signing_package: &SigningPackage, signature_shares: &BTreeMap<Identifier, SignatureShare>, keypair: &VaultKeypair, mode: &SignMode, adaptor_point: &String) -> Result<frost_adaptor_signature::Signature, frost_adaptor_signature::Error>  {
+
+    match mode {
+        SignMode::SignWithTweak => {
+            let tweek  = convert_tweak(&keypair.tweak);
+            let frost_signature = frost_adaptor_signature::aggregate_with_tweak(&signing_package, signature_shares, &keypair.pub_key, tweek)?;
+
+            keypair.pub_key.clone().tweak(tweek)
+                            .verifying_key()
+                            .verify(signing_package.message(), &frost_signature)
+                            .map(|_| frost_signature)
+        },
+        SignMode::SignWithGroupcommitment => {
+
+            let group_commitment = encoding::hex_to_projective_point(adaptor_point)?; 
+            let frost_signature = frost_adaptor_signature::aggregate_with_group_commitment(&signing_package, signature_shares, &keypair.pub_key, &group_commitment)?;
+
+            keypair.pub_key.clone().verifying_key().verify(signing_package.message(), &frost_signature).map(|_| frost_signature)
+        },
+        _ => {
+
+            let frost_signature = frost_adaptor_signature::aggregate(&signing_package, signature_shares, &keypair.pub_key)?;
+            keypair.pub_key.clone().verifying_key().verify(signing_package.message(), &frost_signature).map(|_| frost_signature)
+
+        }
+    }
 
 }
 
-pub fn broadcast_signing_packages(ctx: &mut Context, message: &mut SignMesage) {
+fn broadcast_signing_packages(ctx: &mut Context, message: &mut SignMesage) {
     let raw = serde_json::to_vec(&message.package).unwrap();
     let signaure = ctx.node_key.sign(raw, None).to_vec();
     message.signature = signaure;
@@ -437,7 +436,7 @@ pub fn broadcast_signing_packages(ctx: &mut Context, message: &mut SignMesage) {
     publish_message(ctx, SubscribeTopic::SIGNING, message);
 }
 
-pub fn sanitize<T>(storages: &mut BTreeMap<Identifier, T>, keys: &Vec<&Identifier>) {
+fn sanitize<T>(storages: &mut BTreeMap<Identifier, T>, keys: &Vec<&Identifier>) {
     if keys.len() > 0 {
         storages.retain(|k, _| { keys.contains(&k)});
     }

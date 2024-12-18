@@ -39,7 +39,7 @@ pub fn pubkey_to_identifier(key_bytes: &[u8]) -> Identifier {
     Identifier::new(id).unwrap()
 }
 
-pub fn hex_to_adaptor_point(text: &String) -> Result<ProjectivePoint, GroupError> {
+pub fn hex_to_projective_point(text: &String) -> Result<ProjectivePoint, GroupError> {
     let b = hex::decode(text).unwrap();
-    <Secp256K1Group as Group>::deserialize(&b[..].try_into().unwrap())
+    Secp256K1Group::deserialize(&b[..].try_into().unwrap())
 }

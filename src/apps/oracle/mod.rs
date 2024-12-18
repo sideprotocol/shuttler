@@ -1,4 +1,4 @@
-use core::{NonceGenerator, NonceHandler, OracleKeyShareGenerator, OracleKeyShareHandler};
+use handler::{NonceGenerator, OracleKeyShareGenerator};
 use std::time::Duration;
 use side_proto::side::dlc::query_client::QueryClient as DLCQueryClient;
 use tokio::time::{Instant, Interval};
@@ -7,8 +7,8 @@ use tonic::transport::Channel;
 use crate::config::Config;
 
 use super::{App, Context, SubscribeMessage};
-pub mod core;
-pub mod nonce;
+mod handler;
+mod nonce;
 
 pub struct Oracle {    
     enable: bool,
