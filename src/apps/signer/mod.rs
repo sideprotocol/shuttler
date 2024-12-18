@@ -422,7 +422,7 @@ impl Signer {
 }
 
 impl super::App for Signer {
-    fn on_message(&self, ctx: &mut Context, message: &SubscribeMessage) {
+    fn on_message(&mut self, ctx: &mut Context, message: &SubscribeMessage) {
         // debug!("Received {:?}", message);
         if message.topic == SubscribeTopic::DKG.topic().hash() {
             if let Ok(response) = serde_json::from_slice::<DKGResponse>(&message.data) {
@@ -436,7 +436,7 @@ impl super::App for Signer {
         }
     }
 
-    fn enabled(&self) -> bool {
+    fn enabled(&mut self) -> bool {
         self.enabled
     }
 
@@ -444,7 +444,7 @@ impl super::App for Signer {
         self.ticker.tick().await
     }
 
-    async fn on_tick(&self, ctx: &mut Context) {
+    async fn on_tick(&mut self, ctx: &mut Context) {
         tasks_executor(ctx, &self).await
     }
 }

@@ -24,11 +24,11 @@ pub struct Relayer {
 }
 
 impl App for Relayer {
-    fn on_message(&self, _ctx: &mut Context, _message: &SubscribeMessage) {
+    fn on_message(&mut self, _ctx: &mut Context, _message: &SubscribeMessage) {
         todo!()
     }
 
-    fn enabled(&self) -> bool {
+    fn enabled(&mut self) -> bool {
         self.enabled
     }
 
@@ -36,7 +36,7 @@ impl App for Relayer {
         self.ticker.tick().await
     }
 
-    async fn on_tick(&self, _ctx: &mut Context) {
+    async fn on_tick(&mut self, _ctx: &mut Context) {
         join!(
             sync_btc_blocks(self),
             scan_vault_txs(self),

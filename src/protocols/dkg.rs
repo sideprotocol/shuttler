@@ -1,6 +1,7 @@
 
 
 use core::fmt;
+use std::marker::PhantomData;
 use std::{collections::BTreeMap, fmt::Debug};
 use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 use ed25519_compact::x25519;
@@ -28,23 +29,23 @@ pub enum Round {
 }
 
 pub trait KeyHander {
-    fn on_completed(&self, priv_key: KeyPackage, pubkey: PublicKeyPackage);
+    fn on_completed(ctx: &mut Context, priv_key: KeyPackage, pubkey: PublicKeyPackage);
 }
 
 pub struct DKG<H: KeyHander> {
     db_task: MemStore<String, DKGTask>,
     db_round1: Round1Store,
     db_round2: Round2Store,
-    handler: H,
+    _p: PhantomData<H>,
 }
 
 impl<H> DKG<H> where H: KeyHander{
-    pub fn new(handler: H) -> Self {
+    pub fn new() -> Self {
         Self {
             db_task: MemStore::new(),
             db_round1: MemStore::new(),
             db_round2: MemStore::new(),
-            handler,
+            _p: PhantomData::default(),
         }
     }
 }
@@ -58,7 +59,7 @@ pub struct DKGTask {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DKGMessage {
+struct DKGMessage {
     pub payload: DKGPayload,
     pub nonce: u64,
     pub sender: Identifier,
@@ -66,7 +67,7 @@ pub struct DKGMessage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DKGPayload {
+struct DKGPayload {
     pub task_id: String,
     pub round1_packages: BTreeMap<Identifier, round1::Package>,
     pub round2_packages: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>,
@@ -292,7 +293,7 @@ impl<H> DKG<H> where H: KeyHander {
             match frost::keys::dkg::part3(&round2_secret_package, &round1_packages, &round2_packages ) {
                 Ok((key, pubkey)) => { 
                     // generate vault addresses and save its key share
-                    self.handler.on_completed(key, pubkey);
+                    H::on_completed(ctx, key, pubkey);
                 },
                 Err(e) => {
                     error!("Failed to compute threshold key: {} {:?}", &task.id, e);

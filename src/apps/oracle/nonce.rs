@@ -1,10 +1,9 @@
 
 use serde::{Deserialize, Serialize};
-use side_proto::{cosmos::base::query::v1beta1::PageRequest, side::dlc::{AnnouncementStatus, DlcAnnouncement, QueryAnnouncementsRequest, QueryCountNoncesRequest, QueryNoncesRequest, QueryParamsRequest}};
+use side_proto::side::dlc::{DlcOracle, DlcOracleStatus, QueryCountNoncesRequest, QueryOraclesRequest, QueryParamsRequest};
 
 
-use crate::{apps::Context, config::VaultKeypair, helper::{cipher::encrypt, mem_store, store::Store}, protocols::dkg::{DKGTask, KeyHander, Round}};
-use tracing::error;
+use crate::{apps::Context, protocols::dkg::{DKGTask, Round}};
 use super::Oracle;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,23 +21,12 @@ impl NonceGeneration {
     }
 }
 
-impl Into<DKGTask> for NonceGeneration {
-    fn into(self) -> DKGTask {
-        DKGTask {
-            id: self.id(),
-            participants: todo!(),
-            threshold: todo!(),
-            round: todo!(),
-        }
-    }
-}
-
 impl Oracle {
     pub async fn fetch_new_nonce_generation(&mut self, ctx: &mut Context ) {
         let response = self.dlc_client.count_nonces(QueryCountNoncesRequest{}).await;
         let nonces = match response {
             Ok(resp) => resp.into_inner(),
-            Err(e) => return,
+            Err(_e) => return,
         };
         let response2 = self.dlc_client.params(QueryParamsRequest{}).await;
         let param = match response2 {
@@ -46,27 +34,41 @@ impl Oracle {
                 Some(p) => p,
                 None => return,
             },
-            Err(e) => return,
+            Err(_) => return,
         };
-        if nonces.counts.len() != param.recommended_oracles.len() && nonces.indexs.len() != nonces.counts.len() {return};
+        let response3 = self.dlc_client.oracles(QueryOraclesRequest{status: DlcOracleStatus::OracleStatusEnable as i32}).await;
+        let oracles = match response3 {
+            Ok(resp) => resp.into_inner().oracles,
+            Err(_) => return,
+        };
+        if nonces.counts.len() != oracles.len() {return};
 
-        param.recommended_oracles.iter().zip(nonces.counts.iter()).zip(nonces.indexs.iter()).for_each(|((oracle, count), index)| {
+        oracles.iter().zip(nonces.counts.iter()).for_each(|(oracle, count)| {
             if count >= &param.nonce_queue_size { return }
-            if let Some(keyshare) = self.db_keyshare.get(oracle) {
-                let mut task = new_task(&keyshare, oracle, index);
-                self.nonce_generator.generate(ctx, &mut task);
-            }
+            let mut task = new_task_for_queue(oracle);
+            self.nonce_generator.generate(ctx, &mut task);
+        });
+    }
+
+    pub async fn fetch_new_key_generation(&mut self, ctx: &mut Context) {
+        let response3 = self.dlc_client.oracles(QueryOraclesRequest{status: DlcOracleStatus::OracleStatusPending as i32}).await;
+        let oracles = match response3 {
+            Ok(resp) => resp.into_inner().oracles,
+            Err(_) => return,
+        };
+        oracles.iter().for_each(|oracle| {
+            let mut task = new_task_for_queue(oracle);
+            self.keyshare_generator.generate(ctx, &mut task);
         });
     }
 
 }
 
-fn new_task(keyshare: &VaultKeypair, oracle: &String, index: &u64) -> DKGTask {
-    let participants = keyshare.pub_key.verifying_shares().keys().map(|k| {hex::encode(k.serialize())}).collect();
+fn new_task_for_queue(oracle: &DlcOracle ) -> DKGTask {
     DKGTask {
-        id: format!("{}-{}", oracle, index),
-        participants,
-        threshold: keyshare.priv_key.min_signers().clone(),
+        id: format!("{}-{}", oracle.id, oracle.nonce_index + 1),
+        participants: oracle.participants.clone(),
+        threshold: oracle.threshold as u16,
         round: Round::Round1,
     }
 }

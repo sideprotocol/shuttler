@@ -1,9 +1,13 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use bitcoin_hashes::sha256;
 use bitcoin_hashes::Hash;
+use frost_adaptor_signature::frost::GroupError;
 use frost_adaptor_signature::Field;
+use frost_adaptor_signature::Group;
 use frost_adaptor_signature::Identifier;
+use frost_adaptor_signature::Secp256K1Group;
 use frost_adaptor_signature::Secp256K1ScalarField;
+use k256::ProjectivePoint;
 use libp2p::PeerId;
 
 pub fn to_base64(input: &[u8]) -> String {
@@ -33,4 +37,9 @@ pub fn identifier_to_peer_id(identifier: &Identifier) -> PeerId {
 pub fn pubkey_to_identifier(key_bytes: &[u8]) -> Identifier {
     let id = Secp256K1ScalarField::deserialize(key_bytes.try_into().unwrap()).unwrap();
     Identifier::new(id).unwrap()
+}
+
+pub fn hex_to_adaptor_point(text: &String) -> Result<ProjectivePoint, GroupError> {
+    let b = hex::decode(text).unwrap();
+    <Secp256K1Group as Group>::deserialize(&b[..].try_into().unwrap())
 }

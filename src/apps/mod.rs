@@ -12,10 +12,10 @@ pub mod oracle;
 pub type SubscribeMessage = libp2p::gossipsub::Message;
 
 pub trait App {
-    fn enabled(&self) -> bool;
-    fn on_message(&self, ctx: &mut Context, message: &SubscribeMessage);
+    fn enabled(&mut self) -> bool;
+    fn on_message(&mut self, ctx: &mut Context, message: &SubscribeMessage);
     fn tick(&mut self) -> impl std::future::Future<Output = Instant> + Send;
-    fn on_tick(&self, ctx: &mut Context) -> impl std::future::Future<Output = ()> + Send;
+    fn on_tick(&mut self, ctx: &mut Context) -> impl std::future::Future<Output = ()> + Send;
 }
 
 pub struct Context {

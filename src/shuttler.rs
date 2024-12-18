@@ -204,16 +204,16 @@ impl Shuttler {
 
     // handle sub events from the swarm
     async fn event_handler(
-        &self,
+        &mut self,
         event: ShuttlerBehaviourEvent,
         context: &mut Context,
     ) {
         match event {
             ShuttlerBehaviourEvent::Gossip(gossipsub::Event::Message { message, .. }) => {
                 update_heartbeat(&message);
-                dispatch_messages(&self.oracle, context, &message);
-                dispatch_messages(&self.signer, context, &message);
-                dispatch_messages(&self.relayer,context, &message);
+                dispatch_messages(&mut self.oracle, context, &message);
+                dispatch_messages(&mut self.signer, context, &message);
+                dispatch_messages(&mut self.relayer,context, &message);
             }
             ShuttlerBehaviourEvent::Identify(identify::Event::Received {
                 peer_id, info, ..
@@ -273,7 +273,7 @@ impl Shuttler {
 
 }
 
-fn dispatch_messages<T: App>(app: &T, context: &mut Context,  message: &SubscribeMessage) {
+fn dispatch_messages<T: App>(app: &mut T, context: &mut Context,  message: &SubscribeMessage) {
     if app.enabled() {
         app.on_message(context, message);
     }

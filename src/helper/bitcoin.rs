@@ -1,9 +1,9 @@
 use bitcoin::{
-    consensus::encode::serialize, key::Secp256k1, opcodes, secp256k1::schnorr::Signature, Address, Network, PublicKey, ScriptBuf, TapNodeHash, TapSighashType, Transaction, Txid, XOnlyPublicKey
+    consensus::encode::serialize, key::Secp256k1, opcodes, Address, Network, PublicKey, ScriptBuf, TapNodeHash, TapSighashType, Transaction, Txid, XOnlyPublicKey
 };
 use bitcoin_hashes::Hash;
 use bitcoin_v30::{consensus::encode::deserialize, Transaction as TransactionV30};
-use frost_adaptor_signature::VerifyingKey;
+use frost_adaptor_signature::{keys::PublicKeyPackage, VerifyingKey};
 use ordinals::SpacedRune;
 
 use super::merkle_proof;
@@ -11,9 +11,9 @@ use super::merkle_proof;
 // Magic txin sequence for withdrawal txs
 const MAGIC_SEQUENCE: u32 = (1 << 31) + 0xde;
 
-pub fn schnorr_signature_from_frost(frost_signature: frost_adaptor_signature::Signature) -> Signature {
+pub fn schnorr_signature_from_frost(frost_signature: frost_adaptor_signature::Signature) -> bitcoin::secp256k1::schnorr::Signature {
     let sig_bytes = frost_signature.serialize().unwrap();
-    Signature::from_slice(&sig_bytes).unwrap()
+    bitcoin::secp256k1::schnorr::Signature::from_slice(&sig_bytes).unwrap()
 }
 
 pub fn taproot_signature_from_frost(frost_signature: frost_adaptor_signature::Signature) -> bitcoin::taproot::Signature {
@@ -28,6 +28,24 @@ pub fn convert_tweak(tweak: &Option<TapNodeHash>) -> Option<&[u8]> {
         Some(tnh) => Some(tnh.as_byte_array()),
         None => None,
     }
+}
+
+pub fn generate_tweak(pubkey: &PublicKeyPackage, index: u16) -> Option<TapNodeHash> {
+    let key_bytes = match pubkey.verifying_key().serialize() {
+        Ok(b) => b,
+        Err(_) => return None,
+    };
+    let x_only_pubkey = XOnlyPublicKey::from_slice(&key_bytes[1..]).unwrap();
+
+    let mut script = bitcoin::ScriptBuf::new();
+    script.push_slice(x_only_pubkey.serialize());
+    script.push_opcode(bitcoin::opcodes::all::OP_CHECKSIG);
+    script.push_slice((index as u8).to_be_bytes());
+
+    Some(TapNodeHash::from_script(
+        script.as_script(),
+        bitcoin::taproot::LeafVersion::TapScript,
+    ))
 }
 
 pub fn get_group_address(verify_key: &VerifyingKey, network: Network) -> Address {

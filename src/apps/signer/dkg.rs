@@ -19,7 +19,6 @@ use crate::helper::{mem_store, now};
 use crate::apps::signer::Signer;
 use crate::helper::cipher::{decrypt, encrypt};
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DKGTask {
     pub id: String,
