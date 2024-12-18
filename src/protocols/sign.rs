@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, marker::PhantomData};
 
-use frost_adaptor_signature::{keys::Tweak, round1::{self, SigningNonces}, round2::{self, SignatureShare}, Group, Identifier, Secp256K1Group, SigningPackage};
+use frost_adaptor_signature::{keys::Tweak, round1::{self, SigningNonces}, round2::{self, SignatureShare}, Identifier, SigningPackage};
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
