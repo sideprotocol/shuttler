@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use frost_adaptor_signature as frost;
 use frost::{keys, Identifier, keys::dkg::round1};
 
-use crate::apps::Context;
-use crate::helper::gossip::{publish_message, SubscribeTopic};
+use crate::apps::{Context, SubscribeMessage, TopicAppHandle};
+use crate::helper::gossip::{publish_message, publish_topic_message, SubscribeTopic};
 use crate::helper::store::{MemStore, Store};
 use crate::helper::{mem_store, now};
 use crate::helper::cipher::{decrypt, encrypt};
@@ -59,7 +59,7 @@ pub struct DKGTask {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct DKGMessage {
+pub struct DKGMessage {
     pub payload: DKGPayload,
     pub nonce: u64,
     pub sender: Identifier,
@@ -67,19 +67,19 @@ struct DKGMessage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct DKGPayload {
+pub struct DKGPayload {
     pub task_id: String,
     pub round1_packages: BTreeMap<Identifier, round1::Package>,
     pub round2_packages: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>,
 }
 
-impl<H> DKG<H> where H: KeyHander {
+impl<H> DKG<H> where H: KeyHander + TopicAppHandle {
 
     fn broadcast_dkg_packages(&self, ctx: &mut Context, task_id: &str, round1_packages: BTreeMap<Identifier, round1::Package>, round2_packages: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>) {
         let response = self.prepare_response_for_task(ctx, task_id, round1_packages, round2_packages );
         // debug!("Broadcasting: {:?}", response.);
         let message = serde_json::to_vec(&response).expect("Failed to serialize DKG package");
-        publish_message(ctx, SubscribeTopic::DKG, message);
+        publish_topic_message(ctx, H::topic(), message);
     }
 
     pub fn generate(&mut self, ctx: &mut Context, task: &mut DKGTask) {
@@ -174,8 +174,14 @@ impl<H> DKG<H> where H: KeyHander {
         DKGMessage{ payload, nonce: now(), sender: ctx.identifier.clone(), signature }
     }
 
-    fn received_dkg_response(&mut self, ctx: &mut Context, response: DKGMessage) {
-        let task_id = response.payload.task_id.clone();
+    pub fn on_message(&mut self, ctx: &mut Context, message: &SubscribeMessage) {
+        if let Ok(m) =  H::message(message) {
+            self.received_dkg_message(ctx, m);
+        }
+    }
+
+    fn received_dkg_message(&mut self, ctx: &mut Context, message: DKGMessage) {
+        let task_id = message.payload.task_id.clone();
         let mut task = match self.db_task.get(&task_id) {
             Some(task) => task,
             None => {
@@ -183,16 +189,16 @@ impl<H> DKG<H> where H: KeyHander {
             }
         };
 
-        let addr = sha256::digest(&response.sender.serialize())[0..40].to_uppercase();
+        let addr = sha256::digest(&message.sender.serialize())[0..40].to_uppercase();
         if !task.participants.contains(&addr) {
-            debug!("Invalid DKG participant {:?}, {:?}", response.sender, addr);
+            debug!("Invalid DKG participant {:?}, {:?}", message.sender, addr);
             return;
         }
 
         if task.round == Round::Round1 {
-            self.received_round1_packages(ctx, &mut task, response.payload.round1_packages)
+            self.received_round1_packages(ctx, &mut task, message.payload.round1_packages)
         } else if task.round == Round::Round2 {
-            self.received_round2_packages(ctx, &mut task, response.payload.round2_packages)
+            self.received_round2_packages(ctx, &mut task, message.payload.round2_packages)
         }
     }
 

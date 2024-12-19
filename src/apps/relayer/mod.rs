@@ -43,6 +43,10 @@ impl App for Relayer {
             submit_fee_rate(self),
         );
     }
+    
+    fn subscribe(&self, _ctx: &mut Context) {
+        
+    }
 }
 
 impl Relayer {

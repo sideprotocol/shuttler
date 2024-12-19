@@ -447,6 +447,10 @@ impl super::App for Signer {
     async fn on_tick(&mut self, ctx: &mut Context) {
         tasks_executor(ctx, &self).await
     }
+    
+    fn subscribe(&self, _ctx: &mut Context) {
+        
+    }
 }
 
 pub fn broadcast_dkg_packages(ctx: &mut Context, task_id: &str, round1_packages: BTreeMap<Identifier, Package>, round2_packages: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>) {

@@ -72,6 +72,15 @@ pub fn publish_message(ctx: &mut Context, topic: SubscribeTopic, message: Vec<u8
     }
 }
 
+pub fn publish_topic_message(ctx: &mut Context, topic: IdentTopic, message: Vec<u8>) {
+    match ctx.swarm.behaviour_mut().gossip.publish(topic.clone(), message) {
+        Ok(_) => { },
+        Err(e) => {
+            tracing::error!("Failed to publish message to topic {:?}: {:?}", topic, e);
+        }
+    }
+}
+
 
 
 

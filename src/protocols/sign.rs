@@ -13,6 +13,10 @@ pub type Round1Store = MemStore<String, BTreeMap<Index,BTreeMap<Identifier,round
 pub type Round2Store = MemStore<String, BTreeMap<Index,BTreeMap<Identifier,round2::SignatureShare>>>;
 pub type NonceStore = MemStore<String, BTreeMap<Index, round1::SigningNonces>>;
 
+pub trait SignatureHander {
+    fn on_completed(ctx: &mut Context, signature: frost_adaptor_signature::Signature);
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignMesage {
     pub task_id: String,
@@ -61,7 +65,7 @@ pub struct SignTask {
     participants: Vec<Identifier>,
 }
 
-pub struct StandardSigner<H>{
+pub struct StandardSigner<H: SignatureHander>{
     db_task: MemStore<String, SignTask>,
     db_round1: Round1Store,
     db_round2: Round2Store,
@@ -69,7 +73,17 @@ pub struct StandardSigner<H>{
     _p: PhantomData<H>,
 }
 
-impl<H> StandardSigner<H> {
+impl<H> StandardSigner<H> where H: SignatureHander {
+    pub fn new() -> Self {
+        Self {
+            db_task: MemStore::new(),
+            db_round1: MemStore::new(),
+            db_round2: MemStore::new(),
+            db_nonce: NonceStore::new(),
+            _p: PhantomData::default(),
+        }
+    }
+
     pub fn clean_stores(&mut self, task_id: &String) {
         self.db_nonce.remove(task_id);
         self.db_round1.remove(task_id);

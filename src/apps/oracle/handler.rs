@@ -1,5 +1,6 @@
-use crate::{apps::Context, config::VaultKeypair, helper::store::Store, protocols::dkg::{KeyHander, DKG}};
+use libp2p::gossipsub::IdentTopic;
 
+use crate::{apps::{Context, TopicAppHandle}, config::VaultKeypair, helper::store::Store, protocols::{dkg::{KeyHander, DKG}, sign::{SignatureHander, StandardSigner}}};
 
 pub struct NonceHandler {}
 pub type NonceGenerator = DKG<NonceHandler>;
@@ -18,6 +19,12 @@ impl KeyHander for NonceHandler {
     }
 }
 
+impl TopicAppHandle for NonceHandler {
+    fn topic() -> IdentTopic {
+        IdentTopic::new("nonce")
+    }
+}
+
 pub struct OracleKeyShareHandler{}
 pub type OracleKeyShareGenerator = DKG<OracleKeyShareHandler>;
 
@@ -33,5 +40,20 @@ impl KeyHander for OracleKeyShareHandler {
             tweak,
         };
         ctx.keystore.save(&key.to_string(), &keyshare);
+    }
+}
+
+impl TopicAppHandle for OracleKeyShareHandler {
+    fn topic() -> IdentTopic {
+        IdentTopic::new("Oracle")
+    }
+}
+
+pub struct NonceSignatureHandler{}
+pub type NonceSigner = StandardSigner<NonceSignatureHandler>;
+
+impl SignatureHander for NonceSignatureHandler {
+    fn on_completed(ctx: &mut Context, signature: frost_adaptor_signature::Signature) {
+        todo!()
     }
 }

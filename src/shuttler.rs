@@ -162,7 +162,8 @@ impl Shuttler {
         subscribe_gossip_topics(&mut swarm);
 
         let mut context = Context::new(swarm, identifier, node_key, self.conf.clone(), priv_validator_key.address.to_string());
-
+        self.oracle.subscribe(&mut context);
+        
         loop {
             select! {
                 swarm_event = context.swarm.select_next_some() => match swarm_event {
