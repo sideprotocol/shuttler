@@ -6,16 +6,14 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 pub use tracing::error;
 use usize as Index;
-use crate::{apps::Context, config::VaultKeypair, helper::{bitcoin::convert_tweak, encoding::{self, hex_to_projective_point}, gossip::{publish_message, SubscribeTopic}, mem_store, store::{MemStore, Store}}};
+use crate::{apps::{Context, DKGHander, SignMode, SigningHandler, Status, Task}, config::VaultKeypair, 
+    helper::{
+        bitcoin::convert_tweak, encoding::{self, hex_to_projective_point}, 
+        gossip::{publish_message, SubscribeTopic}, mem_store, 
+        store::Store
+}};
 
 use ed25519_compact::{PublicKey, Signature};
-pub type Round1Store = MemStore<String, BTreeMap<Index,BTreeMap<Identifier,round1::SigningCommitments>>>;
-pub type Round2Store = MemStore<String, BTreeMap<Index,BTreeMap<Identifier,round2::SignatureShare>>>;
-pub type NonceStore = MemStore<String, BTreeMap<Index, round1::SigningNonces>>;
-
-pub trait SignatureHander {
-    fn on_completed(ctx: &mut Context, signature: frost_adaptor_signature::Signature);
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignMesage {
@@ -31,68 +29,15 @@ pub enum SignPackage {
     Round2(BTreeMap<Index,BTreeMap<Identifier,round2::SignatureShare>>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Status {
-    WIP,
-    RESET,
-    CLOSE,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Input {
-    key: String, 
-    message: Vec<u8>,
-    signature: Option<frost_adaptor_signature::Signature>,
-    adaptor_signature: Option<frost_adaptor_signature::AdaptorSignature>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-enum SignMode {
-    Sign,
-    SignWithTweak,
-    SignWithGroupcommitment,
-    SignWithAdaptorPoint,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SignTask {
-    id: String,
-    mode: SignMode,
-    adaptor_point: String,
-    group_commitment: String,
-    status: Status,
-    inputs: Vec<Input>,
-    participants: Vec<Identifier>,
-}
-
-pub struct StandardSigner<H: SignatureHander>{
-    db_task: MemStore<String, SignTask>,
-    db_round1: Round1Store,
-    db_round2: Round2Store,
-    db_nonce: NonceStore,
+pub struct StandardSigner<H: SigningHandler>{
     _p: PhantomData<H>,
 }
 
-impl<H> StandardSigner<H> where H: SignatureHander {
-    pub fn new() -> Self {
-        Self {
-            db_task: MemStore::new(),
-            db_round1: MemStore::new(),
-            db_round2: MemStore::new(),
-            db_nonce: NonceStore::new(),
-            _p: PhantomData::default(),
-        }
-    }
-
-    pub fn clean_stores(&mut self, task_id: &String) {
-        self.db_nonce.remove(task_id);
-        self.db_round1.remove(task_id);
-        self.db_round2.remove(task_id);
-    }
+impl<H> StandardSigner<H> where H: SigningHandler {
     
-    pub fn generate_commitments(&mut self, ctx: &mut Context, task: &SignTask) {
+    pub fn generate_commitments(ctx: &mut Context, task: &Task) {
 
-        if task.status == Status::CLOSE {
+        if task.status == Status::SignComplete {
             return
         }
 
@@ -100,7 +45,7 @@ impl<H> StandardSigner<H> where H: SignatureHander {
         let mut commitments = BTreeMap::new();
         //let mut commitments = signer.get_signing_commitments(&task.id);
 
-        task.inputs.iter().enumerate().for_each(|(index, input)| {
+        task.sign_inputs.iter().enumerate().for_each(|(index, input)| {
             let mut rng = thread_rng();
             let key = match ctx.keystore.get(&input.key) {
                 Some(k) => k,
@@ -114,7 +59,7 @@ impl<H> StandardSigner<H> where H: SignatureHander {
         });
 
         // Save nonces to local storage.
-        self.db_nonce.save(&task.id, &nonces);
+        ctx.nonce_store.save(&task.id, &nonces);
 
         // Publish commitments to other pariticipants
         let mut msg =  SignMesage {
@@ -125,10 +70,10 @@ impl<H> StandardSigner<H> where H: SignatureHander {
         };
         broadcast_signing_packages(ctx, &mut msg);
 
-        self.received_sign_message(ctx, msg);
+        Self::received_sign_message(ctx, msg);
     }
 
-    fn received_sign_message(&mut self, ctx: &mut Context, msg: SignMesage) {
+    fn received_sign_message(ctx: &mut Context, msg: SignMesage) {
 
         // Ensure the message is not forged.
         match PublicKey::from_slice(&msg.sender.serialize()) {
@@ -154,7 +99,7 @@ impl<H> StandardSigner<H> where H: SignatureHander {
         match msg.package {
             SignPackage::Round1(commitments) => {
 
-                let mut remote_commitments = self.db_round1.get(&task_id).unwrap_or(BTreeMap::new());
+                let mut remote_commitments = ctx.commitment_store.get(&task_id).unwrap_or(BTreeMap::new());
                 // return if msg has received.
                 if let Some(exists) = remote_commitments.get(&first) {
                     if exists.contains_key(&msg.sender) {
@@ -174,14 +119,14 @@ impl<H> StandardSigner<H> where H: SignatureHander {
                     }
                 });
 
-                self.db_round1.save(&task_id, &remote_commitments);
+                ctx.commitment_store.save(&task_id, &remote_commitments);
 
-                self.try_generate_signature_shares(ctx, &task_id);
+                Self::try_generate_signature_shares(ctx, &task_id);
 
             },
             SignPackage::Round2(sig_shares) => {
 
-                let mut remote_sig_shares = self.db_round2.get(&task_id).unwrap_or(BTreeMap::new());
+                let mut remote_sig_shares = ctx.signature_store.get(&task_id).unwrap_or(BTreeMap::new());
                 // return if msg has received.
                 if let Some(exists) = remote_sig_shares.get(&first) {
                     if exists.contains_key(&msg.sender) {
@@ -201,30 +146,30 @@ impl<H> StandardSigner<H> where H: SignatureHander {
                     }
                 });
 
-                self.db_round2.save(&task_id, &remote_sig_shares);
+                ctx.signature_store.save(&task_id, &remote_sig_shares);
 
-                self.try_aggregate_signature_shares(ctx, &task_id);
+                Self::try_aggregate_signature_shares(ctx, &task_id);
                 
             }
         }
     }
 
-    fn try_generate_signature_shares(&mut self, ctx: &mut Context, task_id: &String) {
+    fn try_generate_signature_shares(ctx: &mut Context, task_id: &String) {
 
         // Ensure the task exists locally to prevent forged signature tasks. 
-        let mut task = match self.db_task.get(task_id) {
+        let mut task = match ctx.task_store.get(task_id) {
             Some(t) => t,
             None => return,
         };
 
-        let stored_nonces = self.db_nonce.get(&task.id).unwrap_or_default();
+        let stored_nonces = ctx.nonce_store.get(&task.id).unwrap_or_default();
         if stored_nonces.len() == 0 {
             return;
         }
-        let stored_remote_commitments = self.db_round1.get(&task.id).unwrap_or_default();
+        let stored_remote_commitments = ctx.commitment_store.get(&task.id).unwrap_or_default();
 
         let mut broadcast_packages = BTreeMap::new();
-        for (index, input) in task.inputs.iter().enumerate() {
+        for (index, input) in task.sign_inputs.iter().enumerate() {
             
             // filter packets from unknown parties
             if let Some(keypair) = ctx.keystore.get(&input.key) {
@@ -252,7 +197,7 @@ impl<H> StandardSigner<H> where H: SignatureHander {
                         return
                     }
                     task.participants = alive;
-                    self.db_task.save(&task.id, &task);
+                    ctx.task_store.save(&task.id, &task);
                 }
                 
                 let signing_package = SigningPackage::new(
@@ -295,23 +240,23 @@ impl<H> StandardSigner<H> where H: SignatureHander {
 
         broadcast_signing_packages(ctx, &mut msg);
 
-        self.received_sign_message(ctx, msg);
+        Self::received_sign_message(ctx, msg);
 
     }
 
-    fn try_aggregate_signature_shares(&mut self, ctx: &mut Context, task_id: &String) {
+    fn try_aggregate_signature_shares(ctx: &mut Context, task_id: &String) {
 
         // Ensure the task exists locally to prevent forged signature tasks. 
-        let mut task = match self.db_task.get(task_id) {
+        let mut task = match ctx.task_store.get(task_id) {
             Some(t) => t,
             None => return,
         };
 
-        let stored_remote_commitments = self.db_round1.get(&task.id).unwrap_or_default();
-        let stored_remote_signature_shares = self.db_round2.get(&task.id).unwrap_or_default();
+        let stored_remote_commitments = ctx.commitment_store.get(&task.id).unwrap_or_default();
+        let stored_remote_signature_shares = ctx.signature_store.get(&task.id).unwrap_or_default();
         
         let mut verifies = vec![];
-        for (index, input) in task.inputs.iter_mut().enumerate() {
+        for (index, input) in task.sign_inputs.iter_mut().enumerate() {
 
             let keypair = match ctx.keystore.get(&input.key) {
                 Some(keypair) => keypair,
@@ -351,7 +296,7 @@ impl<H> StandardSigner<H> where H: SignatureHander {
                 &input.message
             );
 
-            match aggregate(&signing_package, &signature_shares, &keypair, &task.mode, &task.adaptor_point) {
+            match aggregate(&signing_package, &signature_shares, &keypair, &task.sign_mode, &task.sign_adaptor_point) {
                 Ok(s) => {
                     verifies.push(true);
                     input.signature = Some(s);
@@ -375,16 +320,17 @@ impl<H> StandardSigner<H> where H: SignatureHander {
         // let psbt_bytes = psbt.serialize();
         // let psbt_base64 = to_base64(&psbt_bytes);
         // task.psbt = psbt_base64;
-        task.status = Status::CLOSE;
-        self.db_task.save(&task.id, &task);
+        task.status = Status::SignComplete;
+        ctx.task_store.save(&task.id, &task);
+        H::on_completed(ctx, &mut task);
 
     }
 
 }
 
 
-fn partial_sign(task: &SignTask, keypair: &VaultKeypair, signing_package: &SigningPackage, signer_nonces: &SigningNonces) -> Result<SignatureShare, frost_adaptor_signature::Error>  {
-    match task.mode {
+fn partial_sign(task: &Task, keypair: &VaultKeypair, signing_package: &SigningPackage, signer_nonces: &SigningNonces) -> Result<SignatureShare, frost_adaptor_signature::Error>  {
+    match task.sign_mode {
         SignMode::Sign => {
             round2::sign(signing_package, signer_nonces, &keypair.priv_key)
         },
@@ -395,12 +341,12 @@ fn partial_sign(task: &SignTask, keypair: &VaultKeypair, signing_package: &Signi
             )
         },
         SignMode::SignWithGroupcommitment => {
-            let group_commitment = hex_to_projective_point(&task.group_commitment).unwrap();
+            let group_commitment = hex_to_projective_point(&task.sign_group_commitment).unwrap();
             round2::sign_with_dkg_nonce(signing_package, signer_nonces, &keypair.priv_key, &group_commitment)
         },
         SignMode::SignWithAdaptorPoint => {
             // adatpor signature
-            let adaptor_point = match hex_to_projective_point(&task.adaptor_point) {
+            let adaptor_point = match hex_to_projective_point(&task.sign_adaptor_point) {
                 Ok(p) => p,
                 Err(_) => panic!("Invalid adaptor point"),
             };

@@ -12,7 +12,7 @@ use tracing::{debug, info, warn};
 
 use crate::{
     apps::{
-        oracle::Oracle, relayer::Relayer, signer::Signer, App, Context, SubscribeMessage
+        dlc::DLC, relayer::Relayer, signer::Signer, App, Context, SubscribeMessage
     },
     config::{candidate::Candidate, Config},
     helper::{
@@ -25,7 +25,7 @@ pub struct Shuttler {
     conf: Config,
     relayer: Relayer,
     signer: Signer,
-    oracle: Oracle,
+    oracle: DLC,
     seed: bool,
     candidates: Candidate,
 }
@@ -50,7 +50,7 @@ impl Shuttler {
 
         let relayer = Relayer::new(conf.clone(), start_relayer);
         let signer = Signer::new(conf.clone(), start_signer);
-        let oracle =  Oracle::new(conf.clone(), start_oracle).await;
+        let oracle =  DLC::new(conf.clone(), start_oracle).await;
 
         Self {
             candidates: Candidate::new(conf.side_chain.grpc.clone(), &conf.bootstrap_nodes),

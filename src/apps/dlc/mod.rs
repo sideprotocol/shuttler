@@ -1,5 +1,6 @@
-use handler::{NonceGenerator, NonceHandler, NonceSigner, OracleKeyShareGenerator, OracleKeyShareHandler};
 use std::time::Duration;
+use nonce::{NonceGenerator, NonceHandler};
+use oracle::{OracleGenerator, OracleHandler};
 use side_proto::side::dlc::query_client::QueryClient as DLCQueryClient;
 use tokio::time::{Instant, Interval};
 use tonic::transport::Channel;
@@ -7,26 +8,24 @@ use tonic::transport::Channel;
 use crate::config::Config;
 
 use super::{App, Context, SubscribeMessage, TopicAppHandle};
-mod handler;
 mod nonce;
+mod oracle;
 
-pub struct Oracle {    
+pub struct DLC {    
     enable: bool,
     config: Config,
     ticker: Interval,
     nonce_generator: NonceGenerator,
-    nonce_signer: NonceSigner,
-    keyshare_generator: OracleKeyShareGenerator,
+    keyshare_generator: OracleGenerator,
     dlc_client: DLCQueryClient<Channel>,
 }
 
-impl Oracle {
+impl DLC {
     pub async fn new(conf: Config, enable: bool) -> Self {
         let ticker = tokio::time::interval(Duration::from_secs(10));
 
         let nonce_generator = NonceGenerator::new();
-        let nonce_signer = NonceSigner::new();
-        let keyshare_generator = OracleKeyShareGenerator::new();
+        let keyshare_generator = OracleGenerator::new();
         let dlc_client = match DLCQueryClient::connect(conf.side_chain.grpc.clone()).await {
             Ok(c) => c,
             Err(e) => panic!("{}", e),
@@ -37,7 +36,6 @@ impl Oracle {
             ticker,
             enable,
             nonce_generator,
-            nonce_signer,
             keyshare_generator,
             dlc_client,
         }
@@ -47,7 +45,7 @@ impl Oracle {
     }
 }
 
-impl App for Oracle {
+impl App for DLC {
     async fn on_tick(&mut self, ctx: &mut Context) {
         self.fetch_new_key_generation(ctx).await;
         self.fetch_new_nonce_generation(ctx).await;
@@ -68,7 +66,7 @@ impl App for Oracle {
     
     fn subscribe(&self, ctx: &mut Context) {
         let _ = ctx.swarm.behaviour_mut().gossip.subscribe(&NonceHandler::topic());
-        let _ = ctx.swarm.behaviour_mut().gossip.subscribe(&OracleKeyShareHandler::topic());
+        let _ = ctx.swarm.behaviour_mut().gossip.subscribe(&OracleHandler::topic());
     }
 }
 
