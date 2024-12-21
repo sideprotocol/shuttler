@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 pub use tracing::error;
 use usize as Index;
-use crate::{apps::{Context, DKGHander, SignMode, SigningHandler, Status, Task}, config::VaultKeypair, 
+use crate::{apps::{Context, SignMode, SigningHandler, Status, Task}, config::VaultKeypair, 
     helper::{
         bitcoin::convert_tweak, encoding::{self, hex_to_projective_point}, 
         gossip::{publish_message, SubscribeTopic}, mem_store, 

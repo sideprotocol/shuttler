@@ -153,7 +153,7 @@ pub fn generate_round2_packages(ctx: &mut Context, signer: &Signer, task: &mut D
     Ok(())
 }
 
-pub fn sync_dkg_task_packages(ctx: &mut Context, signer: &Signer) {
+pub fn sync_dkg_task_packages(_ctx: &mut Context, signer: &Signer) {
     let tasks = signer.list_dkg_tasks();
     for t in tasks.iter() {
         if t.timestamp as u64 >= now() {

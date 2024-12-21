@@ -1,6 +1,6 @@
 use cosmrs::Any;
 use libp2p::gossipsub::IdentTopic;
-use side_proto::side::dlc::{MsgSubmitAgencyAddress, MsgSubmitOraclePubkey};
+use side_proto::side::dlc::MsgSubmitAgencyAddress;
 use tracing::error;
 
 use crate::{

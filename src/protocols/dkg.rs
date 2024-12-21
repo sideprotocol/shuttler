@@ -12,7 +12,6 @@ use frost_adaptor_signature as frost;
 use frost::{keys, Identifier, keys::dkg::round1};
 
 use crate::apps::{DKGHander, Context, Status, SubscribeMessage, Task, TopicAppHandle};
-use crate::config::VaultKeypair;
 use crate::helper::gossip::publish_topic_message;
 use crate::helper::store::{MemStore, Store};
 use crate::helper::{mem_store, now};
