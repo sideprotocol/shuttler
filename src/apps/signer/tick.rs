@@ -1,8 +1,5 @@
 
-use side_proto::side::{
-    btcbridge::{query_client::QueryClient as BtcQueryClient, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsRequest},
-    dlc::{query_client::QueryClient as DLCQueryClient, AnnouncementStatus, QueryAnnouncementsRequest},
-};
+use side_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsRequest};
 use cosmrs::Any;
 use tracing::{debug, error, info};
 
@@ -96,55 +93,6 @@ async fn fetch_dkg_requests(ctx: &mut Context, signer: &Signer) {
             {
                 // create a dkg task
                 let mut task = DKGTask::from_request(&request);
-                if signer.has_task_preceeded(&task.id) {
-                    continue;
-                };
-                generate_round1_package(ctx, signer, &mut task);
-                info!("Start DKG {:?}, {:?}", &task.id, task.participants);
-                signer.save_dkg_task(&task);
-            }
-        }
-    };
-}
-
-async fn fetch_nonce_generation_requests(ctx: &mut Context, signer: &Signer) {
-    let host = signer.config().side_chain.grpc.clone();
-    let mut client = match DLCQueryClient::connect(host.to_owned()).await {
-        Ok(client) => client,
-        Err(e) => {
-            error!("Failed to create btcbridge query client: {host} {}", e);
-            return;
-        }
-    };
-    if let Ok(requests_response) = client.announcements(QueryAnnouncementsRequest {
-            status: AnnouncementStatus::AnnouncementPending as i32,
-            pagination: None,
-        })
-        .await
-    {
-        let requests = requests_response.into_inner().announcements;
-        debug!("DKG Requests, {:?}", requests);
-        let tasks_in_process = requests.iter().map(|r| format!("dkg-{}", r.id)).collect::<Vec<_>>();
-        signer.list_dkg_tasks().iter().for_each(|task| {
-            if !tasks_in_process.contains(&task.id) {
-                debug!("Removing completed task: {:?}", task.id);
-                signer.remove_dkg_task(&task.id);
-            }
-        });
-
-        for request in requests {
-            let event = match &request.oracle_event {
-                Some(e)=> e,
-                None => continue,
-            };
-            let keyshare = match signer.get_keypair_from_db(&event.pubkey) {
-                Some(k) => k,
-                None => continue,
-            };
-
-            if keyshare.pub_key.verifying_shares().contains_key(&ctx.identifier) {
-                // create a dkg task
-                let mut task = DKGTask::from_announceemnt(&request, &keyshare);
                 if signer.has_task_preceeded(&task.id) {
                     continue;
                 };

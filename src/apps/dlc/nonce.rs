@@ -1,84 +1,11 @@
 
 use cosmrs::Any;
 use libp2p::gossipsub::IdentTopic;
-use side_proto::side::dlc::{DlcOracle, DlcOracleStatus, MsgSubmitNonce, QueryCountNoncesRequest, QueryOraclesRequest, QueryParamsRequest};
+use side_proto::side::dlc::MsgSubmitNonce;
 use tracing::error;
 
 use crate::{
-    apps::{Context, DKGHander, Input, SignMode, SigningHandler, Task, TopicAppHandle}, config::VaultKeypair, helper::{encoding::{pubkey_to_identifier, to_base64}, store::Store}, protocols::{dkg::DKG, sign::StandardSigner}};
-use super::DLC;
-
-impl DLC {
-    pub async fn fetch_new_nonce_generation(&mut self, ctx: &mut Context ) {
-        let response = self.dlc_client.count_nonces(QueryCountNoncesRequest{}).await;
-        let nonces = match response {
-            Ok(resp) => resp.into_inner(),
-            Err(_e) => return,
-        };
-        let response2 = self.dlc_client.params(QueryParamsRequest{}).await;
-        let param = match response2 {
-            Ok(resp) => match resp.into_inner().params {
-                Some(p) => p,
-                None => return,
-            },
-            Err(_) => return,
-        };
-        let response3 = self.dlc_client.oracles(QueryOraclesRequest{status: DlcOracleStatus::OracleStatusEnable as i32}).await;
-        let oracles = match response3 {
-            Ok(resp) => resp.into_inner().oracles,
-            Err(_) => return,
-        };
-        if nonces.counts.len() != oracles.len() {return};
-
-        oracles.iter().zip(nonces.counts.iter()).for_each(|(oracle, count)| {
-            if count >= &param.nonce_queue_size { return }
-
-            if let Some(mut task) = new_task_from_oracle(oracle) {
-                if ctx.task_store.exists(&task.id) { return }
-                // oracle should sign the new nonce.
-                task.sign_inputs.push(Input::new(oracle.pubkey.clone()));
-                ctx.task_store.save(&task.id, &task);
-                self.nonce_generator.generate(ctx, &task);
-            }
-        });
-    }
-
-    pub async fn fetch_new_key_generation(&mut self, ctx: &mut Context) {
-        let response3 = self.dlc_client.oracles(QueryOraclesRequest{status: DlcOracleStatus::OracleStatusPending as i32}).await;
-        let oracles = match response3 {
-            Ok(resp) => resp.into_inner().oracles,
-            Err(_) => return,
-        };
-        oracles.iter().for_each(|oracle| {
-            if let Some(task) = new_task_from_oracle(oracle) {
-                if ctx.task_store.exists(&task.id) { return }
-                ctx.task_store.save(&task.id, &task);
-
-                self.keyshare_generator.generate(ctx, &task);
-            }
-        });
-    }
-
-}
-
-fn new_task_from_oracle(oracle: &DlcOracle) -> Option<Task> {
-    let id = if oracle.status == DlcOracleStatus::OracleStatusEnable as i32{
-        format!("{}", oracle.id)
-    } else {
-        format!("{}-{}", oracle.id, oracle.nonce_index + 1)
-    };
-
-    let mut participants = vec![];
-    for p in &oracle.participants {
-        match hex::decode(p) {
-            Ok(b) => {
-               participants.push(pubkey_to_identifier(&b))
-            },
-            Err(_) => return None,
-        };
-    }
-    Some(Task::new_dkg(id, participants, oracle.threshold as u16, SignMode::Sign))
-}
+    apps::{Context, DKGHander, SigningHandler, Task, TopicAppHandle}, config::VaultKeypair, helper::{encoding::to_base64, store::Store}, protocols::{dkg::DKG, sign::StandardSigner}};
 
 pub struct NonceHandler {}
 pub type NonceGenerator = DKG<NonceHandler>;

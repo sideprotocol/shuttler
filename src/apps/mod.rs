@@ -59,6 +59,15 @@ impl Input {
             adaptor_signature: None,
         }
     }
+
+    pub fn new_with_message(sign_key: String, message: Vec<u8>) -> Self {
+        Self {
+            key: sign_key,
+            message,
+            signature: None,
+            adaptor_signature: None,
+        }
+    } 
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

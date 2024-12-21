@@ -2,7 +2,7 @@
 
 use core::fmt;
 use std::{collections::BTreeMap, fmt::Debug};
-use side_proto::side::{btcbridge::DkgRequest, dlc::DlcAnnouncement};
+use side_proto::side::btcbridge::DkgRequest;
 use ed25519_compact::x25519;
 use rand::thread_rng;
 use tracing::{debug, error, info};
@@ -13,8 +13,6 @@ use frost::{keys, Identifier, keys::dkg::round1::Package};
 
 use super::{broadcast_dkg_packages, Round};
 use crate::apps::Context;
-use crate::config::VaultKeypair;
-use crate::helper::encoding::to_base64;
 use crate::helper::{mem_store, now};
 use crate::apps::signer::Signer;
 use crate::helper::cipher::{decrypt, encrypt};
@@ -49,20 +47,6 @@ impl DKGTask {
             submitted: false,
         }
     } 
-
-    pub fn from_announceemnt(request: &DlcAnnouncement, keyshare: &VaultKeypair) -> Self {
-        Self {
-            id: format!("dkg-{}", request.id),
-            participants: keyshare.pub_key.verifying_shares().keys().map(|a| to_base64(&a.serialize()) ).collect::<Vec<_>>(), 
-            threshold: *keyshare.priv_key.min_signers(),
-            round: Round::Round1,
-            timestamp: 0,
-            address_num: 0u16,
-            dkg_vaults: vec![],
-            submitted: false,
-        }
-    }
-    
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
