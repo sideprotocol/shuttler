@@ -1,4 +1,7 @@
+use cosmrs::Any;
 use libp2p::gossipsub::IdentTopic;
+use side_proto::side::dlc::MsgSubmitOraclePubkey;
+use tracing::error;
 
 use crate::{
     apps::{Context, DKGHander, Task, TopicAppHandle}, 
@@ -22,31 +25,19 @@ impl DKGHander for OracleHandler {
         };
         ctx.keystore.save(&hexkey, &keyshare);
 
-        // let signature = hex::encode(ctx.node_key.sign(&rawkey, None));
+        let signature = hex::encode(ctx.node_key.sign(&rawkey, None));
 
-        // let cosm_msg = MsgSubmitOraclePubkey {
-        //     oracle_id: task.id.clone(),
-        //     sender: ctx.conf.relayer_bitcoin_address(),
-        //     pubkey: hexkey,
-        //     signature,
-        // };
+        let cosm_msg = MsgSubmitOraclePubkey {
+            oracle_id: task.id.clone(),
+            sender: ctx.conf.relayer_bitcoin_address(),
+            pubkey: hexkey,
+            signature,
+        };
+        let any = Any::from_msg(&cosm_msg).unwrap();
+        if let Err(e) = ctx.tx_sender.blocking_send(any) {
+            error!("{:?}", e)
+        }
 
-        // let any = Any::from_msg(&cosm_msg).unwrap();
-        // match send_cosmos_transaction(&ctx.conf, any).await {
-        //     Ok(resp) => {
-        //         let tx_response = resp.into_inner().tx_response.unwrap();
-        //         if tx_response.code == 0 {
-        //             task.submitted = true;
-        //             ctx.task_store.save(&task.id, task);
-        //             info!("Sent dkg vault: {:?}", tx_response.txhash);
-        //         }
-
-        //         error!("Failed to send dkg vault: {:?}", tx_response);
-        //     },
-        //     Err(e) => {
-        //         error!("Failed to send dkg vault: {:?}", e);
-        //     },
-        // };
     }
 }
 

@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 
+use cosmrs::Any;
 use ed25519_compact::SecretKey;
 use frost_adaptor_signature::{round1, round2, Identifier};
 use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{de::Error, Deserialize, Serialize};
-use tokio::time::Instant;
+use tokio::{sync::mpsc::Sender, time::Instant};
 
 use crate::{config::{Config, VaultKeypair}, helper::{now, store::DefaultStore}, shuttler::ShuttlerBehaviour};
 
@@ -49,6 +50,17 @@ pub struct Input {
     pub adaptor_signature: Option<frost_adaptor_signature::AdaptorSignature>,
 }
 
+impl Input {
+    pub fn new(sign_key: String) -> Self {
+        Self {
+            key: sign_key,
+            message: vec![],
+            signature: None,
+            adaptor_signature: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
     pub id: String,
@@ -87,6 +99,7 @@ type SignerNonceStore = DefaultStore<String, BTreeMap<Index, round1::SigningNonc
 
 pub struct Context {
     pub swarm: Swarm<ShuttlerBehaviour>,
+    pub tx_sender: Sender<Any>,
     pub identifier: Identifier,
     pub node_key: SecretKey,
     pub validator_hex_address: String,
@@ -110,9 +123,10 @@ pub trait TopicAppHandle {
 }
 
 impl Context {
-    pub fn new(swarm: Swarm<ShuttlerBehaviour>, identifier: Identifier, node_key: SecretKey, conf: Config, validator_hex_address:String) -> Self {
+    pub fn new(swarm: Swarm<ShuttlerBehaviour>, tx_sender: Sender<Any>,identifier: Identifier, node_key: SecretKey, conf: Config, validator_hex_address:String) -> Self {
         Self { 
             swarm, 
+            tx_sender,
             identifier, 
             node_key, 
             validator_hex_address, 

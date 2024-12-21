@@ -1,9 +1,11 @@
 
+use cosmrs::Any;
 use libp2p::gossipsub::IdentTopic;
-use side_proto::side::dlc::{DlcOracle, DlcOracleStatus, QueryCountNoncesRequest, QueryOraclesRequest, QueryParamsRequest};
+use side_proto::side::dlc::{DlcOracle, DlcOracleStatus, MsgSubmitNonce, QueryCountNoncesRequest, QueryOraclesRequest, QueryParamsRequest};
+use tracing::error;
 
 use crate::{
-    apps::{Context, DKGHander, Input, SignMode, SigningHandler, Task, TopicAppHandle}, config::VaultKeypair, helper::{encoding::pubkey_to_identifier, store::Store}, protocols::{dkg::DKG, sign::StandardSigner}};
+    apps::{Context, DKGHander, Input, SignMode, SigningHandler, Task, TopicAppHandle}, config::VaultKeypair, helper::{encoding::{pubkey_to_identifier, to_base64}, store::Store}, protocols::{dkg::DKG, sign::StandardSigner}};
 use super::DLC;
 
 impl DLC {
@@ -31,8 +33,10 @@ impl DLC {
         oracles.iter().zip(nonces.counts.iter()).for_each(|(oracle, count)| {
             if count >= &param.nonce_queue_size { return }
 
-            if let Some(task) = new_task_from_oracle(oracle) {
+            if let Some(mut task) = new_task_from_oracle(oracle) {
                 if ctx.task_store.exists(&task.id) { return }
+                // oracle should sign the new nonce.
+                task.sign_inputs.push(Input::new(oracle.pubkey.clone()));
                 ctx.task_store.save(&task.id, &task);
                 self.nonce_generator.generate(ctx, &task);
             }
@@ -66,11 +70,11 @@ fn new_task_from_oracle(oracle: &DlcOracle) -> Option<Task> {
 
     let mut participants = vec![];
     for p in &oracle.participants {
-        let x = match hex::decode(p) {
+        match hex::decode(p) {
             Ok(b) => {
                participants.push(pubkey_to_identifier(&b))
             },
-            Err(e) => return None,
+            Err(_) => return None,
         };
     }
     Some(Task::new_dkg(id, participants, oracle.threshold as u16, SignMode::Sign))
@@ -82,14 +86,20 @@ pub type NonceGenerator = DKG<NonceHandler>;
 impl DKGHander for NonceHandler {
     fn on_completed(ctx: &mut Context, task: &mut Task, priv_key: frost_adaptor_signature::keys::KeyPackage, pub_key: frost_adaptor_signature::keys::PublicKeyPackage) {
         let tweak = None;
-        let hexkey = hex::encode(pub_key.verifying_key().serialize().unwrap());
+        let message = pub_key.verifying_key().serialize().unwrap();
+        let store_key = hex::encode(&message);
         let keyshare = VaultKeypair {
             pub_key,
             priv_key,
             tweak,
         };
-        ctx.keystore.save(&hexkey, &keyshare);
-        // task.sign_inputs = vec![Input { key: todo!(), message: todo!(), signature: todo!(), adaptor_signature: todo!() }];
+        ctx.keystore.save(&store_key, &keyshare);
+        
+        task.sign_inputs.iter_mut().for_each(|i| {
+            i.message = message.clone();
+        });
+        ctx.task_store.save(&task.id, task);
+
         NonceSigner::generate_commitments(ctx, task);   
     }
 }
@@ -105,7 +115,19 @@ pub type NonceSigner = StandardSigner<NonceSignatureHandler>;
 
 impl SigningHandler for NonceSignatureHandler {
     fn on_completed(ctx: &mut Context, task: &mut Task) {
-        todo!()
+        task.sign_inputs.iter().for_each(|input| {
+            if let Some(signature) = input.signature  {
+                let cosm_msg = MsgSubmitNonce {
+                    sender: ctx.conf.relayer_bitcoin_address(),
+                    nonce: to_base64(&input.message),
+                    signature: to_base64(&signature.serialize().unwrap()),
+                };
+                let any = Any::from_msg(&cosm_msg).unwrap();
+                if let Err(e) = ctx.tx_sender.blocking_send(any) {
+                    error!("{:?}", e)
+                }
+            }
+        });
     }
 }
 
