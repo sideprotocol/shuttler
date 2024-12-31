@@ -211,6 +211,21 @@ impl Config {
             home_dir(home_str)
         };
         Self::generate_priv_validator_key(home.clone());
+        let bitcoin = if network == Network::Bitcoin {
+            BitcoinCfg {
+                network,
+                rpc: "http://127.0.0.1:8332".to_string(),
+                user: "<rpc_user_name>".to_string(),
+                password: "<rpc_user_password>".to_string(),
+            }
+        } else {
+            BitcoinCfg {
+                network,
+                rpc: "http://192.248.150.102:18332".to_string(),
+                user: "side".to_string(),
+                password: "12345678".to_string(),
+            }
+        };
         Self {
             home,
             // p2p_keypair ,
@@ -219,12 +234,7 @@ impl Config {
             log_level: "debug".to_string(),
             mnemonic: mnemonic.to_string(),
             priv_validator_key_path: "priv_validator_key.json".to_string(),
-            bitcoin: BitcoinCfg {
-                network,
-                rpc: "http://192.248.150.102:18332".to_string(),
-                user: "side".to_string(),
-                password: "12345678".to_string(),
-            },
+            bitcoin,
             side_chain: CosmosChain {
                 grpc: "http://localhost:9090".to_string(),
                 gas: 1000000,
