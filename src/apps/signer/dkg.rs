@@ -190,6 +190,20 @@ pub fn prepare_response_for_task(signer: &Signer, task_id: &str) -> DKGResponse 
 }
 
 pub fn received_dkg_response(response: DKGResponse, signer: &Signer) {
+
+    // Ensure the message is not forged.
+    match PublicKey::from_slice(&response.sender.serialize()) {
+        Ok(public_key) => {
+            let raw = serde_json::to_vec(&response.payload).unwrap();
+            let sig = Signature::from_slice(&response.signature).unwrap();
+            if public_key.verify(&raw, &sig).is_err() {
+                debug!("Reject, untrusted package from {:?}", response.sender);
+                return;
+            }
+        }
+        Err(_) => return
+    }
+
     let task_id = response.payload.task_id.clone();
     let mut task = match signer.get_dkg_task(&task_id) {
         Some(task) => task,
@@ -198,9 +212,8 @@ pub fn received_dkg_response(response: DKGResponse, signer: &Signer) {
         }
     };
 
-    let addr = sha256::digest(&response.sender.serialize())[0..40].to_uppercase();
-    if !task.participants.contains(&addr) {
-        debug!("Invalid DKG participant {:?}, {:?}", response.sender, addr);
+    if !task.participants.contains(&response.sender) {
+        debug!("Invalid DKG participant {:?}", response.sender);
         return;
     }
 

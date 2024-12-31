@@ -88,7 +88,7 @@ async fn fetch_dkg_requests(signer: &Signer) {
             if request
                 .participants
                 .iter()
-                .find(|p| p.consensus_address == signer.validator_address())
+                .find(|p| p.consensus_address == signer.identifier())
                 .is_some()
             {
                 // create a dkg task
