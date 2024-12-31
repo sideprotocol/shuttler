@@ -50,8 +50,8 @@ pub struct SignMesage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SignPackage {
-    Round1(BTreeMap<Index,BTreeMap<Identifier,round1::SigningCommitments>>),
-    Round2(BTreeMap<Index,BTreeMap<Identifier,round2::SignatureShare>>),
+    Round1(BTreeMap<Index,(Identifier,round1::SigningCommitments)>),
+    Round2(BTreeMap<Index,(Identifier,round2::SignatureShare)>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -259,9 +259,7 @@ fn generate_commitments(ctx: &mut Context, signer: &Signer, task: &SignTask) {
     task.inputs.iter().for_each(|(index, input)| {
         if let Some((nonce, commitment)) = generate_nonce_and_commitment_by_address(&input.address, signer) {
             nonces.insert(*index, nonce);
-            let mut input_commit = BTreeMap::new();
-            input_commit.insert(signer.identifier().clone(), commitment);
-            commitments.insert(*index, input_commit.clone());
+            commitments.insert(*index, (signer.identifier().clone(), commitment));
         }
     });
 
@@ -320,10 +318,12 @@ pub fn received_sign_message(ctx: &mut Context, signer: &Signer, msg: SignMesage
             commitments.iter().for_each(|(index, incoming)| {
                 match received_commitments.get_mut(index) {
                     Some(existing) => {
-                        existing.extend(incoming);
+                        existing.insert(incoming.0, incoming.1);
                     },
                     None => {
-                        received_commitments.insert(*index, incoming.clone());
+                        let mut new_pack = BTreeMap::new();
+                        new_pack.insert(incoming.0, incoming.1);
+                        received_commitments.insert(*index, new_pack);
                     },
                 }
             });
@@ -347,10 +347,12 @@ pub fn received_sign_message(ctx: &mut Context, signer: &Signer, msg: SignMesage
             sig_shares.iter().for_each(|(index, incoming)| {
                 match received_sig_shares.get_mut(index) {
                     Some(existing) => {
-                        existing.extend(incoming);
+                        existing.insert(incoming.0, incoming.1);
                     },
                     None => {
-                        received_sig_shares.insert(*index, incoming.clone());
+                        let mut new_pack = BTreeMap::new();
+                        new_pack.insert(incoming.0, incoming.1);
+                        received_sig_shares.insert(*index, new_pack);
                     }
                 }
             });
@@ -394,7 +396,7 @@ pub fn try_generate_signature_shares(ctx: &mut Context, signer: &Signer, task_id
                 None => return
             };
 
-            // sanitize( &mut signing_commitments, &task.participants);
+            sanitize( &mut signing_commitments, &task.participants);
 
             let received = signing_commitments.len();
             if received < keypair.priv_key.min_signers().clone() as usize {
@@ -440,11 +442,8 @@ pub fn try_generate_signature_shares(ctx: &mut Context, signer: &Signer, task_id
                 }
             };
             
-            let mut my_share = BTreeMap::new();
-            my_share.insert(signer.identifier().clone(), signature_shares);
-            
             // broadcast my share
-            broadcast_packages.insert(index.clone(), my_share.clone());
+            broadcast_packages.insert(index.clone(), (signer.identifier().clone(), signature_shares));
         
         };
     };
