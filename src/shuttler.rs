@@ -3,6 +3,7 @@ use std::{
 };
 
 use ed25519_compact::{PublicKey, SecretKey, Signature};
+use frost_secp256k1_tr::Identifier;
 use futures::StreamExt;
 use libp2p::{
     gossipsub, identify, kad::{self, store::MemoryStore}, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, Multiaddr, PeerId, Swarm
@@ -212,7 +213,7 @@ impl Shuttler {
     ) {
         match event {
             ShuttlerBehaviourEvent::Gossip(gossipsub::Event::Message { message, .. }) => {
-                update_heartbeat(&message);
+                update_heartbeat(self.signer.identifier(), &message);
                 dispatch_messages(&self.oracle, context, &message);
                 dispatch_messages(&self.signer, context, &message);
                 dispatch_messages(&self.relayer,context, &message);
@@ -281,7 +282,7 @@ fn dispatch_messages<T: App>(app: &T, context: &mut Context,  message: &Subscrib
     }
 }
 
-fn update_heartbeat(message: &SubscribeMessage) {
+fn update_heartbeat(self_identifier: &Identifier, message: &SubscribeMessage) {
     if message.topic == SubscribeTopic::HEARTBEAT.topic().hash() {
         if let Ok(alive) = serde_json::from_slice::<HeartBeatMessage>(&message.data) {
             // Ensure the message is not forged.
@@ -296,7 +297,7 @@ fn update_heartbeat(message: &SubscribeMessage) {
                 }
                 Err(_) => return
             }
-            mem_store::update_alive_table( alive );
+            mem_store::update_alive_table( self_identifier, alive );
         }
     }
 }

@@ -29,7 +29,7 @@ lazy_static! {
 }
 
 pub const ALIVE_WINDOW: u64 = TASK_INTERVAL.as_secs() * 2;
-pub const BLOCK_TOLERENCE: i64 = 5;
+pub const BLOCK_TOLERENCE: u64 = 5;
 
 pub fn update_alive_table(self_identifier: &Identifier, alive: HeartBeatMessage) {
     // tracing::debug!("{:?} {}", alive.payload.identifier, if alive.payload.last_seen > now() {alive.payload.last_seen - now()} else {0} );
@@ -38,11 +38,11 @@ pub fn update_alive_table(self_identifier: &Identifier, alive: HeartBeatMessage)
     let mut table= AliveTable.lock().unwrap();
 
     if let Some(t) = table.get(&self_identifier) {
-        table.retain(|(k, v)| v >= t - BLOCK_TOLERENCE );
-        if alive.payload.block_height < t - BLOCK_TOLERENCE { return }
+        if alive.payload.block_height.abs_diff(t.clone()) > BLOCK_TOLERENCE { return }
     }
 
     table.insert(alive.payload.identifier, alive.payload.block_height);
+    table.retain(|_, v| v.abs_diff(alive.payload.block_height) <= BLOCK_TOLERENCE);
 
 }
 

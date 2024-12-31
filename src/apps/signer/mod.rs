@@ -399,7 +399,6 @@ impl Signer {
     pub fn remove_signing_task(&self, task_id: &str) {
         self.db_sign.remove(task_id).expect("Unable to remove task");
         self.remove_signing_task_variables(task_id);
-        mem_store::remove_task_participants(task_id);
     }
 
     pub fn remove_signing_task_variables(&self, task_id: &str) {

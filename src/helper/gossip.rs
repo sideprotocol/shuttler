@@ -47,12 +47,30 @@ pub fn subscribe_gossip_topics(swarm: &mut Swarm<ShuttlerBehaviour>) {
     }
 }
 
-pub async fn sending_heart_beat(ctx: &mut Context, signer: &Signer) -> Result<(), error>  {
+pub async fn sending_heart_beat(ctx: &mut Context, signer: &Signer) {
 
         let last_seen = now() + mem_store::ALIVE_WINDOW;
-        let client = BlockService::connect(signer.config().side_chain.grpc).await?;
-        let response = client.get_latest_block(GetLatestBlockRequest{}).await?;
-        let block_height = response.into_inner().sdk_block?.header?.height;
+        let mut client = match BlockService::connect(signer.config().side_chain.grpc.clone()).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("{}", e);
+                return;
+            },
+        };
+        let block = match client.get_latest_block(GetLatestBlockRequest{}).await {
+            Ok(res) => res.into_inner().sdk_block,
+            Err(e) => {
+                tracing::error!("{}", e);
+                return;
+            },
+        };
+        let block_height = match block {
+            Some(b) => match b.header {
+                Some(h) => h.height,
+                None => return,
+            }
+            None => return,
+        };
 
         let payload = HeartBeatPayload {
             identifier: signer.identifier().clone(),
@@ -66,6 +84,7 @@ pub async fn sending_heart_beat(ctx: &mut Context, signer: &Signer) -> Result<()
         publish_message(ctx, SubscribeTopic::HEARTBEAT, message);
         
         mem_store::update_alive_table(signer.identifier(), alive);
+
 }
 
 pub fn publish_message(ctx: &mut Context, topic: SubscribeTopic, message: Vec<u8>) {

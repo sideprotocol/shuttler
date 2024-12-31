@@ -131,8 +131,8 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
         let address: Address = Address::from_script(&script, signer.config().bitcoin.network).unwrap();
 
         // check if there are sufficient participants for this tasks
-        match signer.get_keypair_from_db(&address) {
-            Some(k) => if participants.len() < k.priv_key.min_signers() { return },
+        match signer.get_keypair_from_db(&address.to_string()) {
+            Some(k) => if participants.len() < k.priv_key.min_signers().clone() as usize { return },
             None => return,
         };
 
@@ -360,7 +360,7 @@ pub fn received_sign_message(ctx: &mut Context, signer: &Signer, msg: SignMesage
     }
 }
 
-pub fn sanitize<T>(storages: &mut BTreeMap<Identifier, T>, keys: &Vec<&Identifier>) {
+pub fn sanitize<T>(storages: &mut BTreeMap<Identifier, T>, keys: &Vec<Identifier>) {
     if keys.len() > 0 {
         storages.retain(|k, _| { keys.contains(&k)});
     }
@@ -391,7 +391,7 @@ pub fn try_generate_signature_shares(ctx: &mut Context, signer: &Signer, task_id
                 None => return
             };
 
-            sanitize( &mut signing_commitments, task.participants);
+            sanitize( &mut signing_commitments, &task.participants);
 
             let received = signing_commitments.len();
             if received < keypair.priv_key.min_signers().clone() as usize {

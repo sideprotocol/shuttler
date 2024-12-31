@@ -3,7 +3,7 @@
 use core::fmt;
 use std::{collections::BTreeMap, fmt::Debug};
 use cosmos_sdk_proto::side::btcbridge::DkgRequest;
-use ed25519_compact::x25519;
+use ed25519_compact::{x25519, PublicKey, Signature};
 use rand::thread_rng;
 use tracing::{debug, error, info};
 use serde::{Deserialize, Serialize};
@@ -14,6 +14,7 @@ use frost::{keys, Identifier, Secp256K1Sha256};
 use frost_core::keys::dkg::round1::Package;
 use super::{broadcast_dkg_packages, Round};
 use crate::apps::Context;
+use crate::helper::encoding::pubkey_to_identifier;
 use crate::helper::{mem_store, now};
 use crate::apps::signer::Signer;
 use crate::helper::cipher::{decrypt, encrypt};
@@ -21,7 +22,7 @@ use crate::helper::cipher::{decrypt, encrypt};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DKGTask {
     pub id: String,
-    pub participants: Vec<String>,
+    pub participants: Vec<Identifier>,
     pub threshold: u16,
     pub round: Round,
     pub timestamp: i64,
@@ -35,8 +36,8 @@ impl DKGTask {
         Self {
             id: format!("dkg-{}", request.id),
             participants: request.participants.iter().map(|p| {
-                p.consensus_address.clone()
-            }).collect(), 
+                pubkey_to_identifier(p.consensus_address.as_bytes())
+            }).collect::<Vec<_>>(), 
             threshold: request.threshold as u16,
             round: Round::Round1,
             timestamp: match request.expiration {

@@ -5,7 +5,7 @@ use tracing::{debug, error, info};
 
 use crate::{
     apps::{signer::{dkg::{generate_round1_package, DKGTask}, sign::save_task_into_signing_queue, Signer}, Context}, 
-    helper::{client_side::{get_signing_requests, send_cosmos_transaction}, gossip::sending_heart_beat}, 
+    helper::{client_side::{get_signing_requests, send_cosmos_transaction}, encoding::pubkey_to_identifier, gossip::sending_heart_beat}, 
 };
 
 use super::{dkg::sync_dkg_task_packages, sign::dispatch_executions, Round};
@@ -88,7 +88,7 @@ async fn fetch_dkg_requests(signer: &Signer) {
             if request
                 .participants
                 .iter()
-                .find(|p| p.consensus_address == signer.identifier())
+                .find(|p| &pubkey_to_identifier(p.consensus_address.as_bytes()) == signer.identifier())
                 .is_some()
             {
                 // create a dkg task
