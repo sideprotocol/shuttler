@@ -49,7 +49,8 @@ pub enum Round {
     Round1,
     Round2,
     Aggregate,
-    Closed,
+    Close,
+    Fail,
 }
 
 #[derive(Debug)]

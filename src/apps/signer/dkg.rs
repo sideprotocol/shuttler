@@ -249,7 +249,7 @@ pub fn received_round1_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
                 signer.save_dkg_task(&task);
             }
             Err(e) => {
-                task.round = Round::Closed;
+                task.round = Round::Fail;
                 signer.save_dkg_task(&task);
                 error!("Failed to generate round2 packages: {} - {:?}", task.id, e);
             }
@@ -260,7 +260,7 @@ pub fn received_round1_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
 
 pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>, signer: &Signer) {
 
-    if task.round == Round::Closed {
+    if task.round == Round::Close {
         debug!("DKG is already closed: {}", task.id);
         return;
     }
@@ -318,7 +318,7 @@ pub fn received_round2_packages(task: &mut DKGTask, packets: BTreeMap<Identifier
             Ok((key, pubkey)) => { 
                 // generate vault addresses and save its key share
                 let address_with_tweak = signer.generate_vault_addresses(pubkey, key, task.address_num);
-                task.round = Round::Closed;
+                task.round = Round::Close;
                 task.dkg_vaults = address_with_tweak;
                 signer.save_dkg_task(&task);
             },

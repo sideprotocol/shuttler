@@ -46,7 +46,7 @@ pub fn update_alive_table(self_identifier: &Identifier, alive: HeartBeatMessage)
 
 }
 
-pub fn count_task_participants(_task_id: &str) -> Vec<Identifier> {
+pub fn count_task_participants() -> Vec<Identifier> {
     let table= AliveTable.lock().unwrap();
     table.keys().map(|k| k.clone()).collect::<Vec<_>>()
 }

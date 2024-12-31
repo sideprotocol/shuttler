@@ -160,7 +160,8 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
         return
     }
 
-    let task = SignTask::new(task_id, request.psbt, inputs, request.creation_time);
+    let mut task = SignTask::new(task_id, request.psbt, inputs, request.creation_time);
+    task.participants = mem_store::count_task_participants();
     signer.save_signing_task(&task);
 
 }
@@ -295,9 +296,9 @@ pub fn received_sign_message(ctx: &mut Context, signer: &Signer, msg: SignMesage
     match msg.package {
         SignPackage::Round1(commitments) => {
 
-            let mut remote_commitments = signer.get_signing_commitments(&task_id);
+            let mut received_commitments = signer.get_signing_commitments(&task_id);
             // return if msg has received.
-            if let Some(exists) = remote_commitments.get(&first) {
+            if let Some(exists) = received_commitments.get(&first) {
                 if exists.contains_key(&msg.sender) {
                     return
                 }
@@ -305,26 +306,26 @@ pub fn received_sign_message(ctx: &mut Context, signer: &Signer, msg: SignMesage
 
             // merge received package
             commitments.iter().for_each(|(index, incoming)| {
-                match remote_commitments.get_mut(index) {
+                match received_commitments.get_mut(index) {
                     Some(existing) => {
                         existing.extend(incoming);
                     },
                     None => {
-                        remote_commitments.insert(*index, incoming.clone());
+                        received_commitments.insert(*index, incoming.clone());
                     },
                 }
             });
 
-            signer.save_signing_commitments(&task_id, &remote_commitments);
+            signer.save_signing_commitments(&task_id, &received_commitments);
 
             try_generate_signature_shares(ctx, signer, &task_id);
 
         },
         SignPackage::Round2(sig_shares) => {
 
-            let mut remote_sig_shares = signer.get_signing_signature_shares(&task_id);
+            let mut received_sig_shares = signer.get_signing_signature_shares(&task_id);
             // return if msg has received.
-            if let Some(exists) = remote_sig_shares.get(&first) {
+            if let Some(exists) = received_sig_shares.get(&first) {
                 if exists.contains_key(&msg.sender) {
                     return
                 }
@@ -332,17 +333,17 @@ pub fn received_sign_message(ctx: &mut Context, signer: &Signer, msg: SignMesage
 
             // Merge all signature shares
             sig_shares.iter().for_each(|(index, incoming)| {
-                match remote_sig_shares.get_mut(index) {
+                match received_sig_shares.get_mut(index) {
                     Some(existing) => {
                         existing.extend(incoming);
                     },
                     None => {
-                        remote_sig_shares.insert(*index, incoming.clone());
+                        received_sig_shares.insert(*index, incoming.clone());
                     }
                 }
             });
 
-            signer.save_signing_signature_shares(&task_id, &remote_sig_shares);
+            signer.save_signing_signature_shares(&task_id, &received_sig_shares);
 
             try_aggregate_signature_shares(signer, &task_id);
             
@@ -381,7 +382,7 @@ pub fn try_generate_signature_shares(ctx: &mut Context, signer: &Signer, task_id
                 None => return
             };
 
-            sanitize( &mut signing_commitments, &keypair.pub_key.verifying_shares().keys().map(|k| k).collect::<Vec<_>>());
+            sanitize( &mut signing_commitments, task.participants);
 
             let received = signing_commitments.len();
             if received < keypair.priv_key.min_signers().clone() as usize {
@@ -390,15 +391,10 @@ pub fn try_generate_signature_shares(ctx: &mut Context, signer: &Signer, task_id
   
             // Only check the first one, because all inputs are in the same package
             if *index == 0 {
-                let participants = keypair.pub_key.verifying_shares().keys().collect::<Vec<_>>();
-                let alive = mem_store::count_task_participants(&task_id);
-              
-                debug!("Commitments {} {}/[{},{}]", &task.id[..6], received, alive.len(), participants.len());
-
-                if !(received == participants.len() || received == alive.len()) {
+                debug!("Commitments {} {}/[{}]", &task.id[..6], received, task.participants.len());
+                if received != task.participants.len() {
                     return
                 }
-                task.participants = alive;
                 signer.save_signing_task(&task);
             }
             

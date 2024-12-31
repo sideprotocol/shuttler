@@ -106,7 +106,7 @@ async fn fetch_dkg_requests(signer: &Signer) {
 
 async fn submit_dkg_address(signer: &Signer) {
     for task in signer.list_dkg_tasks().iter_mut() {
-        if task.round != Round::Closed {
+        if task.round != Round::Close {
             continue;
         }
 
