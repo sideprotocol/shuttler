@@ -123,10 +123,18 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
         .map(|input| input.witness_utxo.clone().unwrap())
         .collect::<Vec<_>>();
 
+    let participants = mem_store::count_task_participants();
+
     psbt.inputs.iter().enumerate().for_each(|(i, input)| {
 
         let script = input.witness_utxo.clone().unwrap().script_pubkey;
         let address: Address = Address::from_script(&script, signer.config().bitcoin.network).unwrap();
+
+        // check if there are sufficient participants for this tasks
+        match signer.get_keypair_from_db(&address) {
+            Some(k) => if participants.len() < k.priv_key.min_signers() { return },
+            None => return,
+        };
 
         // get the message to sign
         let hash_ty = input
@@ -161,7 +169,8 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
     }
 
     let mut task = SignTask::new(task_id, request.psbt, inputs, request.creation_time);
-    task.participants = mem_store::count_task_participants();
+
+    task.participants = participants;
     signer.save_signing_task(&task);
 
 }
