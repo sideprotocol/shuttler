@@ -4,6 +4,8 @@ use frost_secp256k1_tr::Identifier;
 use libp2p::PeerId;
 use tracing::warn;
 
+use cosmrs::crypto::PublicKey;
+
 use crate::helper::{client_side, encoding::{identifier_to_peer_id, pubkey_to_identifier}, now};
 
 #[derive(Debug)]
@@ -53,7 +55,8 @@ impl Candidate {
 
         validators.iter().for_each(|v| {
             if let Some(k) = &v.pub_key {
-                let id = pubkey_to_identifier(&k.value);
+                let pub_key = PublicKey::try_from(k).unwrap();
+                let id = pubkey_to_identifier(&pub_key.to_bytes());
                 self.peers.push(identifier_to_peer_id(&id ));
                 self.identifiers.push( id );
             }
