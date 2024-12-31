@@ -32,7 +32,7 @@ pub const ALIVE_WINDOW: u64 = TASK_INTERVAL.as_secs() * 2;
 pub const BLOCK_TOLERENCE: u64 = 5;
 
 pub fn update_alive_table(self_identifier: &Identifier, alive: HeartBeatMessage) {
-    // tracing::debug!("{:?} {}", alive.payload.identifier, if alive.payload.last_seen > now() {alive.payload.last_seen - now()} else {0} );
+    tracing::debug!("{:?} {}, {} ", alive.payload.identifier, alive.payload.block_height, if alive.payload.last_seen > now() {alive.payload.last_seen - now()} else {0} );
     if alive.payload.last_seen < now() { return }
 
     let mut table= AliveTable.lock().unwrap();

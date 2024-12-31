@@ -125,6 +125,8 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
 
     let participants = mem_store::count_task_participants();
 
+    debug!("participants: {:?}", participants);
+
     psbt.inputs.iter().enumerate().for_each(|(i, input)| {
 
         let script = input.witness_utxo.clone().unwrap().script_pubkey;
@@ -281,6 +283,7 @@ fn generate_commitments(ctx: &mut Context, signer: &Signer, task: &SignTask) {
 
 pub fn received_sign_message(ctx: &mut Context, signer: &Signer, msg: SignMesage) {
 
+    debug!("Received : {:?} from {:?}", msg.task_id, msg.sender);
     // Ensure the message is not forged.
     match PublicKey::from_slice(&msg.sender.serialize()) {
         Ok(public_key) => {
@@ -362,14 +365,14 @@ pub fn received_sign_message(ctx: &mut Context, signer: &Signer, msg: SignMesage
 
 pub fn sanitize<T>(storages: &mut BTreeMap<Identifier, T>, keys: &Vec<Identifier>) {
     if keys.len() > 0 {
-        storages.retain(|k, _| { keys.contains(&k)});
+        storages.retain(|k, _| { keys.contains(k)});
     }
 }
 
 pub fn try_generate_signature_shares(ctx: &mut Context, signer: &Signer, task_id: &str) {
 
     // Ensure the task exists locally to prevent forged signature tasks. 
-    let mut task = match signer.get_signing_task(task_id) {
+    let task = match signer.get_signing_task(task_id) {
         Some(t) => t,
         None => return,
     };
@@ -391,7 +394,7 @@ pub fn try_generate_signature_shares(ctx: &mut Context, signer: &Signer, task_id
                 None => return
             };
 
-            sanitize( &mut signing_commitments, &task.participants);
+            // sanitize( &mut signing_commitments, &task.participants);
 
             let received = signing_commitments.len();
             if received < keypair.priv_key.min_signers().clone() as usize {

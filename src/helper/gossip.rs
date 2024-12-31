@@ -58,12 +58,15 @@ pub async fn sending_heart_beat(ctx: &mut Context, signer: &Signer) {
             },
         };
         let block = match client.get_latest_block(GetLatestBlockRequest{}).await {
-            Ok(res) => res.into_inner().sdk_block,
+            Ok(res) => res.into_inner().block,
             Err(e) => {
                 tracing::error!("{}", e);
                 return;
             },
         };
+
+        tracing::debug!("block: {:?}", block);
+
         let block_height = match block {
             Some(b) => match b.header {
                 Some(h) => h.height,
@@ -81,6 +84,8 @@ pub async fn sending_heart_beat(ctx: &mut Context, signer: &Signer) {
         let signature = signer.identity_key.sign(bytes, None).to_vec();
         let alive = HeartBeatMessage { payload, signature };
         let message = serde_json::to_vec(&alive).unwrap();
+
+        tracing::debug!("message: {:?}", alive);
         publish_message(ctx, SubscribeTopic::HEARTBEAT, message);
         
         mem_store::update_alive_table(signer.identifier(), alive);

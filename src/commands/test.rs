@@ -4,14 +4,14 @@ use cosmos_sdk_proto::{cosmos::base::tendermint::v1beta1::Validator, side::btcbr
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_server::QueryServer as AuthServer;
 use cosmos_sdk_proto::cosmos::tx::v1beta1::service_server::ServiceServer as TxServer;
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_server::ServiceServer as BlockServer;
-use cosmrs::Any;
+
 use tempfile::TempDir;
 use tendermint::{account::Id, PrivateKey};
 use tendermint_config::PrivValidatorKey;
 use tonic::transport::Server;
 use std::process::Command;
 
-use crate::{config, mock::{MockBlockService, MockQuery, MockTxService, DKG, DKG_FILE_NAME}};
+use crate::{config, helper::encoding::to_base64, mock::{MockBlockService, MockQuery, MockTxService, DKG, DKG_FILE_NAME}};
 
 pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32) {
     // parameters
@@ -40,14 +40,20 @@ pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32) {
 
         let rng = rand::thread_rng();
         let sk = ed25519_consensus::SigningKey::new(rng);
-        let priv_key = PrivateKey::from_ed25519_consensus(sk);
+        let priv_key = PrivateKey::from_ed25519_consensus(sk.clone());
         println!("{i}.{}", priv_key.public_key().to_hex().to_ascii_lowercase());
+        let tk = cosmrs::tendermint::PublicKey::from_ed25519_consensus(sk.verification_key());
 
+        let x = cosmrs::crypto::PublicKey::from(tk);
+        
+        let any = x.to_any().unwrap();
+        // let any = priv_key.public_key().to_any();
         validators.push(Validator{
-            pub_key: Some(Any {
-                type_url: "tendermint/PubKeyEd25519".to_string(),
-                value: priv_key.public_key().to_bytes(),
-            }),
+            // pub_key: Some(Any {
+            //     type_url: "/cosmos.crypto.ed25519.PubKey".to_string(),
+            //     value: priv_key.public_key(),
+            // }),
+            pub_key: Some(any),
             address: Id::from(priv_key.public_key()).to_string(),
             voting_power: 1,
             proposer_priority: 1,
@@ -59,7 +65,7 @@ pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32) {
             priv_key,
         };
 
-        participants.push(priv_validator_key.address.to_string());
+        participants.push(to_base64(&priv_validator_key.pub_key.to_bytes()));
 
         let text= serde_json::to_string_pretty(&priv_validator_key).unwrap();
         fs::write(home_i.join("priv_validator_key.json"), text).unwrap();

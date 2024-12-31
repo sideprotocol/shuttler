@@ -14,7 +14,7 @@ use frost::{keys, Identifier, Secp256K1Sha256};
 use frost_core::keys::dkg::round1::Package;
 use super::{broadcast_dkg_packages, Round};
 use crate::apps::Context;
-use crate::helper::encoding::pubkey_to_identifier;
+use crate::helper::encoding::{from_base64, pubkey_to_identifier};
 use crate::helper::{mem_store, now};
 use crate::apps::signer::Signer;
 use crate::helper::cipher::{decrypt, encrypt};
@@ -36,7 +36,8 @@ impl DKGTask {
         Self {
             id: format!("dkg-{}", request.id),
             participants: request.participants.iter().map(|p| {
-                pubkey_to_identifier(p.consensus_address.as_bytes())
+                let key_bytes = from_base64(&p.consensus_pubkey).unwrap();
+                pubkey_to_identifier(&key_bytes)
             }).collect::<Vec<_>>(), 
             threshold: request.threshold as u16,
             round: Round::Round1,
