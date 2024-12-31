@@ -8,6 +8,7 @@ use crate::{apps::{signer::Signer, Context}, shuttler::ShuttlerBehaviour};
 
 use super::{mem_store, now};
 pub const HEART_BEAT_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(60);
+use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::{service_client::ServiceClient as BlockService, GetLatestBlockRequest};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum SubscribeTopic {
@@ -32,7 +33,7 @@ pub struct HeartBeatMessage {
 pub struct HeartBeatPayload {
     pub identifier: Identifier<Secp256K1Sha256>,
     pub last_seen: u64,
-    pub task_ids: Vec<String>,
+    pub block_height: i64,
 }
 
 pub fn subscribe_gossip_topics(swarm: &mut Swarm<ShuttlerBehaviour>) {
@@ -46,14 +47,17 @@ pub fn subscribe_gossip_topics(swarm: &mut Swarm<ShuttlerBehaviour>) {
     }
 }
 
-pub async fn sending_heart_beat(ctx: &mut Context, signer: &Signer) {
+pub async fn sending_heart_beat(ctx: &mut Context, signer: &Signer) -> Result<(), error>  {
 
         let last_seen = now() + mem_store::ALIVE_WINDOW;
-        let task_ids = signer.list_signing_tasks().iter().map(|a| a.id.clone()).collect::<Vec<_>>();
+        let client = BlockService::connect(signer.config().side_chain.grpc).await?;
+        let response = client.get_latest_block(GetLatestBlockRequest{}).await?;
+        let block_height = response.into_inner().sdk_block?.header?.height;
+
         let payload = HeartBeatPayload {
             identifier: signer.identifier().clone(),
             last_seen,
-            task_ids,
+            block_height,
         };
         let bytes = serde_json::to_vec(&payload).unwrap();
         let signature = signer.identity_key.sign(bytes, None).to_vec();
@@ -61,7 +65,7 @@ pub async fn sending_heart_beat(ctx: &mut Context, signer: &Signer) {
         let message = serde_json::to_vec(&alive).unwrap();
         publish_message(ctx, SubscribeTopic::HEARTBEAT, message);
         
-        mem_store::update_alive_table(alive);
+        mem_store::update_alive_table(signer.identifier(), alive);
 }
 
 pub fn publish_message(ctx: &mut Context, topic: SubscribeTopic, message: Vec<u8>) {

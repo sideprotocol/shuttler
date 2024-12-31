@@ -20,73 +20,40 @@ lazy_static! {
     static ref DkgRound2SecretPacket: Mutex<BTreeMap<String, dkg::round2::SecretPackage>> = {
         Mutex::new(BTreeMap::new())
     };
-    pub static ref AliveTable: Mutex<BTreeMap<Identifier, u64>> = {
+    pub static ref AliveTable: Mutex<BTreeMap<Identifier, i64>> = {
         Mutex::new(BTreeMap::new())
     };
     pub static ref TrustedPeers: Mutex<Vec<Identifier>> = {
         Mutex::new(Vec::new())
     };
-    pub static ref TaskParticipants: Mutex<BTreeMap<String,Vec<Identifier>>> = {
-        Mutex::new(BTreeMap::new())
-    };
 }
 
 pub const ALIVE_WINDOW: u64 = TASK_INTERVAL.as_secs() * 2;
+pub const BLOCK_TOLERENCE: i64 = 5;
 
-pub fn update_alive_table(alive: HeartBeatMessage) {
+pub fn update_alive_table(self_identifier: &Identifier, alive: HeartBeatMessage) {
     // tracing::debug!("{:?} {}", alive.payload.identifier, if alive.payload.last_seen > now() {alive.payload.last_seen - now()} else {0} );
     if alive.payload.last_seen < now() { return }
 
     let mut table= AliveTable.lock().unwrap();
 
-    if let Some(t) = table.get(&alive.payload.identifier) {
-        if alive.payload.last_seen < *t {
-            return
-        }
+    if let Some(t) = table.get(&self_identifier) {
+        table.retain(|(k, v)| v >= t - BLOCK_TOLERENCE );
+        if alive.payload.block_height < t - BLOCK_TOLERENCE { return }
     }
-    table.insert(alive.payload.identifier, alive.payload.last_seen);
-    table.retain(|_, v| {*v + 1800u64 > now()});
 
-    let mut tp = TaskParticipants.lock().unwrap();
-    alive.payload.task_ids.iter().for_each(|id| {
-        match tp.get_mut(id.as_str()) {
-            Some(t) => {
-                if !t.contains(&alive.payload.identifier) {
-                    t.push(alive.payload.identifier.clone());
-                }
-            },
-            None => {
-                tp.insert(id.clone(), vec![alive.payload.identifier.clone()]);
-            }
-        };
-    });
+    table.insert(alive.payload.identifier, alive.payload.block_height);
+
 }
 
-pub fn remove_task_participants(task_id: &str) {
-    let mut tp = TaskParticipants.lock().unwrap();
-    tp.remove(task_id);
-}
-
-pub fn count_task_participants(task_id: &str) -> Vec<Identifier> {
-    
-    let tp = TaskParticipants.lock().unwrap();
+pub fn count_task_participants(_task_id: &str) -> Vec<Identifier> {
     let table= AliveTable.lock().unwrap();
-    match tp.get(task_id) {
-        Some(participants) => participants
-            .iter()
-            .filter(|i| {
-                let last_seen = table.get(i).unwrap_or(&0);
-                *last_seen > now()
-            })
-            .map(|i| i.clone()).collect::<Vec<_>>(),
-        None => vec![],
-    }
+    table.keys().map(|k| k.clone()).collect::<Vec<_>>()
 }
 
 pub fn is_peer_alive(identifier: &Identifier) -> bool {
     let table= AliveTable.lock().unwrap();
-    let last_seen = table.get(identifier).unwrap_or(&0u64);
-    now() < *last_seen
+   table.contains_key(identifier)
 }
 
 pub fn is_peer_trusted_peer(identifier: &Identifier, signer: &Signer) -> bool {
