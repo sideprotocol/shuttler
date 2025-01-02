@@ -5,20 +5,21 @@ use std::marker::PhantomData;
 use std::{collections::BTreeMap, fmt::Debug};
 use ed25519_compact::x25519;
 use rand::thread_rng;
+use serde::de::DeserializeOwned;
 use tracing::{debug, error, info};
 use serde::{Deserialize, Serialize};
 
 use frost_adaptor_signature as frost;
-use frost::{keys, Identifier, keys::dkg::round1};
+use frost::{Identifier, keys::dkg::round1};
 
 use crate::apps::{DKGHander, Context, Status, SubscribeMessage, Task, TopicAppHandle};
 use crate::helper::gossip::publish_topic_message;
 use crate::helper::store::{MemStore, Store};
-use crate::helper::{mem_store, now};
+use crate::helper::mem_store;
 use crate::helper::cipher::{decrypt, encrypt};
 
 pub type Round1Store = MemStore<String, BTreeMap<Identifier, round1::Package>>;
-pub type Round2Store = MemStore<String, BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>>;
+pub type Round2Store = MemStore<String, BTreeMap<Identifier, Vec<u8>>>;
 
 pub struct DKG<H: DKGHander> {
     db_round1: Round1Store,
@@ -46,15 +47,21 @@ pub struct DKGInput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DKGMessage {
     pub payload: DKGPayload,
-    pub nonce: u64,
-    pub sender: Identifier,
     pub signature: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DKGPayload {
-    Round1((String, BTreeMap<Identifier, round1::Package>)),
-    Round2((String, BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>))
+    Round1(Data<round1::Package>),
+    Round2(Data<BTreeMap<Identifier, Vec<u8>>>)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(bound(deserialize = "T: DeserializeOwned"))]
+pub struct Data<T> where T: Serialize + DeserializeOwned{
+    pub task_id: String,
+    pub sender: Identifier,
+    pub data: T,
 }
 
 impl<H> DKG<H> where H: DKGHander + TopicAppHandle {
@@ -64,34 +71,34 @@ impl<H> DKG<H> where H: DKGHander + TopicAppHandle {
         let raw = serde_json::to_vec(&payload).unwrap();
         let signature = ctx.node_key.sign(raw, None).to_vec();
         
-        let msg = DKGMessage{ payload, nonce: now(), sender: ctx.identifier.clone(), signature };
+        let msg = DKGMessage{ payload, signature };
         // debug!("Broadcasting: {:?}", response.);
         let bytes = serde_json::to_vec(&msg).expect("Failed to serialize DKG package");
         publish_topic_message(ctx, H::topic(), bytes);
     }
 
-    pub fn generate(&mut self, ctx: &mut Context, input: &Task) {
+    pub fn generate(&mut self, ctx: &mut Context, task: &Task) {
 
         let mut rng = thread_rng();
         if let Ok((secret_packet, round1_package)) = frost::keys::dkg::part1(
             ctx.identifier.clone(),
-            input.participants.len() as u16,
-            input.threshold,
+            task.participants.len() as u16,
+            task.threshold,
             &mut rng,
         ) {
-            debug!("round1_secret_package: {:?}", input.id );
-            mem_store::set_dkg_round1_secret_packet(input.id.to_string().as_str(), secret_packet);
+            debug!("round1_secret_package: {:?}", task.id );
+            mem_store::set_dkg_round1_secret_packet(task.id.to_string().as_str(), secret_packet);
 
             let mut round1_packages = BTreeMap::new();
-            round1_packages.insert(ctx.identifier.clone(), round1_package);
+            round1_packages.insert(ctx.identifier.clone(), round1_package.clone());
 
-            self.db_round1.save(&input.id, &round1_packages);
+            self.db_round1.save(&task.id, &round1_packages);
 
-            self.received_round1_packages(ctx, &input.id, round1_packages.clone());
+            // self.received_round1_packages(ctx, round1_packages.clone());
 
-            self.broadcast_dkg_packages(ctx, DKGPayload::Round1((input.id.clone(), round1_packages)));
+            self.broadcast_dkg_packages(ctx, DKGPayload::Round1(Data{task_id: task.id.clone(), sender: ctx.identifier.clone(), data: round1_package}));
         } else {
-            error!("error in DKG round 1: {:?}", input.id);
+            error!("error in DKG round 1: {:?}", task.id);
         }
     }
 
@@ -106,14 +113,14 @@ impl<H> DKG<H> where H: DKGHander + TopicAppHandle {
             }
         };
 
-        if task.participants.len() as u16 != round1_packages.len() as u16 {
+        if task.participants.len() as u16 - 1 != round1_packages.len() as u16 {
             return Err(DKGError(format!("Have not received enough packages: {}", task_id)));
         }
 
-        let mut cloned = round1_packages.clone();
-        cloned.remove(&ctx.identifier);
+        // let mut cloned = round1_packages.clone();
+        // cloned.remove(&ctx.identifier);
 
-        match frost::keys::dkg::part2(secret_package, &cloned) {
+        match frost::keys::dkg::part2(secret_package, &round1_packages) {
             Ok((round2_secret_package, round2_packages)) => {
                 mem_store::set_dkg_round2_secret_packet(&task_id, round2_secret_package);
 
@@ -132,14 +139,15 @@ impl<H> DKG<H> where H: DKGHander + TopicAppHandle {
                 };
 
                 // convert it to <sender, <receiver, Vec<u8>>
-                let mut merged = BTreeMap::new();
-                merged.insert(ctx.identifier.clone(), output_packages);
+                // let mut merged = BTreeMap::new();
+                // merged.insert(ctx.identifier.clone(), output_packages.clone());
 
-                self.db_round2.save(&task.id, &merged);
+                // self.db_round2.save(&task.id, &merged);
 
-                self.received_round2_packages(ctx, &task_id, merged.clone());
+                let data  = Data{task_id, sender: ctx.identifier.clone(), data: output_packages};
+                // self.received_round2_packages(ctx, data.clone());
 
-                self.broadcast_dkg_packages(ctx, DKGPayload::Round2((task_id, merged)));
+                self.broadcast_dkg_packages(ctx, DKGPayload::Round2(data));
             }
             Err(e) => {
                 return Err(DKGError(e.to_string()));
@@ -157,19 +165,20 @@ impl<H> DKG<H> where H: DKGHander + TopicAppHandle {
     fn received_dkg_message(&mut self, ctx: &mut Context, message: DKGMessage) {
 
         match message.payload {
-            DKGPayload::Round1((task_id,package)) => self.received_round1_packages(ctx, &task_id, package),
-            DKGPayload::Round2((task_id,package)) => self.received_round2_packages(ctx, &task_id, package),
+            DKGPayload::Round1(data) => self.received_round1_packages(ctx, data),
+            DKGPayload::Round2(data) => self.received_round2_packages(ctx, data),
         }
 
     }
 
-    fn received_round1_packages(&mut self, ctx: &mut Context, task_id: &String , packets: BTreeMap<Identifier, keys::dkg::round1::Package>) {
+    fn received_round1_packages(&mut self, ctx: &mut Context, packets: Data<round1::Package>) {
 
+        let task_id = &packets.task_id;
         // store round 1 packets
         let mut local = self.db_round1.get(task_id).map_or(BTreeMap::new(), |v|v);
         
         // merge packets with local
-        local.extend(packets);
+        local.insert(packets.sender, packets.data);
         self.db_round1.save(&task_id, &local);
 
         // let k = local.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
@@ -180,7 +189,9 @@ impl<H> DKG<H> where H: DKGHander + TopicAppHandle {
             None => return,
         };
 
-        if task.participants.len() == local.len() {
+        local.retain(|id, _| task.participants.contains(id));
+
+        if task.participants.len() - 1 == local.len() {
             
             info!("Received round1 packets from all participants: {}", task_id);
             match self.generate_round2_packages(ctx,  &task, local) {
@@ -198,19 +209,17 @@ impl<H> DKG<H> where H: DKGHander + TopicAppHandle {
         }
     }
 
-    fn received_round2_packages(&mut self, ctx: &mut Context, task_id: &String, packets: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>) {
+    fn received_round2_packages(&mut self, ctx: &mut Context, packets: Data<BTreeMap<Identifier, Vec<u8>>>) {
 
+        let task_id = &packets.task_id;
         // store round 1 packets
-        let mut local = self.db_round2.get(task_id).unwrap_or(BTreeMap::new()); 
-        packets.iter().for_each(|(k, v)| {
-            match local.get_mut(k) {
-                Some(lv) => lv.extend(v.clone()),
-                None => {
-                    local.insert(k.clone(), v.clone());
-                },
-            }
-        });
 
+        let data = match packets.data.get(&ctx.identifier) {
+            Some(t) => t.clone(),
+            None => return,
+        };
+        let mut local = self.db_round2.get(task_id).unwrap_or(BTreeMap::new()); 
+        local.insert(packets.sender, data);
         self.db_round2.save(&task_id, &local);
 
         debug!("Received round2 packets: {} {:?}", task_id, local.keys());
@@ -220,25 +229,23 @@ impl<H> DKG<H> where H: DKGHander + TopicAppHandle {
             None => return,
         };
 
-        if task.participants.len() == local.len() {
+        local.retain(|id, _| task.participants.contains(id));
+
+        if task.participants.len() - 1 == local.len() {
             // info!("Received round2 packets from all participants: {}", task.id);
 
             let mut round2_packages = BTreeMap::new();
-            local.iter().for_each(|(sender, packages)| {
-                packages.iter().for_each(|(receiver, packet)| {
-                    if receiver == &ctx.identifier {
-                        let packet = packet.clone();
-                        
-                        let bz = sender.serialize();
-                        let source = x25519::PublicKey::from_ed25519(&ed25519_compact::PublicKey::from_slice(bz.as_slice()).unwrap()).unwrap();
-                        let share_key = source.dh(&x25519::SecretKey::from_ed25519(&ctx.node_key).unwrap()).unwrap();
+            local.iter().for_each(|(sender, packet)| {
+                
+                let bz = sender.serialize();
+                let source = x25519::PublicKey::from_ed25519(&ed25519_compact::PublicKey::from_slice(bz.as_slice()).unwrap()).unwrap();
+                let share_key = source.dh(&x25519::SecretKey::from_ed25519(&ctx.node_key).unwrap()).unwrap();
 
-                        let packet = decrypt(packet.as_slice(), share_key.as_slice().try_into().unwrap());
-                        let received_round2_package = frost::keys::dkg::round2::Package::deserialize(&packet).unwrap();
-                        // debug!("Received {} round2 package from: {:?}", task.id, sender.clone());
-                        round2_packages.insert(sender.clone(), received_round2_package);
-                    }
-                })
+                let packet = decrypt(packet.as_slice(), share_key.as_slice().try_into().unwrap());
+                let received_round2_package = frost::keys::dkg::round2::Package::deserialize(&packet).unwrap();
+                // debug!("Received {} round2 package from: {:?}", task.id, sender.clone());
+                round2_packages.insert(sender.clone(), received_round2_package);
+
             });
 
             info!("Received round2 packages from all participants: {}", task_id);
@@ -252,11 +259,11 @@ impl<H> DKG<H> where H: DKGHander + TopicAppHandle {
                 }
             };
 
-            let mut round1_packages = self.db_round1.get(task_id).unwrap_or(BTreeMap::new());
+            let round1_packages = self.db_round1.get(task_id).unwrap_or(BTreeMap::new());
             // let mut round1_packages_cloned = round1_packages.clone();
             // remove self
             // frost does not need its own package to compute the threshold key
-            round1_packages.remove(&ctx.identifier); 
+            // round1_packages.remove(&ctx.identifier); 
 
             match frost::keys::dkg::part3(&round2_secret_package, &round1_packages, &round2_packages ) {
                 Ok((priv_key, pub_key)) => { 
@@ -280,8 +287,8 @@ impl fmt::Display for DKGError {
     }
 }
 
-impl DKGMessage {
-    pub fn sender(&self) -> String {
-        hex::encode(&self.sender.serialize())
-    }
-}
+// impl DKGMessage {
+//     pub fn sender(&self) -> String {
+//         hex::encode(&self.sender.serialize())
+//     }
+// }
