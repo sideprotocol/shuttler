@@ -2,10 +2,10 @@ use cosmos_sdk_proto::cosmos::{
     auth::v1beta1::{
         query_client::QueryClient as AuthQueryClient, 
         BaseAccount, QueryAccountRequest
-    }, bank::v1beta1::MsgSend, base::tendermint::v1beta1::{service_client::ServiceClient as TendermintServiceClient, GetLatestBlockRequest}
+    }, base::tendermint::v1beta1::{service_client::ServiceClient as TendermintServiceClient, GetLatestBlockRequest}
 };
 use cosmrs::{
-    crypto::secp256k1, tx::{self, Fee, SignDoc, SignerInfo, Tx}, AccountId, Any, Coin
+    AccountId, Coin
 };
 use serde::{Deserialize, Serialize};
 

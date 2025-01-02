@@ -1,6 +1,5 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
-use bitcoin_hashes::sha256;
-use bitcoin_hashes::Hash;
+use bitcoin::hashes::{Hash, sha256};
 use frost_adaptor_signature::Field;
 use frost_adaptor_signature::Group;
 use frost_adaptor_signature::GroupError;
