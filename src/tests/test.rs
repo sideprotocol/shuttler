@@ -1,7 +1,6 @@
 
 use std::collections::BTreeMap;
 use std::str::FromStr;
-use std::thread;
 
 use bitcoin::absolute::LockTime;
 use bitcoin::hashes::Hash;
