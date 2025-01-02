@@ -14,11 +14,10 @@ use cosmos_sdk_proto::tendermint::types::{Block, Header};
 use cosmrs::{Any, Tx};
 use serde::{Deserialize, Serialize};
 
-use bitcoin::{
+use bitcoin::{hashes::{sha256d, Hash},
     opcodes, psbt::PsbtSighashType, transaction::Version, Amount, OutPoint, Psbt, Sequence, TxIn,
     TxOut, Address, ScriptBuf, Transaction, Txid
 };
-use bitcoin_hashes::{sha256d, Hash};
 use side_proto::Timestamp;
 
 use crate::helper::cipher::random_bytes;

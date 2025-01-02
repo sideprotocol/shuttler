@@ -20,7 +20,6 @@ use crate::helper::cipher::{decrypt, encrypt};
 pub type Round1Store = MemStore<String, BTreeMap<Identifier, round1::Package>>;
 pub type Round2Store = MemStore<String, BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>>;
 
-
 pub struct DKG<H: DKGHander> {
     db_round1: Round1Store,
     db_round2: Round2Store,

@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
-use bitcoin::{sighash::{self, SighashCache}, Address, Psbt, TapSighashType, Witness};
-use bitcoin_hashes::Hash;
+use bitcoin::{hashes::Hash, sighash::{self, SighashCache}, Address, Psbt, TapSighashType, Witness};
 use bitcoincore_rpc::RpcApi;
 use side_proto::{Timestamp,side::btcbridge::{MsgSubmitSignatures, SigningRequest, SigningStatus}};
 use cosmrs::Any;

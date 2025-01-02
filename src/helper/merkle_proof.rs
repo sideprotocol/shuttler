@@ -1,8 +1,7 @@
 use std::hash::Hasher;
 use std::iter::FromIterator;
 
-use bitcoin::Txid;
-use bitcoin_hashes::Hash;
+use bitcoin::{hashes::Hash, Txid};
 
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;

@@ -1,5 +1,4 @@
-use bitcoin::{ consensus::Encodable, key::Secp256k1, secp256k1::Message, sign_message::BITCOIN_SIGNED_MSG_PREFIX, PrivateKey};
-use bitcoin_hashes::{sha256d, Hash, HashEngine};
+use bitcoin::{hashes::{Hash, sha256d, HashEngine}, consensus::Encodable, key::Secp256k1, secp256k1::Message, sign_message::BITCOIN_SIGNED_MSG_PREFIX, PrivateKey};
 use cosmrs::{ crypto::secp256k1::SigningKey, tx::{self, Fee, ModeInfo, Raw, SignDoc, SignerInfo, SignerPublicKey}, Coin};
 use cosmos_sdk_proto::{Any, cosmos::{
     base::{query::v1beta1::PageRequest, tendermint::v1beta1::{GetLatestBlockRequest, GetLatestValidatorSetRequest, GetLatestValidatorSetResponse}}, 
@@ -271,7 +270,7 @@ fn sign_with_bitcoin_algo(doc: &SignDoc, priv_key: &PrivateKey) -> Raw {
 }
 
 pub fn signed_msg_hash(msg: Vec<u8>) -> sha256d::Hash {
-    let mut engine = sha256d::Hash::engine();
+    let mut engine = bitcoin::hashes::sha256d::Hash::engine();
     engine.input(BITCOIN_SIGNED_MSG_PREFIX);
     let msg_len = bitcoin::consensus::encode::VarInt::from(msg.len());
     msg_len.consensus_encode(&mut engine).expect("engines don't error");

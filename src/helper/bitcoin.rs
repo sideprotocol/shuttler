@@ -1,8 +1,7 @@
-use bitcoin::{
+use bitcoin::{hashes::Hash,
     consensus::encode::serialize, key::Secp256k1, opcodes, Address, Network, PublicKey, ScriptBuf, TapNodeHash, TapSighashType, Transaction, Txid, XOnlyPublicKey
 };
-use bitcoin_hashes::Hash;
-use bitcoin_v30::{consensus::encode::deserialize, Transaction as TransactionV30};
+use bitcoin::{consensus::encode::deserialize, Transaction as TransactionV30};
 use frost_adaptor_signature::{keys::PublicKeyPackage, VerifyingKey};
 use ordinals::SpacedRune;
 
@@ -117,7 +116,7 @@ pub fn is_runes_deposit(tx: &Transaction) -> bool {
 // Parse runes from the given tx
 // Only an edict operation is allowed
 pub fn parse_runes(tx: &Transaction) -> Option<ordinals::Edict> {
-    match ordinals::Runestone::decipher(&to_transaction_v30(tx)) {
+    match ordinals::Runestone::decipher(&to_transaction_v30(&tx)) {
         Some(artifact) => match artifact {
             ordinals::Artifact::Runestone(runestone) => {
                 if runestone.etching.is_some()
@@ -142,10 +141,13 @@ pub fn validate_runes(
     rune: &SpacedRune,
     runes_output: &ord::api::Output,
 ) -> bool {
-    match runes_output.runes.get(rune) {
-        Some(rune) => rune.amount >= edict.amount,
-        None => false,
-    }
+    runes_output.runes.as_ref().and_then(|runes| {
+        runes.get(rune).and_then(|r| Some(r.amount >= edict.amount))
+    }).unwrap_or(false)
+    // match runes_output.runes.get(rune) {
+    //     Some(rune) => rune.amount >= edict.amount,
+    //     None => false,
+    // }
 }
 
 // Convert the given transaction to the v30 version
@@ -157,8 +159,7 @@ fn to_transaction_v30(tx: &Transaction) -> TransactionV30 {
 
 #[cfg(test)]
 mod tests {
-    use bitcoin::{opcodes, transaction::Version, Amount, OutPoint, Sequence, TxIn, TxOut};
-    use bitcoin_hashes::Hash;
+    use bitcoin::{hashes::Hash as _, opcodes, transaction::Version, Amount, OutPoint, Sequence, TxIn, TxOut};
 
     use crate::helper::encoding::from_base64;
 
