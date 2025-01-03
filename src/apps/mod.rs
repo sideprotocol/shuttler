@@ -9,7 +9,7 @@ use tokio::{sync::mpsc::Sender, time::Instant};
 
 use crate::{config::{Config, VaultKeypair}, helper::{now, store::DefaultStore}, shuttler::ShuttlerBehaviour};
 
-pub mod signer;
+pub mod bridge;
 pub mod relayer;
 pub mod dlc;
 
@@ -171,30 +171,6 @@ impl Context {
             conf, 
         }
     }
-
-    // pub fn get_dkg_inner_task(&self, task_id: &String) -> Option<DKGInput> {
-    //     if let Some(t) =  self.task_store.get(task_id) {
-    //         match t.payload {
-    //             TaskPayload::DKG(d) => return Some(d),
-    //             _ => return None,
-    //         };
-    //     }
-    //     None
-    // }
-
-    // pub fn get_signing_inner_task(&self, task_id: &String) -> Option<SignTask> {
-    //     if let Some(t) =  self.task_store.get(task_id) {
-    //         match t.payload {
-    //             TaskPayload::DKG(d) => return Some(d),
-    //             _ => return None,
-    //         };
-    //     }
-    //     None
-    // }
-
-//     pub fn validator_address(&self) -> String {
-//         self.config().load_validator_key().address.to_string()
-//     }
 }
 
 pub trait DKGHander {

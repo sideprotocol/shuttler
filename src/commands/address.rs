@@ -1,6 +1,6 @@
 use ed25519_compact::SecretKey;
 
-use crate::{apps::signer::Signer, config::Config, helper::encoding::{identifier_to_peer_id, pubkey_to_identifier}};
+use crate::{apps::bridge::Signer, config::Config, helper::encoding::{identifier_to_peer_id, pubkey_to_identifier}};
 
 use super::Cli;
 

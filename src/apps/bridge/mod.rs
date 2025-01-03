@@ -129,8 +129,6 @@ pub fn generate_vault_addresses(
 // #[derive(Debug)]
 pub struct Signer {
     enabled: bool,
-    // deprecated
-    config: Config,
     pub bitcoin_client: Client,
     key_generator: KeyGenerator,
     ticker: tokio::time::Interval,
@@ -151,53 +149,10 @@ impl Signer {
             enabled,
             ticker,
             bitcoin_client,
-            config: conf,
             key_generator: KeyGenerator::new(),
         }
 
-    }
-
-    // pub fn config(&self) -> &Config {
-    //     &self.config
-    // }
-
-    // pub fn validator_address(&self) -> String {
-    //     self.config().load_validator_key().address.to_string()
-    // }
-
-    // pub async fn get_relayer_account(&self) -> BaseAccount {
-    //     let cache = BASE_ACCOUNT.lock().unwrap().clone().map(|account| account);
-    //     match cache {
-    //         Some(account) => {
-    //             let mut new_account = account.clone();
-    //             new_account.sequence += 1;
-    //             BASE_ACCOUNT.lock().unwrap().replace(new_account.clone());
-    //             return new_account;
-    //         }
-    //         None => {
-    //             let mut client = AuthQueryClient::connect(self.config.side_chain.grpc.clone())
-    //                 .await
-    //                 .unwrap();
-    //             let request = QueryAccountRequest {
-    //                 address: self.config().relayer_bitcoin_address(),
-    //             };
-
-    //             match client.account(request).await {
-    //                 Ok(response) => {
-    //                     let base_account: BaseAccount =
-    //                         response.into_inner().account.unwrap().to_msg().unwrap();
-    //                     BASE_ACCOUNT.lock().unwrap().replace(base_account.clone());
-    //                     base_account
-    //                 }
-    //                 Err(_) => {
-    //                     panic!("===============================================\n Relayer account don't exist on side chain \n===============================================");
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-
-    
+    }  
 
 }
 
@@ -233,20 +188,3 @@ impl super::App for Signer {
         
     }
 }
-
-// pub fn broadcast_dkg_packages(ctx: &mut Context, task_id: &str, round1_packages: BTreeMap<Identifier, Package>, round2_packages: BTreeMap<Identifier, BTreeMap<Identifier, Vec<u8>>>) {
-//     let response = prepare_response_for_task(ctx, task_id, round1_packages, round2_packages );
-//     // debug!("Broadcasting: {:?}", response.);
-//     let message = serde_json::to_vec(&response).expect("Failed to serialize DKG package");
-//     publish_message(ctx, SubscribeTopic::DKG, message);
-// }
-
-// pub fn broadcast_signing_packages(ctx: &mut Context, message: &mut SignMesage) {
-//     let raw = serde_json::to_vec(&message.package).unwrap();
-//     let signaure = ctx.node_key.sign(raw, None).to_vec();
-//     message.signature = signaure;
-
-//     // tracing::debug!("Broadcasting: {:?}", message);
-//     let message = serde_json::to_vec(&message).expect("Failed to serialize Sign package");
-//     publish_message(ctx, SubscribeTopic::SIGNING, message);
-// }

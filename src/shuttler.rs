@@ -13,7 +13,7 @@ use tracing::{debug, info, warn, error};
 
 use crate::{
     apps::{
-        dlc::DLC, relayer::Relayer, signer::Signer, App, Context, SubscribeMessage
+        dlc::DLC, relayer::Relayer, bridge::Signer, App, Context, SubscribeMessage
     },
     config::{candidate::Candidate, Config},
     helper::{
