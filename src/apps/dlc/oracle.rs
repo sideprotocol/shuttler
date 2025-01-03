@@ -1,6 +1,6 @@
 use cosmrs::Any;
 use libp2p::gossipsub::IdentTopic;
-use side_proto::side::dlc::MsgSubmitOraclePubkey;
+use side_proto::side::dlc::MsgSubmitOraclePubKey;
 use tracing::error;
 
 use crate::{
@@ -27,10 +27,10 @@ impl DKGHander for OracleHandler {
 
         let signature = hex::encode(ctx.node_key.sign(&rawkey, None));
 
-        let cosm_msg = MsgSubmitOraclePubkey {
-            oracle_id: task.id.clone(),
+        let cosm_msg = MsgSubmitOraclePubKey {
+            oracle_id: task.id.replace("oracle-", "").parse().unwrap(),
             sender: ctx.conf.relayer_bitcoin_address(),
-            pubkey: hexkey,
+            pub_key: hexkey,
             signature,
         };
         let any = Any::from_msg(&cosm_msg).unwrap();
@@ -43,6 +43,6 @@ impl DKGHander for OracleHandler {
 
 impl TopicAppHandle for OracleHandler {
     fn topic() -> IdentTopic {
-        IdentTopic::new("nonce")
+        IdentTopic::new("oracle")
     }
 }

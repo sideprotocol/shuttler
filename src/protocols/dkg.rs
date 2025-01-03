@@ -82,8 +82,8 @@ impl<H> DKG<H> where H: DKGHander + TopicAppHandle {
         let mut rng = thread_rng();
         if let Ok((secret_packet, round1_package)) = frost::keys::dkg::part1(
             ctx.identifier.clone(),
-            task.participants.len() as u16,
-            task.threshold,
+            task.dkg_input.participants.len() as u16,
+            task.dkg_input.threshold,
             &mut rng,
         ) {
             debug!("round1_secret_package: {:?}", task.id );
@@ -113,7 +113,7 @@ impl<H> DKG<H> where H: DKGHander + TopicAppHandle {
             }
         };
 
-        if task.participants.len() as u16 - 1 != round1_packages.len() as u16 {
+        if task.dkg_input.participants.len() as u16 - 1 != round1_packages.len() as u16 {
             return Err(DKGError(format!("Have not received enough packages: {}", task_id)));
         }
 
@@ -189,9 +189,9 @@ impl<H> DKG<H> where H: DKGHander + TopicAppHandle {
             None => return,
         };
 
-        local.retain(|id, _| task.participants.contains(id));
+        local.retain(|id, _| task.dkg_input.participants.contains(id));
 
-        if task.participants.len() - 1 == local.len() {
+        if task.dkg_input.participants.len() - 1 == local.len() {
             
             info!("Received round1 packets from all participants: {}", task_id);
             match self.generate_round2_packages(ctx,  &task, local) {
@@ -229,9 +229,9 @@ impl<H> DKG<H> where H: DKGHander + TopicAppHandle {
             None => return,
         };
 
-        local.retain(|id, _| task.participants.contains(id));
+        local.retain(|id, _| task.dkg_input.participants.contains(id));
 
-        if task.participants.len() - 1 == local.len() {
+        if task.dkg_input.participants.len() - 1 == local.len() {
             // info!("Received round2 packets from all participants: {}", task.id);
 
             let mut round2_packages = BTreeMap::new();

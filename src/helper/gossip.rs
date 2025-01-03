@@ -2,8 +2,9 @@
 use frost_adaptor_signature::Identifier;
 use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{Deserialize, Serialize};
+use side_proto::cosmos::base::tendermint::v1beta1::{service_client::ServiceClient as BlockService, GetLatestBlockRequest};
 
-use crate::{apps::{signer::Signer, Context}, shuttler::ShuttlerBehaviour};
+use crate::{apps::Context, shuttler::ShuttlerBehaviour};
 
 use super::{mem_store, now};
 pub const HEART_BEAT_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(60);
@@ -31,7 +32,7 @@ pub struct HeartBeatMessage {
 pub struct HeartBeatPayload {
     pub identifier: Identifier,
     pub last_seen: u64,
-    pub task_ids: Vec<String>,
+    pub block_height: i64,
 }
 
 pub fn subscribe_gossip_topics(swarm: &mut Swarm<ShuttlerBehaviour>) {
@@ -45,14 +46,38 @@ pub fn subscribe_gossip_topics(swarm: &mut Swarm<ShuttlerBehaviour>) {
     }
 }
 
-pub async fn sending_heart_beat(ctx: &mut Context, signer: &Signer) {
+pub async fn sending_heart_beat(ctx: &mut Context) {
+
+        let mut client = match BlockService::connect(ctx.conf.side_chain.grpc.clone()).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("{}", e);
+                return;
+            },
+        };
+        let block = match client.get_latest_block(GetLatestBlockRequest{}).await {
+            Ok(res) => res.into_inner().block,
+            Err(e) => {
+                tracing::error!("{}", e);
+                return;
+            },
+        };
+
+        tracing::debug!("block: {:?}", block);
+
+        let block_height = match block {
+            Some(b) => match b.header {
+                Some(h) => h.height,
+                None => return,
+            }
+            None => return,
+        };
 
         let last_seen = now() + mem_store::ALIVE_WINDOW;
-        let task_ids = signer.list_signing_tasks().iter().map(|a| a.id.clone()).collect::<Vec<_>>();
         let payload = HeartBeatPayload {
             identifier: ctx.identifier.clone(),
             last_seen,
-            task_ids,
+            block_height,
         };
         let bytes = serde_json::to_vec(&payload).unwrap();
         let signature = ctx.node_key.sign(bytes, None).to_vec();
@@ -60,7 +85,7 @@ pub async fn sending_heart_beat(ctx: &mut Context, signer: &Signer) {
         let message = serde_json::to_vec(&alive).unwrap();
         publish_message(ctx, SubscribeTopic::HEARTBEAT, message);
         
-        mem_store::update_alive_table(alive);
+        mem_store::update_alive_table(&ctx.identifier, alive);
 }
 
 pub fn publish_message(ctx: &mut Context, topic: SubscribeTopic, message: Vec<u8>) {

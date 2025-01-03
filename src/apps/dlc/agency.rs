@@ -1,6 +1,6 @@
 use cosmrs::Any;
 use libp2p::gossipsub::IdentTopic;
-use side_proto::side::dlc::MsgSubmitAgencyAddress;
+use side_proto::side::dlc::MsgSubmitAgencyPubKey;
 use tracing::error;
 
 use crate::{
@@ -17,20 +17,20 @@ impl DKGHander for AgencyHandler {
     fn on_completed(ctx: &mut Context, task: &mut Task, priv_key: frost_adaptor_signature::keys::KeyPackage, pub_key: frost_adaptor_signature::keys::PublicKeyPackage) {
         let tweak = None;
         let rawkey = pub_key.verifying_key().serialize().unwrap();
-        let address = hex::encode(&rawkey);
+        let pubkey = hex::encode(&rawkey);
         let keyshare = VaultKeypair {
             pub_key,
             priv_key,
             tweak,
         };
-        ctx.keystore.save(&address, &keyshare);
+        ctx.keystore.save(&pubkey, &keyshare);
 
         let signature = hex::encode(ctx.node_key.sign(&rawkey, None));
 
-        let cosm_msg = MsgSubmitAgencyAddress {
-            id: task.id.replace("agency-", ""),
+        let cosm_msg = MsgSubmitAgencyPubKey {
+            id: task.id.replace("agency-", "").parse().unwrap(),
             sender: ctx.conf.relayer_bitcoin_address(),
-            address,
+            pub_key: pubkey,
             signature,
         };
         let any = Any::from_msg(&cosm_msg).unwrap();

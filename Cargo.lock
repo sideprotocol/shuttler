@@ -470,9 +470,9 @@ checksum = "8b75356056920673b02621b35afd0f7dda9306d03c79a30f5c56c44cf256e3de"
 
 [[package]]
 name = "async-trait"
-version = "0.1.83"
+version = "0.1.84"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "721cae7de5c34fbb2acd27e21e6d2cf7b886dce0c27388d46c4e6c47ea4318dd"
+checksum = "1b1244b10dcd56c92219da4e14caa97e312079e185f04ba3eea25061561dc0a0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1048,9 +1048,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.6"
+version = "1.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d6dbb628b8f8555f86d0323c2eb39e3ec81901f4b83e091db8a6a76d316a333"
+checksum = "a012a0df96dd6d06ba9a1b29d6402d1a5d77c6befd2566afdc26e10603dc93d7"
 dependencies = [
  "shlex",
 ]
@@ -2024,8 +2024,8 @@ dependencies = [
 
 [[package]]
 name = "frost-adaptor-signature"
-version = "0.1.1-dev5"
-source = "git+https://github.com/sideprotocol/frost-adaptor-signature.git?branch=master#044c63c0016f6bae876cc946efaaf76eb93d19d5"
+version = "0.1.1-dev6"
+source = "git+https://github.com/sideprotocol/frost-adaptor-signature.git?branch=master#55d81bc52fa3467d1a951ac78cf98384759895a1"
 dependencies = [
  "frost-core",
  "frost-secp256k1-tr",
@@ -5751,6 +5751,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 name = "shuttler"
 version = "0.6.0"
 dependencies = [
+ "anyhow",
  "async-std",
  "async-trait",
  "base64 0.22.1",
@@ -5804,8 +5805,8 @@ dependencies = [
 
 [[package]]
 name = "side-proto"
-version = "0.1.0-dev6"
-source = "git+https://github.com/sideprotocol/side-rust#a810207c60255933e27c7002d18656c9ffe87d8c"
+version = "0.1.0-dev7"
+source = "git+https://github.com/sideprotocol/side-rust#5352b6c10eee30fb0bc589cd14f003223c1cbd18"
 dependencies = [
  "cosmos-sdk-proto",
  "cosmrs",
@@ -6142,12 +6143,13 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "3.14.0"
+version = "3.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28cce251fcbc87fac86a866eeb0d6c2d536fc16d06f184bb61aeae11aa4cee0c"
+checksum = "9a8a559c81686f576e8cd0290cd2a24a2a9ad80c98b3478856500fcbd7acd704"
 dependencies = [
  "cfg-if",
  "fastrand 2.3.0",
+ "getrandom",
  "once_cell",
  "rustix 0.38.42",
  "windows-sys 0.59.0",

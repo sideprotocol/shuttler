@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use cosmrs::Any;
 use ed25519_compact::SecretKey;
-use frost_adaptor_signature::{round1, round2, Identifier};
+use frost_adaptor_signature::{round1, round2, AdaptorSignature, Identifier, Signature};
 use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{de::Error, Deserialize, Serialize};
 use tokio::{sync::mpsc::Sender, time::Instant};
@@ -38,36 +38,55 @@ pub enum Status {
 pub enum SignMode {
     Sign,
     SignWithTweak,
-    SignWithGroupcommitment,
-    SignWithAdaptorPoint,
+    SignWithGroupcommitment(String),
+    SignWithAdaptorPoint(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FrostSignature {
+    Standard(Signature),
+    Adaptor(AdaptorSignature)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Input {
-    pub key: String, 
+    pub key: String,
+    pub participants: Vec<Identifier>,
+    pub index: usize,
+    pub mode: SignMode,
     pub message: Vec<u8>,
-    pub signature: Option<frost_adaptor_signature::Signature>,
-    pub adaptor_signature: Option<frost_adaptor_signature::AdaptorSignature>,
+    pub signature: Option<FrostSignature>,
 }
 
 impl Input {
     pub fn new(sign_key: String) -> Self {
         Self {
+            index: 0,
+            participants: vec![],
             key: sign_key,
+            mode: SignMode::Sign,
             message: vec![],
             signature: None,
-            adaptor_signature: None,
         }
     }
 
     pub fn new_with_message(sign_key: String, message: Vec<u8>) -> Self {
         Self {
+            index: 0,
+            participants: vec![],
             key: sign_key,
+            mode: SignMode::Sign,
             message,
             signature: None,
-            adaptor_signature: None,
         }
     } 
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct DkgInput {
+    pub participants: Vec<Identifier>,
+    pub threshold: u16,
+    pub tweaks: Vec<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,28 +94,33 @@ pub struct Task {
     pub id: String,
     pub status: Status,
     pub time: u64,
-    pub participants: Vec<Identifier>,
-    pub threshold: u16,
-
-    pub sign_mode: SignMode,
-    pub sign_adaptor_point: String,
-    pub sign_group_commitment: String,
-    pub sign_inputs: Vec<Input>,
+    pub dkg_input: DkgInput,
+    pub sign_inputs: BTreeMap<usize, Input>,
+    pub psbt: String, // store psbt for later use
     pub submitted: bool,
 }
 
 impl Task {
-    pub fn new_dkg(id: String, participants: Vec<Identifier>, threshold: u16, sign_mode: SignMode) -> Self {
+    pub fn new_dkg(id: String, participants: Vec<Identifier>, threshold: u16) -> Self {
         Self {
             id,
             status: Status::DkgRound1,
             time: now(),
-            participants,
-            threshold,
-            sign_mode,
-            sign_adaptor_point: "".to_string(),
-            sign_group_commitment: "".to_string(),
-            sign_inputs: vec![],
+            dkg_input: DkgInput {participants, threshold, tweaks: vec![] },
+            sign_inputs: BTreeMap::new(),
+            psbt: "".to_owned(),
+            submitted: false,
+        }
+    }
+
+    pub fn new_signing(id: String, psbt: String, sign_inputs: BTreeMap<usize, Input> ) -> Self {
+        Self {
+            id,
+            status: Status::SignRound1,
+            time: now(),
+            dkg_input: DkgInput::default(),
+            psbt,
+            sign_inputs,
             submitted: false,
         }
     }
@@ -111,7 +135,7 @@ pub struct Context {
     pub tx_sender: Sender<Any>,
     pub identifier: Identifier,
     pub node_key: SecretKey,
-    pub validator_hex_address: String,
+    pub id_base64: String,
     pub conf: Config,
     pub keystore: DefaultStore<String, VaultKeypair>,
     pub task_store: DefaultStore<String, Task>,
@@ -132,13 +156,13 @@ pub trait TopicAppHandle {
 }
 
 impl Context {
-    pub fn new(swarm: Swarm<ShuttlerBehaviour>, tx_sender: Sender<Any>,identifier: Identifier, node_key: SecretKey, conf: Config, validator_hex_address:String) -> Self {
+    pub fn new(swarm: Swarm<ShuttlerBehaviour>, tx_sender: Sender<Any>,identifier: Identifier, node_key: SecretKey, conf: Config, id_base64:String) -> Self {
         Self { 
             swarm, 
             tx_sender,
             identifier, 
             node_key, 
-            validator_hex_address, 
+            id_base64, 
             keystore: DefaultStore::new(conf.get_database_with_name("keypairs")),
             task_store: DefaultStore::new(conf.get_database_with_name("tasks")),
             nonce_store: SignerNonceStore::new(conf.get_database_with_name("nonces")),

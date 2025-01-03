@@ -211,7 +211,7 @@ async fn loading_dkg_request(home: &str) -> Result<tonic::Response<QueryDkgReque
         let participants = dkg.participants.iter().map(|i: &String| DkgParticipant {
             moniker: i.clone(),
             operator_address: i.clone(),
-            consensus_address: i.to_string(),
+            consensus_pubkey: i.to_string(),
         }).collect::<Vec<_>>();
 
         requests.push( DkgRequest { 

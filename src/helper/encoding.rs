@@ -32,7 +32,9 @@ pub fn identifier_to_peer_id(identifier: &Identifier) -> PeerId {
     let xkey = libp2p::identity::ed25519::PublicKey::try_from_bytes(&identifier.serialize()).unwrap();
     libp2p::identity::PublicKey::from(xkey).to_peer_id()
 }
-
+pub fn identifier_to_base64(identifier: &Identifier) -> String {
+    to_base64(&identifier.serialize())
+}
 pub fn pubkey_to_identifier(key_bytes: &[u8]) -> Identifier {
     let id = Secp256K1ScalarField::deserialize(key_bytes.try_into().unwrap()).unwrap();
     Identifier::new(id).unwrap()

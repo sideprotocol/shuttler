@@ -222,7 +222,7 @@ impl Shuttler {
     ) {
         match event {
             ShuttlerBehaviourEvent::Gossip(gossipsub::Event::Message { message, .. }) => {
-                update_heartbeat(&message);
+                update_heartbeat(context, &message);
                 dispatch_messages(&mut self.dlc, context, &message);
                 dispatch_messages(&mut self.signer, context, &message);
                 dispatch_messages(&mut self.relayer,context, &message);
@@ -291,7 +291,7 @@ fn dispatch_messages<T: App>(app: &mut T, context: &mut Context,  message: &Subs
     }
 }
 
-fn update_heartbeat(message: &SubscribeMessage) {
+fn update_heartbeat(ctx: &Context, message: &SubscribeMessage) {
     if message.topic == SubscribeTopic::HEARTBEAT.topic().hash() {
         if let Ok(alive) = serde_json::from_slice::<HeartBeatMessage>(&message.data) {
             // Ensure the message is not forged.
@@ -306,7 +306,7 @@ fn update_heartbeat(message: &SubscribeMessage) {
                 }
                 Err(_) => return
             }
-            mem_store::update_alive_table( alive );
+            mem_store::update_alive_table(&ctx.identifier, alive );
         }
     }
 }

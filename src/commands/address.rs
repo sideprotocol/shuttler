@@ -31,7 +31,7 @@ pub fn execute(cli: &Cli) {
     println!("-------------------------------------------------------------");
 
     println!("\nVault Address:");
-    signer.list_keypairs().iter().enumerate().for_each(| (i, (addr, kp))| {
-        println!("{i}. {addr} ({}-of-{})", kp.priv_key.min_signers(), kp.pub_key.verifying_shares().len());
-    });
+    // signer.list_keypairs().iter().enumerate().for_each(| (i, (addr, kp))| {
+    //     println!("{i}. {addr} ({}-of-{})", kp.priv_key.min_signers(), kp.pub_key.verifying_shares().len());
+    // });
 }
