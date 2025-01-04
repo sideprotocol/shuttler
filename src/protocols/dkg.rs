@@ -54,6 +54,7 @@ pub struct DKGInput {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DKGMessage {
+    pub sender: Identifier,
     pub payload: DKGPayload,
     pub signature: Vec<u8>,
 }
@@ -79,7 +80,7 @@ impl DKG {
         let raw = serde_json::to_vec(&payload).unwrap();
         let signature = ctx.node_key.sign(raw, None).to_vec();
         
-        let msg = DKGMessage{ payload, signature };
+        let msg = DKGMessage{ sender: ctx.identifier, payload, signature };
         debug!("Broadcasting: {:?}", msg);
         let bytes = serde_json::to_vec(&msg).expect("Failed to serialize DKG package");
         publish_topic_message(ctx, IdentTopic::new(&self.name), bytes);
@@ -177,6 +178,19 @@ impl DKG {
     }
 
     fn received_dkg_message(&mut self, ctx: &mut Context, message: DKGMessage) {
+
+        // Ensure the message is not forged.
+        match ed25519_compact::PublicKey::from_slice(&message.sender.serialize()) {
+            Ok(public_key) => {
+                let raw = serde_json::to_vec(&message.payload).unwrap();
+                let sig = ed25519_compact::Signature::from_slice(&message.signature).unwrap();
+                if public_key.verify(&raw, &sig).is_err() {
+                    debug!("Reject, untrusted package from {:?}", message.sender);
+                    return;
+                }
+            }
+            Err(_) => return
+        }
 
         match message.payload {
             DKGPayload::Round1(data) => self.received_round1_packages(ctx, data),
