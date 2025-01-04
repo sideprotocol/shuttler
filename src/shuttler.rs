@@ -13,11 +13,11 @@ use tracing::{debug, info, warn, error};
 
 use crate::{
     apps::{
-        dlc::DLC, relayer::Relayer, bridge::BridgeSigner, App, Context, SubscribeMessage
+        bridge::BridgeSigner, dlc::DLC, relayer::Relayer, App, Context, SubscribeMessage
     },
     config::{candidate::Candidate, Config},
     helper::{
-        client_side::send_cosmos_transaction, encoding::pubkey_to_identifier, gossip::{subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store
+        client_side::send_cosmos_transaction, encoding::pubkey_to_identifier, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store
     },
 };
 
@@ -183,8 +183,14 @@ impl Shuttler {
                 };
             }
         });
+
+        let mut heart_beat = tokio::time::interval(Duration::from_secs(mem_store::HEART_BEAT_WINDOW));
+
         loop {
             select! {
+                _ = heart_beat.tick() => {
+                    sending_heart_beat(&mut context).await;
+                }
                 swarm_event = context.swarm.select_next_some() => match swarm_event {
                     SwarmEvent::Behaviour(event) => {
                         // event_handler(evt, &mut swarm, &signer).await;

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use cosmrs::Any;
@@ -5,16 +6,18 @@ use libp2p::gossipsub::IdentTopic;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 use tracing::{error, info};
-use bitcoin::{Network, TapNodeHash, XOnlyPublicKey};
-use bitcoincore_rpc::{Auth, Client};
+use bitcoin::{Network, Psbt, TapNodeHash, TapSighashType, Witness, XOnlyPublicKey};
+use bitcoincore_rpc::{Auth, Client, RpcApi};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::BaseAccount;
 use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 
-use side_proto::side::btcbridge::MsgCompleteDkg;
+use side_proto::side::btcbridge::{MsgCompleteDkg, MsgSubmitSignatures};
 use tick::tasks_executor;
 
+use crate::apps::Status;
 use crate::config::{Config, VaultKeypair, TASK_INTERVAL};
 use crate::helper::bitcoin::get_group_address_by_tweak;
+use crate::helper::encoding::{from_base64, to_base64};
 use crate::helper::store::Store;
 use crate::protocols::dkg::DKG;
 use crate::protocols::sign::StandardSigner;
@@ -101,47 +104,121 @@ impl BridgeSigner {
             enabled,
             ticker,
             bitcoin_client,
-            keygen: DKG::new("bridge_dkg", Box::new(|ctx: &mut Context, task: &mut Task, priv_key: &frost_adaptor_signature::keys::KeyPackage, pub_key: &frost_adaptor_signature::keys::PublicKeyPackage| {
-
-                let vaults = generate_vault_addresses(ctx, pub_key.clone(), priv_key.clone(), &task.dkg_input.tweaks, ctx.conf.bitcoin.network);
-        
-                let id: u64 = task.id.replace("dkg-", "").parse().unwrap();
-        
-                let mut sig_msg = id.to_be_bytes().to_vec();
-        
-                for v in &vaults {
-                    sig_msg.extend(v.as_bytes())
-                }
-        
-                let signature = hex::encode(ctx.node_key.sign(&sig_msg, None));
-        
-                let cosm_msg = MsgCompleteDkg {
-                    id,
-                    sender: ctx.conf.relayer_bitcoin_address(),
-                    vaults,
-                    consensus_address: ctx.id_base64.clone(),
-                    signature,
-                };
-                let any = Any::from_msg(&cosm_msg).unwrap();
-                if let Err(e) = ctx.tx_sender.send(any) {
-                    error!("{:?}", e)
-                }
-            })),
-            signer: StandardSigner::new("bridge_signing", Box::new(aa))
+            keygen: DKG::new("bridge_dkg", Box::new(handle_dkg)),
+            signer: StandardSigner::new("bridge_signing", Box::new(handle_signature))
 
         }
     }  
 
 }
 
-fn aa(ctx: &mut Context, task: &mut Task) {
+fn handle_dkg(ctx: &mut Context, task: &mut Task, priv_key: &frost_adaptor_signature::keys::KeyPackage, pub_key: &frost_adaptor_signature::keys::PublicKeyPackage) {
+
+    let vaults = generate_vault_addresses(ctx, pub_key.clone(), priv_key.clone(), &task.dkg_input.tweaks, ctx.conf.bitcoin.network);
+
+    let id: u64 = task.id.replace("dkg-", "").parse().unwrap();
+
+    let mut sig_msg = id.to_be_bytes().to_vec();
+
+    for v in &vaults {
+        sig_msg.extend(v.as_bytes())
+    }
+
+    let signature = hex::encode(ctx.node_key.sign(&sig_msg, None));
+
+    let cosm_msg = MsgCompleteDkg {
+        id,
+        sender: ctx.conf.relayer_bitcoin_address(),
+        vaults,
+        consensus_address: ctx.id_base64.clone(),
+        signature,
+    };
+    let any = Any::from_msg(&cosm_msg).unwrap();
+    if let Err(e) = ctx.tx_sender.send(any) {
+        error!("{:?}", e)
+    }
+}
+
+fn handle_signature(ctx: &mut Context, task: &mut Task) -> anyhow::Result<()> {
     println!("Signing completed: {:?}, {:?}", ctx.identifier, task.id);
+    if task.submitted {
+        return anyhow::Ok(());
+    }
+
+    // // check if I am a sender to submit the txs
+    // let address = match task.sign_inputs.get(&0) {
+    //     Some(i) => i.key.clone(),
+    //     None => return,
+    // };
+
+    // let vk = match ctx.task_store.get(&address) {
+    //     Some(k) => k,
+    //     None => return,
+    // };
+
+    // let participants = vk.pub_key.verifying_shares();
+
+    // let sender_index = participants.iter().position(|(id, _)| {id == signer.identifier()}).unwrap_or(0);
+    
+    // let current = now();
+    // let d = TASK_INTERVAL.as_secs();
+    // let x = (current - (current % d) - task.start_time) % d + current / d;
+    // if x as usize % participants.len() != sender_index {
+    //     continue;
+    // }
+
+    // submit the transaction if I am the sender.
+
+    let mut psbt_bytes = from_base64(&task.psbt)?;
+    let mut psbt = Psbt::deserialize(psbt_bytes.as_slice())?;
+
+    for (index, input) in task.sign_inputs.iter() {
+
+        let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&input.signature.as_ref().unwrap().inner().serialize()?)?;
+
+        psbt.inputs[*index].tap_key_sig = Option::Some(bitcoin::taproot::Signature {
+            signature: sig,
+            sighash_type: TapSighashType::Default,
+        });
+
+        let witness = Witness::p2tr_key_spend(&psbt.inputs[*index].tap_key_sig.unwrap());
+        psbt.inputs[*index].final_script_witness = Some(witness);
+        psbt.inputs[*index].partial_sigs = BTreeMap::new();
+        psbt.inputs[*index].sighash_type = None;
+    };
+
+    let signed_tx = psbt.clone().extract_tx()?;
+    // let txid = signed_tx.compute_txid().to_string();
+
+    if let Err(e) = ctx.bitcoin_client.send_raw_transaction(&signed_tx) {
+        error!("{:?}", e)
+    };
+
+    psbt_bytes = psbt.serialize();
+
+    // submit signed psbt to side chain
+    let msg = MsgSubmitSignatures {
+        sender: ctx.conf.relayer_bitcoin_address(),
+        txid: signed_tx.compute_txid().to_string(),
+        psbt: to_base64(&psbt_bytes),
+    };
+
+    let any = Any::from_msg(&msg)?;
+    ctx.tx_sender.send(any)?;
+
+    task.submitted = true;
+    task.psbt = to_base64(&psbt_bytes);
+    task.status = Status::SignComplete;
+    ctx.task_store.save(&task.id, &task);
+
+    anyhow::Ok(())
 }
 
 impl super::App for BridgeSigner {
     fn on_message(&mut self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()> {
         // debug!("Received {:?}", message);
-        self.keygen.on_message(ctx, message)
+        self.keygen.on_message(ctx, message)?;
+        self.signer.on_message(ctx, message)
     }
 
     fn enabled(&mut self) -> bool {

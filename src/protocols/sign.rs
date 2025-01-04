@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 pub use tracing::error;
 use usize as Index;
-use crate::{apps::{Context, FrostSignature, SignMode, Status, Task}, config::VaultKeypair, 
+use crate::{apps::{Context, FrostSignature, SignMode, Status, SubscribeMessage, Task}, config::VaultKeypair, 
     helper::{
         bitcoin::convert_tweak, encoding::{self, hex_to_projective_point}, 
         gossip::publish_topic_message, 
@@ -29,7 +29,7 @@ pub enum SignPackage {
     Round1(BTreeMap<Index,BTreeMap<Identifier,round1::SigningCommitments>>),
     Round2(BTreeMap<Index,BTreeMap<Identifier,round2::SignatureShare>>),
 }
-pub type SigningHandleFn = dyn Fn(&mut Context, &mut Task);
+pub type SigningHandleFn = dyn Fn(&mut Context, &mut Task) -> anyhow::Result<()>;
 
 pub struct StandardSigner {
     name: String,
@@ -51,6 +51,8 @@ impl StandardSigner{
         if task.status == Status::SignComplete {
             return
         }
+
+        debug!("Start a new signing task: {}", task.id);
 
         let mut nonces = BTreeMap::new();
         let mut commitments = BTreeMap::new();
@@ -85,8 +87,21 @@ impl StandardSigner{
         self.received_sign_message(ctx, msg);
     }
 
+
+    pub fn on_message(&mut self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()> {
+        if message.topic.to_string() == self.name {
+            let m = serde_json::from_slice(&message.data)?;
+            self.received_sign_message(ctx, m);
+        }
+        // if let Ok(m) =  H::message(message) {
+        //     self.received_dkg_message(ctx, m);
+        // }
+        return Ok(())
+    }
+
     fn received_sign_message(&self, ctx: &mut Context, msg: SignMesage) {
 
+        tracing:: debug!("Received: {:?}", msg);
         // Ensure the message is not forged.
         match PublicKey::from_slice(&msg.sender.serialize()) {
             Ok(public_key) => {
@@ -341,7 +356,7 @@ impl StandardSigner{
         let signaure = ctx.node_key.sign(raw, None).to_vec();
         message.signature = signaure;
     
-        // tracing::debug!("Broadcasting: {:?}", message);
+        tracing::debug!("Broadcasting: {:?}", message);
         let message = serde_json::to_vec(&message).expect("Failed to serialize Sign package");
         publish_topic_message(ctx, self.topic(), message);
     }

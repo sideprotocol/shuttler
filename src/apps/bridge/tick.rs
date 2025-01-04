@@ -41,12 +41,16 @@ pub async fn fetch_signing_requests(
             debug!("In-process signing tasks: {:?} {:?}", tasks_in_process.len(), tasks_in_process);
             for request in requests {
                 // create a dkg task
-                if let Ok(task) = new_task_from_signing_request(ctx, &request) {
+                match new_task_from_signing_request(ctx, &request) {
+                    Ok(task) => {
+                        if ctx.task_store.exists(&task.id) { continue; }
+                        ctx.task_store.save(&task.id, &task);
+        
+                        debug!("start sign: {}", task.id);
+                        signer.signer.generate_commitments(ctx, &task);                       
+                    },
+                    Err(e) => error!("{:?}", e),
 
-                    if ctx.task_store.exists(&task.id) { continue; }
-                    ctx.task_store.save(&task.id, &task);
-    
-                    signer.signer.generate_commitments(ctx, &task);
                 }
             }
         }
@@ -75,7 +79,6 @@ async fn fetch_dkg_requests(ctx: &mut Context, signer: &mut BridgeSigner) {
         let requests = requests_response.into_inner().requests;
         debug!("DKG Requests, {:?}", requests);
 
-        debug!("my pubkey: {:?}", ctx.id_base64);
         for request in requests {
             if request
                 .participants
@@ -121,7 +124,6 @@ fn new_task_from_vault_dkg(request: &DkgRequest) -> Option<Task> {
 
 fn new_task_from_signing_request(ctx: &mut Context, request: &SigningRequest) -> anyhow::Result<Task> {
 
-
     let psbt_bytes = from_base64(&request.psbt)?;
     let task_id = request.txid.clone();
 
@@ -141,6 +143,7 @@ fn new_task_from_signing_request(ctx: &mut Context, request: &SigningRequest) ->
 
         // check if there are sufficient participants for this tasks
         let participants = mem_store::count_task_participants(ctx, &address.to_string());
+        debug!("task participant: {:?}", participants);
         match ctx.keystore.get(&address) {
             Some(k) => if participants.len() < k.priv_key.min_signers().clone() as usize { return Err(anyhow!("insufficient signers")); },
             None => continue,
@@ -170,11 +173,7 @@ fn new_task_from_signing_request(ctx: &mut Context, request: &SigningRequest) ->
         return Err(anyhow!("invalid psbt, 0 input"));
     }
 
-    let task = Task::new_signing(task_id, request.psbt.clone(), inputs);
-
-    ctx.task_store.save(&task.id, &task);
-
-    Ok(task)
+    Ok(Task::new_signing(task_id, request.psbt.clone(), inputs))
 
 }
 

@@ -32,7 +32,7 @@ lazy_static! {
     };
 }
 
-pub const ALIVE_WINDOW: u64 = TASK_INTERVAL.as_secs() * 2;
+pub const HEART_BEAT_WINDOW: u64 = TASK_INTERVAL.as_secs() * 2;
 pub const BLOCK_TOLERENCE: u64 = 5;
 
 pub fn update_alive_table(self_identifier: &Identifier, alive: HeartBeatMessage) {
@@ -54,6 +54,7 @@ pub fn update_alive_table(self_identifier: &Identifier, alive: HeartBeatMessage)
 pub fn count_task_participants(ctx: &Context, key: &String) -> Vec<Identifier> {
     if let Some(vkp) = ctx.keystore.get(key) {
         let table= AliveTable.lock().unwrap();
+        // tracing::debug!("alive: {:?}", table);
         table.keys()
             .filter(|alive| {vkp.pub_key.verifying_shares().contains_key(alive)})
             .map(|k| k.clone())
