@@ -1,8 +1,7 @@
 use std::sync::Mutex;
 
 use cosmrs::Any;
-use libp2p::gossipsub::{IdentTopic, TopicHash};
-use once_cell::sync::Lazy;
+use libp2p::gossipsub::IdentTopic;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 use tracing::{error, info};
@@ -17,8 +16,8 @@ use tick::tasks_executor;
 use crate::config::{Config, VaultKeypair, TASK_INTERVAL};
 use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::store::Store;
-use crate::protocols::dkg::{DKGHandleFn, DKG};
-use crate::protocols::sign::{SigningHandleFn, StandardSigner};
+use crate::protocols::dkg::DKG;
+use crate::protocols::sign::StandardSigner;
 
 use lazy_static::lazy_static;
 
@@ -124,23 +123,25 @@ impl BridgeSigner {
                     signature,
                 };
                 let any = Any::from_msg(&cosm_msg).unwrap();
-                if let Err(e) = ctx.tx_sender.blocking_send(any) {
+                if let Err(e) = ctx.tx_sender.send(any) {
                     error!("{:?}", e)
                 }
             })),
-            signer: StandardSigner::new("bridge_signing", Box::new(|ctx, task| {
-                println!("Signing completed: {:?}, {:?}", ctx.identifier, task.id);
-            }))
+            signer: StandardSigner::new("bridge_signing", Box::new(aa))
 
         }
     }  
 
 }
 
+fn aa(ctx: &mut Context, task: &mut Task) {
+    println!("Signing completed: {:?}, {:?}", ctx.identifier, task.id);
+}
+
 impl super::App for BridgeSigner {
-    fn on_message(&mut self, ctx: &mut Context, message: &SubscribeMessage) {
+    fn on_message(&mut self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()> {
         // debug!("Received {:?}", message);
-        self.keygen.on_message(ctx, message);
+        self.keygen.on_message(ctx, message)
     }
 
     fn enabled(&mut self) -> bool {

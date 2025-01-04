@@ -1,13 +1,13 @@
 use std::collections::BTreeMap;
-
+use std::sync::mpsc::Sender;
 use cosmrs::Any;
 use ed25519_compact::SecretKey;
 use frost_adaptor_signature::{round1, round2, AdaptorSignature, Identifier, Signature};
 use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{Deserialize, Serialize};
-use tokio::{sync::mpsc::Sender, time::Instant};
+use tokio::{ time::Instant};
 
-use crate::{config::{Config, VaultKeypair}, helper::{now, store::DefaultStore}, shuttler::ShuttlerBehaviour};
+use crate::{config::{Config, VaultKeypair}, helper::{encoding::to_base64, now, store::DefaultStore}, shuttler::ShuttlerBehaviour};
 
 pub mod bridge;
 pub mod relayer;
@@ -18,7 +18,7 @@ pub type SubscribeMessage = libp2p::gossipsub::Message;
 pub trait App {
     fn enabled(&mut self) -> bool;
     fn subscribe_topics(&self) -> Vec<IdentTopic>;
-    fn on_message(&mut self, ctx: &mut Context, message: &SubscribeMessage);
+    fn on_message(&mut self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()>;
     fn tick(&mut self) -> impl std::future::Future<Output = Instant>;
     fn on_tick(&mut self, ctx: &mut Context) -> impl std::future::Future<Output = ()>;
 }
@@ -145,7 +145,8 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn new(swarm: Swarm<ShuttlerBehaviour>, tx_sender: Sender<Any>,identifier: Identifier, node_key: SecretKey, conf: Config, id_base64:String) -> Self {
+    pub fn new(swarm: Swarm<ShuttlerBehaviour>, tx_sender: Sender<Any>,identifier: Identifier, node_key: SecretKey, conf: Config) -> Self {
+        let id_base64 = to_base64(&identifier.serialize());
         Self { 
             swarm, 
             tx_sender,

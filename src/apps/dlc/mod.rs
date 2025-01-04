@@ -53,9 +53,10 @@ impl App for DLC {
         // self.fetch_new_agency(ctx).await;
     }
 
-    fn on_message(&mut self, ctx: &mut Context, message: &SubscribeMessage) {
+    fn on_message(&mut self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()>{
         // self.nonce_generator.on_message(ctx, message);
         // self.keyshare_generator.on_message(ctx, message);
+        Ok(())
     }
 
     fn enabled(&mut self) -> bool {

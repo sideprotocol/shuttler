@@ -14,7 +14,7 @@ fn on_completed(ctx: &mut Context, task: &mut Task) {
                 signature: to_base64(&sig.serialize().unwrap()),
             };
             let any = Any::from_msg(&cosm_msg).unwrap();
-            if let Err(e) = ctx.tx_sender.blocking_send(any) {
+            if let Err(e) = ctx.tx_sender.send(any) {
                 error!("{:?}", e)
             }
         }

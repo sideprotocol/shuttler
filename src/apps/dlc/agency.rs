@@ -31,7 +31,7 @@ use crate::{
             signature,
         };
         let any = Any::from_msg(&cosm_msg).unwrap();
-        if let Err(e) = ctx.tx_sender.blocking_send(any) {
+        if let Err(e) = ctx.tx_sender.send(any) {
             error!("{:?}", e)
         }
 

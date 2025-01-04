@@ -4,7 +4,7 @@ use core::fmt;
 use std::{collections::BTreeMap, fmt::Debug};
 use ed25519_compact::x25519;
 use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
-use libp2p::gossipsub::{IdentTopic, Topic, TopicHash};
+use libp2p::gossipsub::IdentTopic;
 use rand::thread_rng;
 use serde::de::DeserializeOwned;
 use tracing::{debug, error, info};
@@ -80,7 +80,7 @@ impl DKG {
         let signature = ctx.node_key.sign(raw, None).to_vec();
         
         let msg = DKGMessage{ payload, signature };
-        // debug!("Broadcasting: {:?}", response.);
+        debug!("Broadcasting: {:?}", msg);
         let bytes = serde_json::to_vec(&msg).expect("Failed to serialize DKG package");
         publish_topic_message(ctx, IdentTopic::new(&self.name), bytes);
     }
@@ -102,9 +102,10 @@ impl DKG {
 
             self.db_round1.save(&task.id, &round1_packages);
 
-            // self.received_round1_packages(ctx, round1_packages.clone());
+            let data = Data{task_id: task.id.clone(), sender: ctx.identifier.clone(), data: round1_package};
+            self.received_round1_packages(ctx, data.clone());
 
-            self.broadcast_dkg_packages(ctx, DKGPayload::Round1(Data{task_id: task.id.clone(), sender: ctx.identifier.clone(), data: round1_package}));
+            self.broadcast_dkg_packages(ctx, DKGPayload::Round1(data));
         } else {
             error!("error in DKG round 1: {:?}", task.id);
         }
@@ -121,14 +122,14 @@ impl DKG {
             }
         };
 
-        if task.dkg_input.participants.len() as u16 - 1 != round1_packages.len() as u16 {
+        if task.dkg_input.participants.len() as u16 != round1_packages.len() as u16 {
             return Err(DKGError(format!("Have not received enough packages: {}", task_id)));
         }
 
-        // let mut cloned = round1_packages.clone();
-        // cloned.remove(&ctx.identifier);
+        let mut cloned = round1_packages.clone();
+        cloned.remove(&ctx.identifier);
 
-        match frost::keys::dkg::part2(secret_package, &round1_packages) {
+        match frost::keys::dkg::part2(secret_package, &cloned) {
             Ok((round2_secret_package, round2_packages)) => {
                 mem_store::set_dkg_round2_secret_packet(&task_id, round2_secret_package);
 
@@ -153,7 +154,7 @@ impl DKG {
                 // self.db_round2.save(&task.id, &merged);
 
                 let data  = Data{task_id, sender: ctx.identifier.clone(), data: output_packages};
-                // self.received_round2_packages(ctx, data.clone());
+                self.received_round2_packages(ctx, data.clone());
 
                 self.broadcast_dkg_packages(ctx, DKGPayload::Round2(data));
             }
@@ -204,7 +205,7 @@ impl DKG {
 
         local.retain(|id, _| task.dkg_input.participants.contains(id));
 
-        if task.dkg_input.participants.len() - 1 == local.len() {
+        if task.dkg_input.participants.len() == local.len() {
             
             info!("Received round1 packets from all participants: {}", task_id);
             match self.generate_round2_packages(ctx,  &task, local) {
@@ -272,11 +273,11 @@ impl DKG {
                 }
             };
 
-            let round1_packages = self.db_round1.get(task_id).unwrap_or(BTreeMap::new());
+            let mut round1_packages = self.db_round1.get(task_id).unwrap_or(BTreeMap::new());
             // let mut round1_packages_cloned = round1_packages.clone();
             // remove self
             // frost does not need its own package to compute the threshold key
-            // round1_packages.remove(&ctx.identifier); 
+            round1_packages.remove(&ctx.identifier); 
 
             match frost::keys::dkg::part3(&round2_secret_package, &round1_packages, &round2_packages ) {
                 Ok((priv_key, pub_key)) => { 

@@ -75,6 +75,7 @@ async fn fetch_dkg_requests(ctx: &mut Context, signer: &mut BridgeSigner) {
         let requests = requests_response.into_inner().requests;
         debug!("DKG Requests, {:?}", requests);
 
+        debug!("my pubkey: {:?}", ctx.id_base64);
         for request in requests {
             if request
                 .participants

@@ -12,7 +12,7 @@ use tendermint_config::PrivValidatorKey;
 use tonic::transport::Server;
 use std::process::Command;
 
-use crate::{config, mock::{MockBlockService, MockQuery, MockTxService, DKG, DKG_FILE_NAME}};
+use crate::{config, helper::encoding::to_base64, mock::{MockBlockService, MockQuery, MockTxService, DKG, DKG_FILE_NAME}};
 
 pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32) {
     // parameters
@@ -60,7 +60,7 @@ pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32) {
             priv_key,
         };
 
-        participants.push(priv_validator_key.address.to_string());
+        participants.push(to_base64(&priv_validator_key.pub_key.to_bytes()));
 
         let text= serde_json::to_string_pretty(&priv_validator_key).unwrap();
         fs::write(home_i.join("priv_validator_key.json"), text).unwrap();

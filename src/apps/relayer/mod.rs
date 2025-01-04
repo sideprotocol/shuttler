@@ -25,8 +25,8 @@ pub struct Relayer {
 }
 
 impl App for Relayer {
-    fn on_message(&mut self, _ctx: &mut Context, _message: &SubscribeMessage) {
-        todo!()
+    fn on_message(&mut self, _ctx: &mut Context, _message: &SubscribeMessage) -> anyhow::Result<()> {
+        Ok(())
     }
 
     fn enabled(&mut self) -> bool {
@@ -46,7 +46,7 @@ impl App for Relayer {
     }
     
     fn subscribe_topics(&self) -> Vec<IdentTopic> {
-        todo!()
+        vec![]
     }
     
 }

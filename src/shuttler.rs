@@ -1,5 +1,5 @@
 use std::{
-    hash::{DefaultHasher, Hash, Hasher}, io, str::FromStr, time::Duration
+    hash::{DefaultHasher, Hash, Hasher}, io, str::FromStr, sync::mpsc, time::Duration
 };
 
 use cosmrs::Any;
@@ -8,7 +8,7 @@ use futures::StreamExt;
 use libp2p::{
     gossipsub, identify, identity::Keypair, kad::{self, store::MemoryStore}, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, Multiaddr, PeerId, Swarm
 };
-use tokio::{select, sync::mpsc};
+use tokio::{select, spawn};
 use tracing::{debug, info, warn, error};
 
 use crate::{
@@ -165,17 +165,26 @@ impl Shuttler {
         subscribe_gossip_topics(&mut swarm, &self);
 
 
-        let (tx_sender, mut tx_receiver) = mpsc::channel::<Any>(10);
+        let (tx_sender, tx_receiver) = mpsc::channel::<Any>();
 
-        let mut context = Context::new(swarm, tx_sender, identifier, node_key, self.conf.clone(), priv_validator_key.address.to_string());
+        let mut context = Context::new(swarm, tx_sender, identifier, node_key, self.conf.clone());
 
+        let conf = self.conf.clone();
+        spawn(async move {
+            while let Ok(message) = tx_receiver.recv() {
+                println!("Received: {:?}", message);
+                match send_cosmos_transaction(&conf, message).await {
+                    Ok(resp) => {
+                        if let Some(inner) = resp.into_inner().tx_response {
+                            debug!("Submited {}, {}, {}", inner.txhash, inner.code, inner.raw_log)
+                        };
+                    },
+                    Err(e) => error!("Submit error: {:?}", e),
+                };
+            }
+        });
         loop {
             select! {
-                x = tx_receiver.recv() => {
-                    if let Some(tx) = x {
-                        send_tx(&context.conf, tx).await;
-                    }
-                },
                 swarm_event = context.swarm.select_next_some() => match swarm_event {
                     SwarmEvent::Behaviour(event) => {
                         // event_handler(evt, &mut swarm, &signer).await;
