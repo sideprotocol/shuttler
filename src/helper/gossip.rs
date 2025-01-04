@@ -4,15 +4,13 @@ use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{Deserialize, Serialize};
 use side_proto::cosmos::base::tendermint::v1beta1::{service_client::ServiceClient as BlockService, GetLatestBlockRequest};
 
-use crate::{apps::Context, shuttler::ShuttlerBehaviour};
+use crate::{apps::{App, Context}, shuttler::{Shuttler, ShuttlerBehaviour}};
 
 use super::{mem_store, now};
 pub const HEART_BEAT_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(60);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum SubscribeTopic {
-    DKG,
-    SIGNING,
     HEARTBEAT,
 }
 
@@ -35,14 +33,13 @@ pub struct HeartBeatPayload {
     pub block_height: i64,
 }
 
-pub fn subscribe_gossip_topics(swarm: &mut Swarm<ShuttlerBehaviour>) {
-    let topics = vec![
-        SubscribeTopic::DKG,
-        SubscribeTopic::SIGNING,
-        SubscribeTopic::HEARTBEAT,
+pub fn subscribe_gossip_topics(swarm: &mut Swarm<ShuttlerBehaviour>, app: &Shuttler) {
+    let mut topics = vec![
+        SubscribeTopic::HEARTBEAT.topic(),
     ];
+    topics.extend(app.signer.subscribe_topics());
     for topic in topics {
-        swarm.behaviour_mut().gossip.subscribe(&topic.topic()).expect("Failed to subscribe TSS events");
+        swarm.behaviour_mut().gossip.subscribe(&topic).expect("Failed to subscribe TSS events");
     }
 }
 

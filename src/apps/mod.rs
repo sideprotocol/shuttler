@@ -4,7 +4,7 @@ use cosmrs::Any;
 use ed25519_compact::SecretKey;
 use frost_adaptor_signature::{round1, round2, AdaptorSignature, Identifier, Signature};
 use libp2p::{gossipsub::IdentTopic, Swarm};
-use serde::{de::Error, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use tokio::{sync::mpsc::Sender, time::Instant};
 
 use crate::{config::{Config, VaultKeypair}, helper::{now, store::DefaultStore}, shuttler::ShuttlerBehaviour};
@@ -17,10 +17,10 @@ pub type SubscribeMessage = libp2p::gossipsub::Message;
 
 pub trait App {
     fn enabled(&mut self) -> bool;
-    fn subscribe(&self, ctx: &mut Context);
+    fn subscribe_topics(&self) -> Vec<IdentTopic>;
     fn on_message(&mut self, ctx: &mut Context, message: &SubscribeMessage);
-    fn tick(&mut self) -> impl std::future::Future<Output = Instant> + Send;
-    fn on_tick(&mut self, ctx: &mut Context) -> impl std::future::Future<Output = ()> + Send;
+    fn tick(&mut self) -> impl std::future::Future<Output = Instant>;
+    fn on_tick(&mut self, ctx: &mut Context) -> impl std::future::Future<Output = ()>;
 }
 
 
@@ -144,17 +144,6 @@ pub struct Context {
     pub signature_store: SignatureShareStore,
 }
 
-pub trait TopicAppHandle {
-    fn topic() -> IdentTopic;
-    fn message<M: for<'a> serde::Deserialize<'a>>(message: &SubscribeMessage) -> Result<M, serde_json::Error> {
-        if message.topic == Self::topic().hash() {
-            serde_json::from_slice::<M>(&message.data)
-        } else {
-            Err(serde_json::Error::unknown_field(message.topic.as_str(), &[]))
-        }
-    }
-}
-
 impl Context {
     pub fn new(swarm: Swarm<ShuttlerBehaviour>, tx_sender: Sender<Any>,identifier: Identifier, node_key: SecretKey, conf: Config, id_base64:String) -> Self {
         Self { 
@@ -171,12 +160,4 @@ impl Context {
             conf, 
         }
     }
-}
-
-pub trait DKGHander {
-    fn on_completed(ctx: &mut Context, task: &mut Task, priv_key: frost_adaptor_signature::keys::KeyPackage, pub_key: frost_adaptor_signature::keys::PublicKeyPackage);
-}
-
-pub trait SigningHandler {
-    fn on_completed(ctx: &mut Context, task: &mut Task);
 }

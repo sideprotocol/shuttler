@@ -1,14 +1,11 @@
 use std::time::Duration;
-use agency::{AgencyGenerator, AgencyHandler};
-use nonce::{NonceGenerator, NonceHandler};
-use oracle::{OracleGenerator, OracleHandler};
 use side_proto::side::dlc::query_client::QueryClient as DLCQueryClient;
 use tokio::time::{Instant, Interval};
 use tonic::transport::Channel;
 
 use crate::config::Config;
 
-use super::{App, Context, SubscribeMessage, TopicAppHandle};
+use super::{App, Context, SubscribeMessage};
 mod tick;
 mod nonce;
 mod oracle;
@@ -19,9 +16,9 @@ pub struct DLC {
     enable: bool,
     config: Config,
     ticker: Interval,
-    nonce_generator: NonceGenerator,
-    keyshare_generator: OracleGenerator,
-    agency_generator: AgencyGenerator,
+    // nonce_generator: NonceGenerator,
+    // keyshare_generator: OracleGenerator,
+    // agency_generator: AgencyGenerator,
     dlc_client: DLCQueryClient<Channel>,
 }
 
@@ -38,9 +35,9 @@ impl DLC {
             config: conf,
             ticker,
             enable,
-            nonce_generator: NonceGenerator::new(),
-            keyshare_generator: OracleGenerator::new(),
-            agency_generator: AgencyGenerator::new(),
+            // nonce_generator: NonceGenerator::new(),
+            // keyshare_generator: OracleGenerator::new(),
+            // agency_generator: AgencyGenerator::new(),
             dlc_client,
         }
     }
@@ -51,14 +48,14 @@ impl DLC {
 
 impl App for DLC {
     async fn on_tick(&mut self, ctx: &mut Context) {
-        self.fetch_new_key_generation(ctx).await;
-        self.fetch_new_nonce_generation(ctx).await;
-        self.fetch_new_agency(ctx).await;
+        // self.fetch_new_key_generation(ctx).await;
+        // self.fetch_new_nonce_generation(ctx).await;
+        // self.fetch_new_agency(ctx).await;
     }
 
     fn on_message(&mut self, ctx: &mut Context, message: &SubscribeMessage) {
-        self.nonce_generator.on_message(ctx, message);
-        self.keyshare_generator.on_message(ctx, message);
+        // self.nonce_generator.on_message(ctx, message);
+        // self.keyshare_generator.on_message(ctx, message);
     }
 
     fn enabled(&mut self) -> bool {
@@ -69,10 +66,9 @@ impl App for DLC {
         self.ticker.tick().await
     }
     
-    fn subscribe(&self, ctx: &mut Context) {
-        let _ = ctx.swarm.behaviour_mut().gossip.subscribe(&NonceHandler::topic());
-        let _ = ctx.swarm.behaviour_mut().gossip.subscribe(&OracleHandler::topic());
-        let _ = ctx.swarm.behaviour_mut().gossip.subscribe(&AgencyHandler::topic());
+    fn subscribe_topics(&self) -> Vec<libp2p::gossipsub::IdentTopic> {
+        vec![]
     }
+    
 }
 

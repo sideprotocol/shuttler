@@ -4,15 +4,12 @@ use side_proto::side::dlc::MsgSubmitAgencyPubKey;
 use tracing::error;
 
 use crate::{
-    apps::{Context, DKGHander, Task, TopicAppHandle}, 
+    apps::{Context, Task}, 
     config::VaultKeypair, helper::store::Store, 
     protocols::dkg::DKG
 };
 
-pub type AgencyGenerator = DKG<AgencyHandler>;
 
-pub struct AgencyHandler {}
-impl DKGHander for AgencyHandler {
 
     fn on_completed(ctx: &mut Context, task: &mut Task, priv_key: frost_adaptor_signature::keys::KeyPackage, pub_key: frost_adaptor_signature::keys::PublicKeyPackage) {
         let tweak = None;
@@ -39,10 +36,3 @@ impl DKGHander for AgencyHandler {
         }
 
     }
-}
-
-impl TopicAppHandle for AgencyHandler {
-    fn topic() -> IdentTopic {
-        IdentTopic::new("agency")
-    }
-}

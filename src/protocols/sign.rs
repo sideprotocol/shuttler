@@ -1,15 +1,16 @@
-use std::{collections::BTreeMap, marker::PhantomData};
+use std::collections::BTreeMap;
 
 use frost_adaptor_signature::{keys::Tweak, round1::{self, SigningNonces}, round2::{self, SignatureShare}, Identifier, SigningPackage};
+use libp2p::gossipsub::IdentTopic;
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 pub use tracing::error;
 use usize as Index;
-use crate::{apps::{Context, FrostSignature, SignMode, SigningHandler, Status, Task}, config::VaultKeypair, 
+use crate::{apps::{Context, FrostSignature, SignMode, Status, Task}, config::VaultKeypair, 
     helper::{
         bitcoin::convert_tweak, encoding::{self, hex_to_projective_point}, 
-        gossip::{publish_message, SubscribeTopic}, 
+        gossip::publish_topic_message, 
         store::Store
 }};
 
@@ -28,14 +29,24 @@ pub enum SignPackage {
     Round1(BTreeMap<Index,BTreeMap<Identifier,round1::SigningCommitments>>),
     Round2(BTreeMap<Index,BTreeMap<Identifier,round2::SignatureShare>>),
 }
+pub type SigningHandleFn = dyn Fn(&mut Context, &mut Task);
 
-pub struct StandardSigner<H: SigningHandler>{
-    _p: PhantomData<H>,
+pub struct StandardSigner {
+    name: String,
+    on_complete: Box<SigningHandleFn>,
 }
 
-impl<H> StandardSigner<H> where H: SigningHandler {
+impl StandardSigner{
+
+    pub fn new(name: impl Into<String>, on_complete: Box<SigningHandleFn>) -> Self {
+        Self {name: name.into(), on_complete}
+    }
+
+    pub fn topic(&self) -> IdentTopic {
+        IdentTopic::new(&self.name)
+    }
     
-    pub fn generate_commitments(ctx: &mut Context, task: &Task) {
+    pub fn generate_commitments(&self, ctx: &mut Context, task: &Task) {
 
         if task.status == Status::SignComplete {
             return
@@ -68,12 +79,13 @@ impl<H> StandardSigner<H> where H: SigningHandler {
             sender: ctx.identifier.clone(),
             signature: vec![], 
         };
-        broadcast_signing_packages(ctx, &mut msg);
 
-        Self::received_sign_message(ctx, msg);
+        self.broadcast_signing_packages(ctx, &mut msg);
+
+        self.received_sign_message(ctx, msg);
     }
 
-    fn received_sign_message(ctx: &mut Context, msg: SignMesage) {
+    fn received_sign_message(&self, ctx: &mut Context, msg: SignMesage) {
 
         // Ensure the message is not forged.
         match PublicKey::from_slice(&msg.sender.serialize()) {
@@ -121,7 +133,7 @@ impl<H> StandardSigner<H> where H: SigningHandler {
 
                 ctx.commitment_store.save(&task_id, &remote_commitments);
 
-                Self::try_generate_signature_shares(ctx, &task_id);
+                self.try_generate_signature_shares(ctx, &task_id);
 
             },
             SignPackage::Round2(sig_shares) => {
@@ -148,13 +160,13 @@ impl<H> StandardSigner<H> where H: SigningHandler {
 
                 ctx.signature_store.save(&task_id, &remote_sig_shares);
 
-                Self::try_aggregate_signature_shares(ctx, &task_id);
+                self.try_aggregate_signature_shares(ctx, &task_id);
                 
             }
         }
     }
 
-    fn try_generate_signature_shares(ctx: &mut Context, task_id: &String) {
+    fn try_generate_signature_shares(&self, ctx: &mut Context, task_id: &String) {
 
         // Ensure the task exists locally to prevent forged signature tasks. 
         let task = match ctx.task_store.get(task_id) {
@@ -235,13 +247,13 @@ impl<H> StandardSigner<H> where H: SigningHandler {
             signature: vec![],
         };
 
-        broadcast_signing_packages(ctx, &mut msg);
+        self.broadcast_signing_packages(ctx, &mut msg);
 
-        Self::received_sign_message(ctx, msg);
+        self.received_sign_message(ctx, msg);
 
     }
 
-    fn try_aggregate_signature_shares(ctx: &mut Context, task_id: &String) {
+    fn try_aggregate_signature_shares(&self, ctx: &mut Context, task_id: &String) {
 
         // Ensure the task exists locally to prevent forged signature tasks. 
         let mut task = match ctx.task_store.get(task_id) {
@@ -319,8 +331,19 @@ impl<H> StandardSigner<H> where H: SigningHandler {
         // task.psbt = psbt_base64;
         task.status = Status::SignComplete;
         ctx.task_store.save(&task.id, &task);
-        H::on_completed(ctx, &mut task);
+        
+        (self.on_complete)(ctx, &mut task);
 
+    }
+
+    fn broadcast_signing_packages(&self, ctx: &mut Context, message: &mut SignMesage) {
+        let raw = serde_json::to_vec(&message.package).unwrap();
+        let signaure = ctx.node_key.sign(raw, None).to_vec();
+        message.signature = signaure;
+    
+        // tracing::debug!("Broadcasting: {:?}", message);
+        let message = serde_json::to_vec(&message).expect("Failed to serialize Sign package");
+        publish_topic_message(ctx, self.topic(), message);
     }
 
 }
@@ -387,16 +410,6 @@ fn aggregate(signing_package: &SigningPackage, signature_shares: &BTreeMap<Ident
         }
     }
 
-}
-
-fn broadcast_signing_packages(ctx: &mut Context, message: &mut SignMesage) {
-    let raw = serde_json::to_vec(&message.package).unwrap();
-    let signaure = ctx.node_key.sign(raw, None).to_vec();
-    message.signature = signaure;
-
-    // tracing::debug!("Broadcasting: {:?}", message);
-    let message = serde_json::to_vec(&message).expect("Failed to serialize Sign package");
-    publish_message(ctx, SubscribeTopic::SIGNING, message);
 }
 
 fn sanitize<T>(storages: &mut BTreeMap<Identifier, T>, keys: &Vec<&Identifier>) {

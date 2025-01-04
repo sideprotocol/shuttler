@@ -4,15 +4,11 @@ use side_proto::side::dlc::MsgSubmitOraclePubKey;
 use tracing::error;
 
 use crate::{
-    apps::{Context, DKGHander, Task, TopicAppHandle}, 
+    apps::{Context, Task}, 
     config::VaultKeypair, helper::store::Store, 
     protocols::dkg::DKG
 };
 
-pub struct OracleHandler {}
-pub type OracleGenerator = DKG<OracleHandler>;
-
-impl DKGHander for OracleHandler {
 
     fn on_completed(ctx: &mut Context, task: &mut Task, priv_key: frost_adaptor_signature::keys::KeyPackage, pub_key: frost_adaptor_signature::keys::PublicKeyPackage) {
         let tweak = None;
@@ -39,10 +35,3 @@ impl DKGHander for OracleHandler {
         }
 
     }
-}
-
-impl TopicAppHandle for OracleHandler {
-    fn topic() -> IdentTopic {
-        IdentTopic::new("oracle")
-    }
-}

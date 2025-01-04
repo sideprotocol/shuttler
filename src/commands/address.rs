@@ -1,12 +1,12 @@
 use ed25519_compact::SecretKey;
 
-use crate::{apps::bridge::Signer, config::Config, helper::encoding::{identifier_to_peer_id, pubkey_to_identifier}};
+use crate::{apps::bridge::BridgeSigner, config::Config, helper::encoding::{identifier_to_peer_id, pubkey_to_identifier}};
 
 use super::Cli;
 
 pub fn execute(cli: &Cli) {
     let conf = Config::from_file(&cli.home).unwrap();
-    let signer = Signer::new(conf.clone(), false);
+    let signer = BridgeSigner::new(conf.clone(), false);
 
     let priv_validator_key = conf.load_validator_key();
 

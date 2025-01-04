@@ -1,4 +1,4 @@
-use crate::{config::Config, apps::bridge::Signer};
+use crate::{config::Config, apps::bridge::BridgeSigner};
 
 use super::Cli;
 

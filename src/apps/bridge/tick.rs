@@ -11,9 +11,9 @@ use crate::{
     helper::{client_side::get_signing_requests, encoding::{from_base64, pubkey_to_identifier}, mem_store, store::Store}, 
 };
 
-use super::Signer;
+use super::BridgeSigner;
 
-pub async fn tasks_executor(ctx: &mut Context, signer: &mut Signer ) {
+pub async fn tasks_executor(ctx: &mut Context, signer: &mut BridgeSigner ) {
     
     if ctx.swarm.connected_peers().count() == 0 {
         return
@@ -30,7 +30,7 @@ pub async fn tasks_executor(ctx: &mut Context, signer: &mut Signer ) {
 
 pub async fn fetch_signing_requests(
     ctx: &mut Context,
-    signer: &mut Signer,
+    signer: &mut BridgeSigner,
 ) {
     let host = ctx.conf.side_chain.grpc.as_str();
 
@@ -46,7 +46,7 @@ pub async fn fetch_signing_requests(
                     if ctx.task_store.exists(&task.id) { continue; }
                     ctx.task_store.save(&task.id, &task);
     
-                    signer.key_generator.generate(ctx, &task);
+                    signer.signer.generate_commitments(ctx, &task);
                 }
             }
         }
@@ -57,7 +57,7 @@ pub async fn fetch_signing_requests(
     };
 }
 
-async fn fetch_dkg_requests(ctx: &mut Context, signer: &mut Signer) {
+async fn fetch_dkg_requests(ctx: &mut Context, signer: &mut BridgeSigner) {
     let host = ctx.conf.side_chain.grpc.clone();
     let mut client = match BtcQueryClient::connect(host.to_owned()).await {
         Ok(client) => client,
@@ -89,7 +89,7 @@ async fn fetch_dkg_requests(ctx: &mut Context, signer: &mut Signer) {
                     task.dkg_input.tweaks = request.vault_types;
                     ctx.task_store.save(&task.id, &task);
     
-                    signer.key_generator.generate(ctx, &task);
+                    signer.keygen.generate(ctx, &task);
                 }
             }
         }

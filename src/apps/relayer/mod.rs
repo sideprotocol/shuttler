@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use bitcoincore_rpc::{Auth, Client};
+use libp2p::gossipsub::IdentTopic;
 use tick::{scan_vault_txs, submit_fee_rate, sync_btc_blocks};
 use tokio::{join, time::Instant};
 use crate::{config::Config, helper::{client_fee_provider::FeeProviderClient, client_ordinals::OrdinalsClient}};
@@ -44,9 +45,10 @@ impl App for Relayer {
         );
     }
     
-    fn subscribe(&self, _ctx: &mut Context) {
-        
+    fn subscribe_topics(&self) -> Vec<IdentTopic> {
+        todo!()
     }
+    
 }
 
 impl Relayer {

@@ -13,7 +13,7 @@ use tracing::{debug, info, warn, error};
 
 use crate::{
     apps::{
-        dlc::DLC, relayer::Relayer, bridge::Signer, App, Context, SubscribeMessage
+        dlc::DLC, relayer::Relayer, bridge::BridgeSigner, App, Context, SubscribeMessage
     },
     config::{candidate::Candidate, Config},
     helper::{
@@ -23,8 +23,8 @@ use crate::{
 
 pub struct Shuttler {
     conf: Config,
-    relayer: Relayer,
-    signer: Signer,
+    pub relayer: Relayer,
+    pub signer: BridgeSigner,
     dlc: DLC,
     seed: bool,
     candidates: Candidate,
@@ -111,7 +111,7 @@ impl Shuttler {
         let conf = Config::from_file(home).unwrap();
 
         let relayer = Relayer::new(conf.clone(), start_relayer);
-        let signer = Signer::new(conf.clone(), start_signer);
+        let signer = BridgeSigner::new(conf.clone(), start_signer);
         let dlc =  DLC::new(conf.clone(), start_dlc).await;
 
         Self {
@@ -162,13 +162,12 @@ impl Shuttler {
         }
 
         dail_bootstrap_nodes(&mut swarm, &self.conf);
-        subscribe_gossip_topics(&mut swarm);
+        subscribe_gossip_topics(&mut swarm, &self);
 
 
         let (tx_sender, mut tx_receiver) = mpsc::channel::<Any>(10);
 
         let mut context = Context::new(swarm, tx_sender, identifier, node_key, self.conf.clone(), priv_validator_key.address.to_string());
-        self.dlc.subscribe(&mut context);
 
         loop {
             select! {

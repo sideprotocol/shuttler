@@ -1,9 +1,10 @@
 
 
 use core::fmt;
-use std::marker::PhantomData;
 use std::{collections::BTreeMap, fmt::Debug};
 use ed25519_compact::x25519;
+use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
+use libp2p::gossipsub::{IdentTopic, Topic, TopicHash};
 use rand::thread_rng;
 use serde::de::DeserializeOwned;
 use tracing::{debug, error, info};
@@ -12,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use frost_adaptor_signature as frost;
 use frost::{Identifier, keys::dkg::round1};
 
-use crate::apps::{DKGHander, Context, Status, SubscribeMessage, Task, TopicAppHandle};
+use crate::apps::{Context, Status, SubscribeMessage, Task};
 use crate::helper::gossip::publish_topic_message;
 use crate::helper::store::{MemStore, Store};
 use crate::helper::mem_store;
@@ -20,20 +21,27 @@ use crate::helper::cipher::{decrypt, encrypt};
 
 pub type Round1Store = MemStore<String, BTreeMap<Identifier, round1::Package>>;
 pub type Round2Store = MemStore<String, BTreeMap<Identifier, Vec<u8>>>;
+pub type DKGHandleFn = dyn Fn(&mut Context, &mut Task, &KeyPackage, &PublicKeyPackage);
 
-pub struct DKG<H: DKGHander> {
+pub struct DKG {
+    name: String,
     db_round1: Round1Store,
     db_round2: Round2Store,
-    _p: PhantomData<H>,
+    on_complete: Box<DKGHandleFn>,
 }
 
-impl<H> DKG<H> where H: DKGHander{
-    pub fn new() -> Self {
+impl DKG {
+    pub fn new(name: impl Into<String>, on_complete: Box<DKGHandleFn>) -> Self {
         Self {
+            name: name.into(),
             db_round1: MemStore::new(),
             db_round2: MemStore::new(),
-            _p: PhantomData::default(),
+            on_complete,
         }
+    }
+
+    pub fn topic(&self) -> IdentTopic {
+        IdentTopic::new(&self.name)
     }
 }
 
@@ -64,7 +72,7 @@ pub struct Data<T> where T: Serialize + DeserializeOwned{
     pub data: T,
 }
 
-impl<H> DKG<H> where H: DKGHander + TopicAppHandle {
+impl DKG {
 
     fn broadcast_dkg_packages(&self, ctx: &mut Context, payload: DKGPayload) {
 
@@ -74,7 +82,7 @@ impl<H> DKG<H> where H: DKGHander + TopicAppHandle {
         let msg = DKGMessage{ payload, signature };
         // debug!("Broadcasting: {:?}", response.);
         let bytes = serde_json::to_vec(&msg).expect("Failed to serialize DKG package");
-        publish_topic_message(ctx, H::topic(), bytes);
+        publish_topic_message(ctx, IdentTopic::new(&self.name), bytes);
     }
 
     pub fn generate(&mut self, ctx: &mut Context, task: &Task) {
@@ -156,10 +164,15 @@ impl<H> DKG<H> where H: DKGHander + TopicAppHandle {
         Ok(())
     }
 
-    pub fn on_message(&mut self, ctx: &mut Context, message: &SubscribeMessage) {
-        if let Ok(m) =  H::message(message) {
+    pub fn on_message(&mut self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()> {
+        if message.topic.to_string() == self.name {
+            let m = serde_json::from_slice(&message.data)?;
             self.received_dkg_message(ctx, m);
         }
+        // if let Ok(m) =  H::message(message) {
+        //     self.received_dkg_message(ctx, m);
+        // }
+        return Ok(())
     }
 
     fn received_dkg_message(&mut self, ctx: &mut Context, message: DKGMessage) {
@@ -267,7 +280,8 @@ impl<H> DKG<H> where H: DKGHander + TopicAppHandle {
 
             match frost::keys::dkg::part3(&round2_secret_package, &round1_packages, &round2_packages ) {
                 Ok((priv_key, pub_key)) => { 
-                    H::on_completed(ctx, &mut task, priv_key, pub_key);
+                    (self.on_complete)(ctx, &mut task, &priv_key, &pub_key);
+                    // self.on_com(ctx, &mut task, priv_key, pub_key);
                 },
                 Err(e) => {
                     error!("Failed to compute threshold key: {} {:?}", task_id, e);

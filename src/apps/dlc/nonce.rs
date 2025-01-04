@@ -1,16 +1,11 @@
 
 use cosmrs::Any;
-use libp2p::gossipsub::IdentTopic;
 use side_proto::side::dlc::MsgSubmitNonce;
 use tracing::error;
 
-use crate::{
-    apps::{Context, DKGHander, FrostSignature, SigningHandler, Task, TopicAppHandle}, config::VaultKeypair, helper::{encoding::to_base64, store::Store}, protocols::{dkg::DKG, sign::StandardSigner}};
+use crate::{apps::{Context, FrostSignature, Task}, config::VaultKeypair, helper::{encoding::to_base64, store::Store}};
 
-pub struct NonceHandler {}
-pub type NonceGenerator = DKG<NonceHandler>;
 
-impl DKGHander for NonceHandler {
     fn on_completed(ctx: &mut Context, task: &mut Task, priv_key: frost_adaptor_signature::keys::KeyPackage, pub_key: frost_adaptor_signature::keys::PublicKeyPackage) {
         let tweak = None;
         let message = pub_key.verifying_key().serialize().unwrap();
@@ -27,21 +22,10 @@ impl DKGHander for NonceHandler {
         });
         ctx.task_store.save(&task.id, task);
 
-        NonceSigner::generate_commitments(ctx, task);   
+        // NonceSigner::generate_commitments(ctx, task);   
     }
-}
 
-impl TopicAppHandle for NonceHandler {
-    fn topic() -> IdentTopic {
-        IdentTopic::new("nonce")
-    }
-}
-
-pub struct NonceSignatureHandler{}
-pub type NonceSigner = StandardSigner<NonceSignatureHandler>;
-
-impl SigningHandler for NonceSignatureHandler {
-    fn on_completed(ctx: &mut Context, task: &mut Task) {
+    fn on_completed2(ctx: &mut Context, task: &mut Task) {
         task.sign_inputs.iter().for_each(|(_, input)| {
             if let Some(FrostSignature::Standard(signature)) = input.signature  {
                 let cosm_msg = MsgSubmitNonce {
@@ -56,5 +40,3 @@ impl SigningHandler for NonceSignatureHandler {
             }
         });
     }
-}
-

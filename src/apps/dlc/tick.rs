@@ -3,7 +3,7 @@ use side_proto::side::dlc::{AgencyStatus, DlcOracle, DlcOracleStatus, QueryAgenc
 
 use crate::{
     apps::{Context, Input, Task}, helper::{encoding::pubkey_to_identifier, store::Store}};
-use super::{attestation::AttestationSigner, DLC};
+use super::DLC;
 
 impl DLC {
     pub async fn fetch_new_nonce_generation(&mut self, ctx: &mut Context ) {
@@ -35,7 +35,7 @@ impl DLC {
                 // oracle should sign the new nonce.
                 task.sign_inputs.insert(0, Input::new(oracle.pubkey.clone()));
                 ctx.task_store.save(&task.id, &task);
-                self.nonce_generator.generate(ctx, &task);
+                //self.nonce_generator.generate(ctx, &task);
             }
         });
     }
@@ -51,7 +51,7 @@ impl DLC {
                 if ctx.task_store.exists(&task.id) { return }
                 ctx.task_store.save(&task.id, &task);
 
-                self.keyshare_generator.generate(ctx, &task);
+                // self.keyshare_generator.generate(ctx, &task);
             }
         });
     }
@@ -79,7 +79,7 @@ impl DLC {
             if ctx.task_store.exists(&task.id) { return }
             ctx.task_store.save(&task.id, &task);
 
-            self.agency_generator.generate(ctx, &task);
+            // self.agency_generator.generate(ctx, &task);
         });
     }
 
@@ -104,7 +104,7 @@ impl DLC {
             if ctx.task_store.exists(&task.id) { return }
             ctx.task_store.save(&task.id, &task);
 
-            AttestationSigner::generate_commitments(ctx, &task);
+            // AttestationSigner::generate_commitments(ctx, &task);
         });
     }
 
