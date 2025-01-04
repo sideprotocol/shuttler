@@ -301,7 +301,9 @@ impl Shuttler {
 
 fn dispatch_messages<T: App>(app: &mut T, context: &mut Context,  message: &SubscribeMessage) {
     if app.enabled() {
-        app.on_message(context, message);
+        if let Err(e) = app.on_message(context, message) {
+            error!("Dispatch message error: {:?}", e);
+        }
     }
 }
 
@@ -342,21 +344,5 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<ShuttlerBehaviour>, conf: &Config) {
             }
         }
     }
-}
-
-async fn send_tx(config: &Config, tx: Any) {
-    match send_cosmos_transaction(config, tx).await {
-        Ok(resp) => {
-            let tx_response = resp.into_inner().tx_response.unwrap();
-            if tx_response.code == 0 {       
-                info!("Sent dkg vault: {:?}", tx_response.txhash);
-            } else {
-                error!("Failed to send dkg vault: {:?}", tx_response);
-            }
-        },
-        Err(e) => {
-            error!("Failed to send dkg vault: {:?}", e);
-        },
-    };
 }
 

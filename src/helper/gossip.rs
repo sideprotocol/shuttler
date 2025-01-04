@@ -1,11 +1,9 @@
 
-use std::time::Duration;
 
 use frost_adaptor_signature::Identifier;
 use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{Deserialize, Serialize};
 use side_proto::cosmos::base::tendermint::v1beta1::{service_client::ServiceClient as BlockService, GetLatestBlockRequest};
-use tokio::time::Interval;
 
 use crate::{apps::{App, Context}, shuttler::{Shuttler, ShuttlerBehaviour}};
 

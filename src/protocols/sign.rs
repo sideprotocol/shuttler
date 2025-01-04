@@ -347,7 +347,9 @@ impl StandardSigner{
         task.status = Status::SignComplete;
         ctx.task_store.save(&task.id, &task);
         
-        (self.on_complete)(ctx, &mut task);
+        if let Err(e) = (self.on_complete)(ctx, &mut task) {
+            error!("signing error: {:?}", e);
+        }
 
     }
 
