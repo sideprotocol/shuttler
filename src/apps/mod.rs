@@ -5,7 +5,7 @@ use ed25519_compact::SecretKey;
 use frost_adaptor_signature::{round1, round2, AdaptorSignature, Identifier, Signature};
 use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{Deserialize, Serialize};
-use tokio::{ time::Instant};
+use tokio::time::Instant;
 use bitcoincore_rpc::{Auth, Client as BitcoinClient};
 
 use crate::{config::{Config, VaultKeypair}, helper::{encoding::to_base64, now, store::DefaultStore}, shuttler::ShuttlerBehaviour};
