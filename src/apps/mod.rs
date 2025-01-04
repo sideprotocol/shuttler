@@ -5,14 +5,16 @@ use ed25519_compact::SecretKey;
 use frost_adaptor_signature::{round1, round2, AdaptorSignature, Identifier, Signature};
 use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{Deserialize, Serialize};
+use shuttler::ShuttlerBehaviour;
 use tokio::time::Instant;
 use bitcoincore_rpc::{Auth, Client as BitcoinClient};
 
-use crate::{config::{Config, VaultKeypair}, helper::{encoding::to_base64, now, store::DefaultStore}, shuttler::ShuttlerBehaviour};
+use crate::{config::{Config, VaultKeypair}, helper::{encoding::to_base64, now, store::DefaultStore}};
 
 pub mod bridge;
 pub mod relayer;
 pub mod dlc;
+pub mod shuttler;
 
 pub type SubscribeMessage = libp2p::gossipsub::Message;
 

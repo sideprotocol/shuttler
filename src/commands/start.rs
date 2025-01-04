@@ -1,7 +1,7 @@
 
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-use crate::{config::Config, shuttler::Shuttler};
+use crate::{config::Config, apps::shuttler::Shuttler};
 
 pub async fn execute(home: &str, relayer: bool, signer: bool, seed: bool) {
     

@@ -5,7 +5,7 @@ use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{Deserialize, Serialize};
 use side_proto::cosmos::base::tendermint::v1beta1::{service_client::ServiceClient as BlockService, GetLatestBlockRequest};
 
-use crate::{apps::{App, Context}, shuttler::{Shuttler, ShuttlerBehaviour}};
+use crate::apps::{App, Context, shuttler::{Shuttler, ShuttlerBehaviour}};
 
 use super::{mem_store, now};
 pub const HEART_BEAT_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(60);
