@@ -1,7 +1,7 @@
 
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-use crate::{config::Config, apps::shuttler::Shuttler};
+use crate::{apps::{bridge::BridgeSigner, relayer::Relayer, Shuttler, Task}, config::Config};
 
 pub async fn execute(home: &str, relayer: bool, signer: bool, seed: bool) {
     
@@ -16,6 +16,16 @@ pub async fn execute(home: &str, relayer: bool, signer: bool, seed: bool) {
         println!("Unable to set global log config!");
     }
 
-    let mut app = Shuttler::new(home, seed, relayer, signer, true).await;
-    app.start().await;
+    let mut app = Shuttler::new(home, seed);
+
+    let r = Relayer::new(conf.clone());
+    if relayer {
+        app.registry( &r);
+    }
+    let b = BridgeSigner::new(conf.clone());
+    if signer {
+        app.registry( &b);
+    }
+
+    app.start(&conf).await;
 }

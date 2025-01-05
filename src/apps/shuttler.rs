@@ -1,31 +1,29 @@
 use std::{
-    hash::{DefaultHasher, Hash, Hasher}, io, str::FromStr, sync::mpsc, time::Duration
+    collections::BTreeMap, hash::{DefaultHasher, Hash, Hasher}, io, str::FromStr, time::Duration
 };
 
 use cosmrs::Any;
 use ed25519_compact::{PublicKey, SecretKey, Signature};
-use futures::StreamExt;
+use futures::stream::{self, FuturesUnordered, StreamExt};
 use libp2p::{
     gossipsub, identify, identity::Keypair, kad::{self, store::MemoryStore}, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, Multiaddr, PeerId, Swarm
 };
-use tokio::{select, spawn};
+use tokio::{select, spawn, time::interval};
 use tracing::{debug, info, warn, error};
 
 use crate::{
     apps::{
-        bridge::BridgeSigner, dlc::DLC, relayer::Relayer, App, Context, SubscribeMessage
+        App, Context, SubscribeMessage, Task
     },
     config::{candidate::Candidate, Config},
     helper::{
         client_side::send_cosmos_transaction, encoding::pubkey_to_identifier, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store
     },
 };
+use tokio_stream::wrappers::IntervalStream;
 
-pub struct Shuttler {
-    conf: Config,
-    pub relayer: Relayer,
-    pub signer: BridgeSigner,
-    dlc: DLC,
+pub struct Shuttler<'a> {
+    pub apps: Vec<&'a dyn App>,
     seed: bool,
     candidates: Candidate,
 }
@@ -100,33 +98,31 @@ fn initial_swarm(keybyte: impl AsMut<[u8]>) -> Swarm<ShuttlerBehaviour> {
         .build()
 }
 
-impl Shuttler {
-    pub async fn new(
+impl<'a> Shuttler<'a> {
+    pub fn new(
         home: &str,
         seed: bool,
-        start_relayer: bool,
-        start_signer: bool,
-        start_dlc: bool,
     ) -> Self {
         let conf = Config::from_file(home).unwrap();
 
-        let relayer = Relayer::new(conf.clone(), start_relayer);
-        let signer = BridgeSigner::new(conf.clone(), start_signer);
-        let dlc =  DLC::new(conf.clone(), start_dlc).await;
-
         Self {
             candidates: Candidate::new(conf.side_chain.grpc.clone(), &conf.bootstrap_nodes),
-            conf,
             seed,
-            relayer,
-            signer,
-            dlc,
+            apps: vec![],
         }
     }
 
-    pub async fn start(&mut self) {
+    pub fn registry(&mut self, app: &'a impl App) {
+        self.apps.push(app);
+    }
+
+    pub fn get_app(&self, index: usize ) -> Option<&&dyn App> {
+        self.apps.get(index)
+    }
+
+    pub async fn start(&mut self, conf: &Config) {
         // load private key from priv_validator_key_path
-        let priv_validator_key = self.conf.load_validator_key();
+        let priv_validator_key = conf.load_validator_key();
 
         let mut b = priv_validator_key
             .priv_key
@@ -148,32 +144,28 @@ impl Shuttler {
         // swarm.listen_on(format!("/ip4/0.0.0.0/udp/{}/quic-v1", 5157).parse().expect("address parser error")).expect("failed to listen on all interfaces");
         swarm
             .listen_on(
-                format!("/ip4/0.0.0.0/tcp/{}", self.conf.port)
+                format!("/ip4/0.0.0.0/tcp/{}", conf.port)
                     .parse()
                     .expect("Address parse error"),
             )
             .expect("failed to listen on all interfaces");
 
-        if self.seed || self.conf.bootstrap_nodes.len() == 0 {
+        if self.seed || conf.bootstrap_nodes.len() == 0 {
             swarm
                 .behaviour_mut()
                 .kad
                 .set_mode(Some(libp2p::kad::Mode::Server));
         }
 
-        dail_bootstrap_nodes(&mut swarm, &self.conf);
+        dail_bootstrap_nodes(&mut swarm, &conf);
         subscribe_gossip_topics(&mut swarm, &self);
 
-
-        let (tx_sender, tx_receiver) = mpsc::channel::<Any>();
-
-        let mut context = Context::new(swarm, tx_sender, identifier, node_key, self.conf.clone());
-
-        let conf = self.conf.clone();
+        let (tx_sender, tx_receiver) = std::sync::mpsc::channel::<Any>();
+        let conf2 = conf.clone();
         spawn(async move {
             while let Ok(message) = tx_receiver.recv() {
                 println!("Received: {:?}", message);
-                match send_cosmos_transaction(&conf, message).await {
+                match send_cosmos_transaction(&conf2, message).await {
                     Ok(resp) => {
                         if let Some(inner) = resp.into_inner().tx_response {
                             debug!("Submited {}, {}, {}", inner.txhash, inner.code, inner.raw_log)
@@ -184,18 +176,57 @@ impl Shuttler {
             }
         });
 
+        let mut context = Context::new(swarm, tx_sender, identifier, node_key, conf.clone());
         let mut heart_beat = tokio::time::interval(Duration::from_secs(mem_store::HEART_BEAT_WINDOW));
+
+
+        let mut all = stream::select_all(self.apps.iter().enumerate().map(|(index, app)| {
+            IntervalStream::new(interval(app.tick())).map(move |_| index)
+        }));
 
         loop {
             select! {
+                Some(index) = all.next() => {
+                    if let Some(app) = self.get_app(index) {
+                        app.on_tick(&mut context);
+                    };
+                }
                 _ = heart_beat.tick() => {
                     sending_heart_beat(&mut context).await;
                 }
                 swarm_event = context.swarm.select_next_some() => match swarm_event {
-                    SwarmEvent::Behaviour(event) => {
-                        // event_handler(evt, &mut swarm, &signer).await;
-                        self.event_handler(event, &mut context).await;
-                    },
+                    SwarmEvent::Behaviour(ShuttlerBehaviourEvent::Gossip(gossipsub::Event::Message { message, .. })) => {
+                        update_heartbeat(&context, &message);
+                        for app in &self.apps {
+                            dispatch_messages(app, &mut context, &message);
+                        }
+                    }
+                    SwarmEvent::Behaviour(ShuttlerBehaviourEvent::Identify(identify::Event::Received {
+                        peer_id, info, ..
+                    })) => {
+                        context.swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
+                        // info!(" @@(Received) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
+                        info.listen_addrs.iter().for_each(|addr| {
+                            if !addr.to_string().starts_with("/ip4/127.0.0.1") {
+                                tracing::debug!("Discovered: {addr}/p2p/{peer_id}");
+                                context.swarm
+                                    .behaviour_mut()
+                                    .kad
+                                    .add_address(&peer_id, addr.clone());
+                            }
+                        });
+                    }
+                    SwarmEvent::Behaviour(ShuttlerBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
+                        for (peer_id, multiaddr) in list {
+                            context.swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
+                            context.swarm.behaviour_mut().kad.add_address(&peer_id, multiaddr);
+                        }
+                    }
+                    SwarmEvent::Behaviour(ShuttlerBehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
+                        for (peer_id, _multiaddr) in list {
+                            info!("mDNS peer has expired: {peer_id}");
+                        }
+                    }
                     SwarmEvent::NewListenAddr { address, .. } => {
                         info!("Listening on {address}/p2p/{}", context.swarm.local_peer_id());
                     },
@@ -214,70 +245,7 @@ impl Shuttler {
                         // debug!("Swarm event: {:?}", swarm_event);
                     },
                 },
-                _ = self.relayer.tick(), if self.relayer.enabled() => {
-                    self.relayer.on_tick(&mut context).await;
-                },
-                _ = self.dlc.tick(), if self.dlc.enabled() => {
-                    self.dlc.on_tick(&mut context).await;
-                },
-                _ = self.signer.tick(), if self.signer.enabled() => {
-                    self.signer.on_tick(&mut context).await;
-                },
-
             }
-        }
-    }
-
-    // handle sub events from the swarm
-    async fn event_handler(
-        &mut self,
-        event: ShuttlerBehaviourEvent,
-        context: &mut Context,
-    ) {
-        match event {
-            ShuttlerBehaviourEvent::Gossip(gossipsub::Event::Message { message, .. }) => {
-                update_heartbeat(context, &message);
-                dispatch_messages(&mut self.dlc, context, &message);
-                dispatch_messages(&mut self.signer, context, &message);
-                dispatch_messages(&mut self.relayer,context, &message);
-            }
-            ShuttlerBehaviourEvent::Identify(identify::Event::Received {
-                peer_id, info, ..
-            }) => {
-                context.swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-                // info!(" @@(Received) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
-                info.listen_addrs.iter().for_each(|addr| {
-                    if !addr.to_string().starts_with("/ip4/127.0.0.1") {
-                        tracing::debug!("Discovered: {addr}/p2p/{peer_id}");
-                        context.swarm
-                            .behaviour_mut()
-                            .kad
-                            .add_address(&peer_id, addr.clone());
-                    }
-                });
-            }
-            ShuttlerBehaviourEvent::Kad(kad::Event::RoutablePeer { peer, address }) => {
-                debug!("Found Peer {:?}/{:?}", address, peer)
-            }
-            ShuttlerBehaviourEvent::Kad(kad::Event::RoutingUpdated {
-                is_new_peer,
-                addresses,
-                ..
-            }) => {
-                debug!("Routing Peer {:?}/{:?}", addresses, is_new_peer)
-            }
-            ShuttlerBehaviourEvent::Mdns(mdns::Event::Discovered(list)) => {
-                for (peer_id, multiaddr) in list {
-                    context.swarm.behaviour_mut().gossip.add_explicit_peer(&peer_id);
-                    context.swarm.behaviour_mut().kad.add_address(&peer_id, multiaddr);
-                }
-            }
-            ShuttlerBehaviourEvent::Mdns(mdns::Event::Expired(list)) => {
-                for (peer_id, _multiaddr) in list {
-                    info!("mDNS peer has expired: {peer_id}");
-                }
-            }
-            _ => {}
         }
     }
 
@@ -299,11 +267,9 @@ impl Shuttler {
 
 }
 
-fn dispatch_messages<T: App>(app: &mut T, context: &mut Context,  message: &SubscribeMessage) {
-    if app.enabled() {
-        if let Err(e) = app.on_message(context, message) {
-            error!("Dispatch message error: {:?}", e);
-        }
+fn dispatch_messages(app: &&dyn App, context: &mut Context,  message: &SubscribeMessage) {
+    if let Err(e) = app.on_message(context, message) {
+        error!("Dispatch message error: {:?}", e);
     }
 }
 

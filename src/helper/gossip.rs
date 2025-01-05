@@ -5,7 +5,7 @@ use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{Deserialize, Serialize};
 use side_proto::cosmos::base::tendermint::v1beta1::{service_client::ServiceClient as BlockService, GetLatestBlockRequest};
 
-use crate::apps::{App, Context, shuttler::{Shuttler, ShuttlerBehaviour}};
+use crate::apps::{Context, Shuttler, ShuttlerBehaviour};
 
 use super::{mem_store, now};
 pub const HEART_BEAT_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(60);
@@ -38,7 +38,8 @@ pub fn subscribe_gossip_topics(swarm: &mut Swarm<ShuttlerBehaviour>, app: &Shutt
     let mut topics = vec![
         SubscribeTopic::HEARTBEAT.topic(),
     ];
-    topics.extend(app.signer.subscribe_topics());
+    app.apps.iter().for_each(|a| topics.extend(a.subscribe_topics()));
+
     for topic in topics {
         swarm.behaviour_mut().gossip.subscribe(&topic).expect("Failed to subscribe TSS events");
     }

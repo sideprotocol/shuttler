@@ -29,7 +29,7 @@ pub enum SignPackage {
     Round1(BTreeMap<Index,BTreeMap<Identifier,round1::SigningCommitments>>),
     Round2(BTreeMap<Index,BTreeMap<Identifier,round2::SignatureShare>>),
 }
-pub type SigningHandleFn = dyn Fn(&mut Context, &mut Task) -> anyhow::Result<()>;
+pub type SigningHandleFn = dyn Fn(&mut Context, &mut Task) -> anyhow::Result<()> + Send + Sync;
 
 pub struct StandardSigner {
     name: String,
@@ -88,7 +88,7 @@ impl StandardSigner{
     }
 
 
-    pub fn on_message(&mut self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()> {
+    pub fn on_message(&self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()> {
         if message.topic.to_string() == self.name {
             let m = serde_json::from_slice(&message.data)?;
             self.received_sign_message(ctx, m);

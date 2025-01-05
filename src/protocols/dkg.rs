@@ -15,18 +15,14 @@ use frost::{Identifier, keys::dkg::round1};
 
 use crate::apps::{Context, Status, SubscribeMessage, Task};
 use crate::helper::gossip::publish_topic_message;
-use crate::helper::store::{MemStore, Store};
+use crate::helper::store::Store;
 use crate::helper::mem_store;
 use crate::helper::cipher::{decrypt, encrypt};
 
-pub type Round1Store = MemStore<String, BTreeMap<Identifier, round1::Package>>;
-pub type Round2Store = MemStore<String, BTreeMap<Identifier, Vec<u8>>>;
-pub type DKGHandleFn = dyn Fn(&mut Context, &mut Task, &KeyPackage, &PublicKeyPackage);
+pub type DKGHandleFn = dyn Fn(&mut Context, &mut Task, &KeyPackage, &PublicKeyPackage) + Send + Sync;
 
 pub struct DKG {
     name: String,
-    db_round1: Round1Store,
-    db_round2: Round2Store,
     on_complete: Box<DKGHandleFn>,
 }
 
@@ -34,8 +30,6 @@ impl DKG {
     pub fn new(name: impl Into<String>, on_complete: Box<DKGHandleFn>) -> Self {
         Self {
             name: name.into(),
-            db_round1: MemStore::new(),
-            db_round2: MemStore::new(),
             on_complete,
         }
     }
@@ -86,7 +80,7 @@ impl DKG {
         publish_topic_message(ctx, IdentTopic::new(&self.name), bytes);
     }
 
-    pub fn generate(&mut self, ctx: &mut Context, task: &Task) {
+    pub fn generate(&self, ctx: &mut Context, task: &Task) {
 
         let mut rng = thread_rng();
         if let Ok((secret_packet, round1_package)) = frost::keys::dkg::part1(
@@ -101,7 +95,7 @@ impl DKG {
             let mut round1_packages = BTreeMap::new();
             round1_packages.insert(ctx.identifier.clone(), round1_package.clone());
 
-            self.db_round1.save(&task.id, &round1_packages);
+            ctx.db_round1.save(&task.id, &round1_packages);
 
             let data = Data{task_id: task.id.clone(), sender: ctx.identifier.clone(), data: round1_package};
             self.received_round1_packages(ctx, data.clone());
@@ -112,7 +106,7 @@ impl DKG {
         }
     }
 
-    fn generate_round2_packages(&mut self, ctx: &mut Context, task: &Task, round1_packages: BTreeMap<Identifier, round1::Package>) -> Result<(), DKGError> {
+    fn generate_round2_packages(&self, ctx: &mut Context, task: &Task, round1_packages: BTreeMap<Identifier, round1::Package>) -> Result<(), DKGError> {
 
         let task_id = task.id.clone();
 
@@ -166,7 +160,7 @@ impl DKG {
         Ok(())
     }
 
-    pub fn on_message(&mut self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()> {
+    pub fn on_message(&self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()> {
         if message.topic.to_string() == self.name {
             let m = serde_json::from_slice(&message.data)?;
             self.received_dkg_message(ctx, m);
@@ -177,7 +171,7 @@ impl DKG {
         return Ok(())
     }
 
-    fn received_dkg_message(&mut self, ctx: &mut Context, message: DKGMessage) {
+    fn received_dkg_message(&self, ctx: &mut Context, message: DKGMessage) {
 
         // Ensure the message is not forged.
         match ed25519_compact::PublicKey::from_slice(&message.sender.serialize()) {
@@ -199,15 +193,15 @@ impl DKG {
 
     }
 
-    fn received_round1_packages(&mut self, ctx: &mut Context, packets: Data<round1::Package>) {
+    fn received_round1_packages(&self, ctx: &mut Context, packets: Data<round1::Package>) {
 
         let task_id = &packets.task_id;
         // store round 1 packets
-        let mut local = self.db_round1.get(task_id).map_or(BTreeMap::new(), |v|v);
+        let mut local = ctx.db_round1.get(task_id).map_or(BTreeMap::new(), |v|v);
         
         // merge packets with local
         local.insert(packets.sender, packets.data);
-        self.db_round1.save(&task_id, &local);
+        ctx.db_round1.save(&task_id, &local);
 
         // let k = local.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
         debug!("Received round1 packets: {} {:?}", &task_id, local.keys());
@@ -237,7 +231,7 @@ impl DKG {
         }
     }
 
-    fn received_round2_packages(&mut self, ctx: &mut Context, packets: Data<BTreeMap<Identifier, Vec<u8>>>) {
+    fn received_round2_packages(&self, ctx: &mut Context, packets: Data<BTreeMap<Identifier, Vec<u8>>>) {
 
         let task_id = &packets.task_id;
         // store round 1 packets
@@ -246,9 +240,9 @@ impl DKG {
             Some(t) => t.clone(),
             None => return,
         };
-        let mut local = self.db_round2.get(task_id).unwrap_or(BTreeMap::new()); 
+        let mut local = ctx.db_round2.get(task_id).unwrap_or(BTreeMap::new()); 
         local.insert(packets.sender, data);
-        self.db_round2.save(&task_id, &local);
+        ctx.db_round2.save(&task_id, &local);
 
         debug!("Received round2 packets: {} {:?}", task_id, local.keys());
 
@@ -287,7 +281,7 @@ impl DKG {
                 }
             };
 
-            let mut round1_packages = self.db_round1.get(task_id).unwrap_or(BTreeMap::new());
+            let mut round1_packages = ctx.db_round1.get(task_id).unwrap_or(BTreeMap::new());
             // let mut round1_packages_cloned = round1_packages.clone();
             // remove self
             // frost does not need its own package to compute the threshold key

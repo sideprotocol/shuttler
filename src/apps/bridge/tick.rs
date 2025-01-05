@@ -13,91 +13,93 @@ use crate::{
 
 use super::BridgeSigner;
 
-pub async fn tasks_executor(ctx: &mut Context, signer: &mut BridgeSigner ) {
-    
-    if ctx.swarm.connected_peers().count() == 0 {
-        return
+impl BridgeSigner {
+    pub async fn tasks_executor(&self, ctx: &mut Context) {
+        
+        if ctx.swarm.connected_peers().count() == 0 {
+            return
+        }
+
+        // // 1. dkg tasks
+        self.fetch_dkg_requests(ctx).await;
+
+        // // fetch request for next execution
+        self.fetch_signing_requests(ctx).await;
+        // broadcast_sign_packages(swarm);
+        
     }
 
-    // // 1. dkg tasks
-    fetch_dkg_requests(ctx, signer).await;
+    pub async fn fetch_signing_requests(
+        &self,
+        ctx: &mut Context,
+    ) {
+        let host = ctx.conf.side_chain.grpc.as_str();
 
-    // // fetch request for next execution
-    fetch_signing_requests(ctx, signer).await;
-    // broadcast_sign_packages(swarm);
-    
-}
+        match get_signing_requests(&host).await {
+            Ok(response) => {
+                let requests = response.into_inner().requests;
+                let tasks_in_process = requests.iter().map(|r| r.txid.clone() ).collect::<Vec<_>>();
+                debug!("In-process signing tasks: {:?} {:?}", tasks_in_process.len(), tasks_in_process);
+                for request in requests {
+                    // create a dkg task
+                    match new_task_from_signing_request(ctx, &request) {
+                        Ok(task) => {
+                            if ctx.task_store.exists(&task.id) { continue; }
+                            ctx.task_store.save(&task.id, &task);
+            
+                            debug!("start sign: {}", task.id);
+                            self.signer.generate_commitments(ctx, &task);                       
+                        },
+                        Err(e) => error!("{:?}", e),
 
-pub async fn fetch_signing_requests(
-    ctx: &mut Context,
-    signer: &mut BridgeSigner,
-) {
-    let host = ctx.conf.side_chain.grpc.as_str();
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to fetch signing requests: {:?}", e);
+                return;
+            }
+        };
+    }
 
-    match get_signing_requests(&host).await {
-        Ok(response) => {
-            let requests = response.into_inner().requests;
-            let tasks_in_process = requests.iter().map(|r| r.txid.clone() ).collect::<Vec<_>>();
-            debug!("In-process signing tasks: {:?} {:?}", tasks_in_process.len(), tasks_in_process);
+    async fn fetch_dkg_requests(&self, ctx: &mut Context) {
+        let host = ctx.conf.side_chain.grpc.clone();
+        let mut client = match BtcQueryClient::connect(host.to_owned()).await {
+            Ok(client) => client,
+            Err(e) => {
+                error!("Failed to create btcbridge query client: {host} {}", e);
+                return;
+            }
+        };
+        if let Ok(requests_response) = client
+            .query_dkg_requests(QueryDkgRequestsRequest {
+                status: DkgRequestStatus::Pending as i32,
+            })
+            .await
+        {
+            let requests = requests_response.into_inner().requests;
+            debug!("DKG Requests, {:?}", requests);
+
             for request in requests {
-                // create a dkg task
-                match new_task_from_signing_request(ctx, &request) {
-                    Ok(task) => {
+                if request
+                    .participants
+                    .iter()
+                    .find(|p| p.consensus_pubkey == ctx.id_base64)
+                    .is_some()
+                {
+                    // create a dkg task
+                    if let Some(mut task) = new_task_from_vault_dkg(&request) {
+
                         if ctx.task_store.exists(&task.id) { continue; }
+                        task.dkg_input.tweaks = request.vault_types;
                         ctx.task_store.save(&task.id, &task);
         
-                        debug!("start sign: {}", task.id);
-                        signer.signer.generate_commitments(ctx, &task);                       
-                    },
-                    Err(e) => error!("{:?}", e),
-
+                        self.keygen.generate(ctx, &task);
+                    }
                 }
             }
-        }
-        Err(e) => {
-            error!("Failed to fetch signing requests: {:?}", e);
-            return;
-        }
-    };
-}
-
-async fn fetch_dkg_requests(ctx: &mut Context, signer: &mut BridgeSigner) {
-    let host = ctx.conf.side_chain.grpc.clone();
-    let mut client = match BtcQueryClient::connect(host.to_owned()).await {
-        Ok(client) => client,
-        Err(e) => {
-            error!("Failed to create btcbridge query client: {host} {}", e);
-            return;
-        }
-    };
-    if let Ok(requests_response) = client
-        .query_dkg_requests(QueryDkgRequestsRequest {
-            status: DkgRequestStatus::Pending as i32,
-        })
-        .await
-    {
-        let requests = requests_response.into_inner().requests;
-        debug!("DKG Requests, {:?}", requests);
-
-        for request in requests {
-            if request
-                .participants
-                .iter()
-                .find(|p| p.consensus_pubkey == ctx.id_base64)
-                .is_some()
-            {
-                // create a dkg task
-                if let Some(mut task) = new_task_from_vault_dkg(&request) {
-
-                    if ctx.task_store.exists(&task.id) { continue; }
-                    task.dkg_input.tweaks = request.vault_types;
-                    ctx.task_store.save(&task.id, &task);
-    
-                    signer.keygen.generate(ctx, &task);
-                }
-            }
-        }
-    };
+        };
+    }
 }
 
 fn task_id_to_request_id(task_id: &String) -> u64 {

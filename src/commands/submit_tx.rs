@@ -12,7 +12,7 @@ pub async fn execute(home: &str, hash: &String) {
     let txid = Txid::from_str(hash).expect("invalid tx hash");
 
     let conf = Config::from_file(home).unwrap();
-    let relayer = Relayer::new(conf, false);
+    let relayer = Relayer::new(conf);
 
     check_and_handle_tx_by_hash(&relayer, &txid).await
 }

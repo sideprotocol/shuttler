@@ -3,18 +3,17 @@
 use std::time::Duration;
 
 use bitcoincore_rpc::{Auth, Client};
+use futures::executor::block_on;
 use libp2p::gossipsub::IdentTopic;
 use tick::{scan_vault_txs, submit_fee_rate, sync_btc_blocks};
-use tokio::{join, time::Instant};
 use crate::{config::Config, helper::{client_fee_provider::FeeProviderClient, client_ordinals::OrdinalsClient}};
 
-use super::{App, Context, SubscribeMessage};
+use super::{App, Context, SubscribeMessage, Task};
 
 pub mod tick;
 
 #[derive(Debug)]
 pub struct Relayer {
-    enabled: bool,
     // deprecated
     config: Config,
     pub bitcoin_client: Client,
@@ -25,34 +24,26 @@ pub struct Relayer {
 }
 
 impl App for Relayer {
-    fn on_message(&mut self, _ctx: &mut Context, _message: &SubscribeMessage) -> anyhow::Result<()> {
+    fn on_message(&self, _ctx: &mut Context, _message: &SubscribeMessage) -> anyhow::Result<()> {
         Ok(())
-    }
-
-    fn enabled(&mut self) -> bool {
-        self.enabled
-    }
-
-    async fn tick(&mut self) -> Instant {
-        self.ticker.tick().await
-    }
-
-    async fn on_tick(&mut self, _ctx: &mut Context) {
-        join!(
-            sync_btc_blocks(self),
-            scan_vault_txs(self),
-            submit_fee_rate(self),
-        );
     }
     
     fn subscribe_topics(&self) -> Vec<IdentTopic> {
         vec![]
     }
     
+    fn tick(&self) -> Duration {
+        Duration::from_secs(30)
+    }
+    fn on_tick(&self, _ctxx: &mut Context) {
+        block_on(scan_vault_txs(&self));
+        block_on(submit_fee_rate(&self));
+        block_on(sync_btc_blocks(&self));
+    }
 }
 
 impl Relayer {
-    pub fn new(conf: Config, enabled: bool) -> Self {
+    pub fn new(conf: Config) -> Self {
 
         let auth = if !conf.bitcoin.user.is_empty() {
             Auth::UserPass(conf.bitcoin.user.clone(), conf.bitcoin.password.clone())
@@ -79,7 +70,6 @@ impl Relayer {
             config: conf,
             db_relayer,
             ticker,
-            enabled,
         }
     }
 

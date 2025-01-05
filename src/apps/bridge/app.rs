@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
 
+use std::time::Duration;
+
 use cosmrs::Any;
+use futures::executor::block_on;
 use libp2p::gossipsub::IdentTopic;
-use tokio::time::Instant;
 use tracing::{error, info};
 use bitcoin::{Network, Psbt, TapNodeHash, TapSighashType, Witness, XOnlyPublicKey};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
@@ -10,7 +12,7 @@ use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 
 use side_proto::side::btcbridge::{MsgCompleteDkg, MsgSubmitSignatures};
 
-use crate::apps::{App, Context, Status, SubscribeMessage, Task};
+use crate::apps::{App, Context, Status, SubscribeMessage, Task };
 use crate::config::{Config, VaultKeypair, TASK_INTERVAL};
 use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::encoding::{from_base64, to_base64};
@@ -18,61 +20,48 @@ use crate::helper::store::Store;
 use crate::protocols::dkg::DKG;
 use crate::protocols::sign::StandardSigner;
 
-use super::tick::tasks_executor;
-
 // #[derive(Debug)]
 pub struct BridgeSigner {
-    enabled: bool,
     pub bitcoin_client: Client,
     pub keygen: DKG,
     pub signer: StandardSigner,
-    ticker: tokio::time::Interval,
 }
 
 impl BridgeSigner {
-    pub fn new(conf: Config, enabled: bool) -> Self {
+    pub fn new(conf: Config) -> Self {
         let bitcoin_client = Client::new(
             &conf.bitcoin.rpc,
             Auth::UserPass(conf.bitcoin.user.clone(), conf.bitcoin.password.clone()),
         )
         .expect("Could not initial bitcoin RPC client");
 
-        let ticker = tokio::time::interval(TASK_INTERVAL);
-
         Self {
-            enabled,
-            ticker,
             bitcoin_client,
             keygen: DKG::new("bridge_dkg", Box::new(keygen_handle_fn)),
-            signer: StandardSigner::new("bridge_signing", Box::new(signature_handle_fn))
-
+            signer: StandardSigner::new("bridge_signing", Box::new(signature_handle_fn)),
         }
     }  
 }
 
 impl App for BridgeSigner {
-    fn on_message(&mut self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()> {
+
+    fn on_message(&self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()> {
         // debug!("Received {:?}", message);
         self.keygen.on_message(ctx, message)?;
         self.signer.on_message(ctx, message)
-    }
-
-    fn enabled(&mut self) -> bool {
-        self.enabled
-    }
-
-    async fn tick(&mut self) -> Instant {
-        self.ticker.tick().await
-    }
-
-    async fn on_tick(&mut self, ctx: &mut Context) {
-        tasks_executor(ctx, self).await
     }
     
     fn subscribe_topics(&self) -> Vec<IdentTopic> {
         vec![self.keygen.topic(), self.signer.topic()]
     }
+    fn tick(&self) -> Duration {
+        TASK_INTERVAL
+    }
+    fn on_tick(&self, ctx: &mut Context) {
+        block_on(self.tasks_executor(ctx));
+    }
 }
+
 
 fn keygen_handle_fn(ctx: &mut Context, task: &mut Task, priv_key: &frost_adaptor_signature::keys::KeyPackage, pub_key: &frost_adaptor_signature::keys::PublicKeyPackage) {
 

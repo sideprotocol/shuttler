@@ -9,7 +9,7 @@ pub async fn execute(home: &str, height: u64) {
     }
     
     let conf = Config::from_file(home).unwrap();
-    let relayer = Relayer::new(conf, false);
+    let relayer = Relayer::new(conf);
     match fetch_block_header_by_height(&relayer, height).await {
         Ok(header) => {
             match send_block_headers(&relayer, &vec![header]).await {

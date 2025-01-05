@@ -5795,6 +5795,7 @@ dependencies = [
  "tendermint",
  "tendermint-config",
  "tokio",
+ "tokio-stream",
  "tokio-tungstenite",
  "toml",
  "tonic",
