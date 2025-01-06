@@ -1,10 +1,10 @@
 use std::{
-    collections::BTreeMap, hash::{DefaultHasher, Hash, Hasher}, io, str::FromStr, time::Duration
+    hash::{DefaultHasher, Hash, Hasher}, io, str::FromStr, time::Duration
 };
 
 use cosmrs::Any;
 use ed25519_compact::{PublicKey, SecretKey, Signature};
-use futures::stream::{self, FuturesUnordered, StreamExt};
+use futures::stream::{self, StreamExt};
 use libp2p::{
     gossipsub, identify, identity::Keypair, kad::{self, store::MemoryStore}, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, Multiaddr, PeerId, Swarm
 };
@@ -13,7 +13,7 @@ use tracing::{debug, info, warn, error};
 
 use crate::{
     apps::{
-        App, Context, SubscribeMessage, Task
+        App, Context, SubscribeMessage
     },
     config::{candidate::Candidate, Config},
     helper::{
@@ -156,10 +156,10 @@ impl<'a> Shuttler<'a> {
                 .kad
                 .set_mode(Some(libp2p::kad::Mode::Server));
         }
-
         dail_bootstrap_nodes(&mut swarm, &conf);
         subscribe_gossip_topics(&mut swarm, &self);
-
+        
+        // Tx Sender for Tx Quene
         let (tx_sender, tx_receiver) = std::sync::mpsc::channel::<Any>();
         let conf2 = conf.clone();
         spawn(async move {
@@ -176,17 +176,18 @@ impl<'a> Shuttler<'a> {
             }
         });
 
-        let mut context = Context::new(swarm, tx_sender, identifier, node_key, conf.clone());
+        // Common Setting: Context and Heart Beat
+        let mut context = Context::new(swarm, tx_sender, identifier, node_key, conf.clone()); 
         let mut heart_beat = tokio::time::interval(Duration::from_secs(mem_store::HEART_BEAT_WINDOW));
 
-
-        let mut all = stream::select_all(self.apps.iter().enumerate().map(|(index, app)| {
+        // App Tickers for schedule tasks
+        let mut tickers = stream::select_all(self.apps.iter().enumerate().map(|(index, app)| {
             IntervalStream::new(interval(app.tick())).map(move |_| index)
         }));
 
         loop {
             select! {
-                Some(index) = all.next() => {
+                Some(index) = tickers.next() => {
                     if let Some(app) = self.get_app(index) {
                         app.on_tick(&mut context);
                     };

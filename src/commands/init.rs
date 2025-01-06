@@ -1,10 +1,9 @@
 use crate::config;
 
-use super::Cli;
 use bitcoin::Network;
 
-pub fn execute(cli: &Cli, port : u32, network: Network) {
-    println!("Initialize Shuttler Home: {}", &cli.home);
+pub fn execute(home: &str, port : u32, network: Network) {
+    println!("Initialize Shuttler Home: {}", home);
     // config::update_app_home(&cli.home);
-    config::Config::default(&cli.home, port, network).save().unwrap();
+    config::Config::default(home, port, network).save().unwrap();
 }

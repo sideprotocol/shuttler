@@ -1,6 +1,7 @@
 pub mod bridge;
 pub mod relayer;
-pub mod dlc;
+pub mod oracle;
+pub mod agency;
 mod shuttler;
 mod core;
 

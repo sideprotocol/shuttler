@@ -26,7 +26,11 @@ pub enum Commands {
         #[clap(long, default_value = "false")]
         relayer: bool,
         #[clap(long, default_value = "false")]
-        signer: bool,
+        bridge: bool,
+        #[clap(long, default_value = "false")]
+        agency: bool,
+        #[clap(long, default_value = "false")]
+        oracle: bool,
         #[clap(long, default_value = "false")]
         seed: bool,
     },
@@ -42,10 +46,6 @@ pub enum Commands {
     },
     Address,
     Reset,
-    #[command(about = "Print TSS variables for debug")]
-    Debug {
-        txid: String,
-    },
     Test {
         #[clap(long, default_value = "shuttler")]
         bin: String,
@@ -64,5 +64,4 @@ pub mod address;
 pub mod reset;
 pub mod submit_header;
 pub mod submit_tx;
-pub mod debug;
 pub mod test;

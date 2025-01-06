@@ -1,29 +1,47 @@
 
-use side_proto::side::dlc::{AgencyStatus, DlcOracle, DlcOracleStatus, QueryAgenciesRequest, QueryAttestationsRequest, QueryCountNoncesRequest, QueryOraclesRequest, QueryParamsRequest};
+use side_proto::side::dlc::{DlcOracle, DlcOracleStatus, QueryAttestationsRequest, QueryCountNoncesRequest, QueryOraclesRequest, QueryParamsRequest};
+use side_proto::side::dlc::query_client::QueryClient as DLCQueryClient;
+use tracing::error;
 
 use crate::{
     apps::{Context, Input, Task}, helper::{encoding::pubkey_to_identifier, store::Store}};
-use super::DLC;
+use super::Oracle;
 
-impl DLC {
-    pub async fn fetch_new_nonce_generation(&mut self, ctx: &mut Context ) {
-        let response = self.dlc_client.count_nonces(QueryCountNoncesRequest{}).await;
+impl Oracle {
+    pub async fn fetch_new_nonce_generation(&self, ctx: &mut Context ) {
+        let mut dlc_client = match DLCQueryClient::connect(ctx.conf.side_chain.grpc.clone()).await {
+            Ok(c) => c,
+            Err(e) => {
+                error!("{:?}", e);
+                return
+            },
+        };
+        let response = dlc_client.count_nonces(QueryCountNoncesRequest{}).await;
         let nonces = match response {
             Ok(resp) => resp.into_inner(),
-            Err(_e) => return,
+            Err(e) => {
+                error!("{:?}", e);
+                return
+            },
         };
-        let response2 = self.dlc_client.params(QueryParamsRequest{}).await;
+        let response2 = dlc_client.params(QueryParamsRequest{}).await;
         let param = match response2 {
             Ok(resp) => match resp.into_inner().params {
                 Some(p) => p,
                 None => return,
             },
-            Err(_) => return,
+            Err(e) => {
+                error!("{:?}", e);
+                return
+            },
         };
-        let response3 = self.dlc_client.oracles(QueryOraclesRequest{status: DlcOracleStatus::OracleStatusEnable as i32, pagination: None}).await;
+        let response3 = dlc_client.oracles(QueryOraclesRequest{status: DlcOracleStatus::OracleStatusEnable as i32, pagination: None}).await;
         let oracles = match response3 {
             Ok(resp) => resp.into_inner().oracles,
-            Err(_) => return,
+            Err(e) => {
+                error!("{:?}", e);
+                return
+            },
         };
         if nonces.counts.len() != oracles.len() {return};
 
@@ -35,56 +53,46 @@ impl DLC {
                 // oracle should sign the new nonce.
                 task.sign_inputs.insert(0, Input::new(oracle.pubkey.clone()));
                 ctx.task_store.save(&task.id, &task);
-                //self.nonce_generator.generate(ctx, &task);
+                self.nonce_gen.generate(ctx, &task);
             }
         });
     }
 
-    pub async fn fetch_new_key_generation(&mut self, ctx: &mut Context) {
-        let response3 = self.dlc_client.oracles(QueryOraclesRequest{status: DlcOracleStatus::OracleStatusPending as i32, pagination: None}).await;
+    pub async fn fetch_new_key_generation(&self, ctx: &mut Context) {
+        let mut dlc_client = match DLCQueryClient::connect(ctx.conf.side_chain.grpc.clone()).await {
+            Ok(c) => c,
+            Err(e) => {
+                error!("{:?}", e);
+                return
+            },
+        };
+        let response3 = dlc_client.oracles(QueryOraclesRequest{status: DlcOracleStatus::OracleStatusPending as i32, pagination: None}).await;
         let oracles = match response3 {
             Ok(resp) => resp.into_inner().oracles,
-            Err(_) => return,
+            Err(e) => {
+                error!("{:?}", e);
+                return
+            },
         };
         oracles.iter().for_each(|oracle| {
             if let Some(task) = new_task_from_oracle(oracle) {
                 if ctx.task_store.exists(&task.id) { return }
                 ctx.task_store.save(&task.id, &task);
 
-                // self.keyshare_generator.generate(ctx, &task);
+                self.keygen.generate(ctx, &task);
             }
         });
     }
 
-    pub async fn fetch_new_agency(&mut self, ctx: &mut Context) {
-        let response3 = self.dlc_client.agencies(QueryAgenciesRequest{status: AgencyStatus::Pending as i32, pagination: None}).await;
-        let agencies = match response3 {
-            Ok(resp) => resp.into_inner().agencies,
-            Err(_) => return,
+    pub async fn fetch_new_attestation(&self, ctx: &mut Context) {
+        let mut dlc_client = match DLCQueryClient::connect(ctx.conf.side_chain.grpc.clone()).await {
+            Ok(c) => c,
+            Err(e) => {
+                error!("{}", e);
+                return
+            },
         };
-        agencies.iter().for_each(|agency| {
-
-            let mut participants = vec![];
-            for p in &agency.participants {
-                match hex::decode(p) {
-                    Ok(b) => {
-                       participants.push(pubkey_to_identifier(&b))
-                    },
-                    Err(_) => return,
-                };
-            }
-
-            let task = Task::new_dkg(format!("agency-{}", agency.id), participants, agency.threshold as u16);
-
-            if ctx.task_store.exists(&task.id) { return }
-            ctx.task_store.save(&task.id, &task);
-
-            // self.agency_generator.generate(ctx, &task);
-        });
-    }
-
-    pub async fn fetch_new_attestation(&mut self, ctx: &mut Context) {
-        let response3 = self.dlc_client.attestations(QueryAttestationsRequest{pagination: None}).await;
+        let response3 = dlc_client.attestations(QueryAttestationsRequest{pagination: None}).await;
         let attestations = match response3 {
             Ok(resp) => resp.into_inner().attestations,
             Err(_) => return,
@@ -104,7 +112,7 @@ impl DLC {
             if ctx.task_store.exists(&task.id) { return }
             ctx.task_store.save(&task.id, &task);
 
-            // AttestationSigner::generate_commitments(ctx, &task);
+            self.signer.generate_commitments(ctx, &task);
         });
     }
 

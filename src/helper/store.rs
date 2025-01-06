@@ -9,6 +9,7 @@ pub trait Store<K, V> where K: AsRef<[u8]>, V: Serialize + for<'a> Deserialize<'
     fn remove(&mut self, key: &K) -> bool;
     fn get(&self, key: &K) -> Option<V>;
     fn exists(&self, key: &K) -> bool;
+    fn clear(&mut self) -> bool;
 }
 
 pub type DefaultStore<K, V> = SledStore<K, V>;
@@ -62,6 +63,9 @@ impl<K, V> Store<K, V> for SledStore<K, V> where K: AsRef<[u8]>, V: Serialize + 
     fn exists(&self, key: &K) -> bool {
         self.inner.contains_key(key).unwrap_or(false)
     }
+    fn clear(&mut self) -> bool {
+        self.inner.clear().is_ok()
+    }
 }
 
 pub struct MemStore<K, V> where K: AsRef<[u8]> + Ord + Clone, V: Serialize + for<'a> Deserialize<'a> + Clone {
@@ -96,5 +100,9 @@ impl<K, V> Store<K, V> for MemStore<K, V> where K: AsRef<[u8]> + Ord + Clone, V:
 
     fn exists(&self, key: &K) -> bool {
         self.inner.contains_key(key)
+    }
+    fn clear(&mut self) -> bool {
+        self.inner.clear();
+        true
     }
 }

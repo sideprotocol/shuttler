@@ -8,7 +8,7 @@ use libp2p::gossipsub::IdentTopic;
 use tick::{scan_vault_txs, submit_fee_rate, sync_btc_blocks};
 use crate::{config::Config, helper::{client_fee_provider::FeeProviderClient, client_ordinals::OrdinalsClient}};
 
-use super::{App, Context, SubscribeMessage, Task};
+use super::{App, Context, SubscribeMessage};
 
 pub mod tick;
 

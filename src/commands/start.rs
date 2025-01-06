@@ -1,9 +1,9 @@
 
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-use crate::{apps::{bridge::BridgeSigner, relayer::Relayer, Shuttler, Task}, config::Config};
+use crate::{apps::{agency::Agency, bridge::BridgeSigner, oracle::Oracle, relayer::Relayer, Shuttler }, config::Config};
 
-pub async fn execute(home: &str, relayer: bool, signer: bool, seed: bool) {
+pub async fn execute(home: &str, relayer: bool, bridge: bool, oracle: bool, agency: bool, seed: bool) {
     
     let conf = Config::from_file(home).unwrap();
 
@@ -16,16 +16,17 @@ pub async fn execute(home: &str, relayer: bool, signer: bool, seed: bool) {
         println!("Unable to set global log config!");
     }
 
-    let mut app = Shuttler::new(home, seed);
+    let mut shuttler = Shuttler::new(home, seed);
 
     let r = Relayer::new(conf.clone());
-    if relayer {
-        app.registry( &r);
-    }
+    if relayer { shuttler.registry( &r); }
     let b = BridgeSigner::new(conf.clone());
-    if signer {
-        app.registry( &b);
-    }
+    if bridge { shuttler.registry( &b); }
+    let o = Oracle::new();
+    if oracle { shuttler.registry(&o); }
+    let a = Agency::new();
+    if agency { shuttler.registry(&a);}
 
-    app.start(&conf).await;
+
+    shuttler.start(&conf).await;
 }
