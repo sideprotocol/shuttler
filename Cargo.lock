@@ -1310,7 +1310,7 @@ dependencies = [
 [[package]]
 name = "cosmos-sdk-proto"
 version = "0.23.0-pre"
-source = "git+https://github.com/sideprotocol/cosmos-rust?branch=main#2da59907915bcf872bf00e316c5593ba5336c69e"
+source = "git+https://github.com/sideprotocol/cosmos-rust?branch=main#11a525e17fddf81a07bb798345cf19fe7ebb58cb"
 dependencies = [
  "prost",
  "prost-types",
@@ -1321,7 +1321,7 @@ dependencies = [
 [[package]]
 name = "cosmrs"
 version = "0.18.0-pre"
-source = "git+https://github.com/sideprotocol/cosmos-rust?branch=main#2da59907915bcf872bf00e316c5593ba5336c69e"
+source = "git+https://github.com/sideprotocol/cosmos-rust?branch=main#11a525e17fddf81a07bb798345cf19fe7ebb58cb"
 dependencies = [
  "bip32",
  "cosmos-sdk-proto",
@@ -2717,7 +2717,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.8",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -3175,15 +3175,6 @@ name = "itertools"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
 dependencies = [
  "either",
 ]
@@ -4693,7 +4684,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "157c5a9d7ea5c2ed2d9fb8f495b64759f7816c7eaea54ba3978f0d63000162e3"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.93",
