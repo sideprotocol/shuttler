@@ -26,8 +26,8 @@ async fn main() {
         Commands::SubmitTx { hash} => {
             submit_tx::execute(&cli.home, &hash).await;
         }
-        Commands::Test {bin, n, tx, delay} => {
-            test::execute(bin.clone().leak(), n, tx, delay).await;
+        Commands::Test {bin, n, tx, delay, module} => {
+            test::execute(bin.clone().leak(), n, tx, delay, module).await;
         }
     }
 }

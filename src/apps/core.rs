@@ -24,6 +24,7 @@ pub enum Status {
     DkgRound1,
     DkgRound2,
     DkgComplete,
+    Connect,
     SignRound1,
     SignRound2,
     SignComplete,

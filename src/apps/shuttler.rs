@@ -187,7 +187,8 @@ impl<'a> Shuttler<'a> {
 
         loop {
             select! {
-                Some(index) = tickers.next() => {
+                Some(index) = tickers.next() => {   
+                    if context.swarm.connected_peers().count() < 2 { continue; }
                     if let Some(app) = self.get_app(index) {
                         app.on_tick(&mut context);
                     };

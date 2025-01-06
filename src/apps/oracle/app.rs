@@ -9,7 +9,7 @@ use crate::helper::store::Store;
 use crate::protocols::sign::StandardSigner;
 use crate::protocols::dkg::DKG;
 
-use crate::apps::{App, Context, FrostSignature, SubscribeMessage, Task};
+use crate::apps::{App, Context, FrostSignature, Status, SubscribeMessage, Task};
 
 pub struct Oracle {
     pub keygen: DKG,
@@ -33,12 +33,14 @@ impl Oracle {
 impl App for Oracle {
 
     fn on_message(&self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()>{
+        self.signer.on_message(ctx, message)?;
         self.keygen.on_message(ctx, message)?;
-        self.signer.on_message(ctx, message)
+        self.nonce_gen.on_message(ctx, message)?;
+        self.nonce_signer.on_message(ctx, message)
         // Ok(())
     }
     fn subscribe_topics(&self) -> Vec<libp2p::gossipsub::IdentTopic> {
-        vec![self.keygen.topic(), self.signer.topic()]
+        vec![self.keygen.topic(), self.signer.topic(), self.nonce_gen.topic(), self.nonce_signer.topic()]
     }
     fn tick(&self) -> Duration {
         Duration::from_secs(30)
@@ -107,7 +109,9 @@ fn nonce_gen_handle_fn(ctx: &mut Context, task: &mut Task, priv_key: &frost_adap
     
     task.sign_inputs.iter_mut().for_each(|(_, input)| {
         input.message = message.clone();
+        input.participants = task.dkg_input.participants.clone();
     });
+    task.status = Status::Connect;
     ctx.task_store.save(&task.id, task);
 
     // NonceSigner::generate_commitments(ctx, task);   

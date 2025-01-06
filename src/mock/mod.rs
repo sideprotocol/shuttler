@@ -1,53 +1,48 @@
-use std::path::PathBuf;
-use std::fs;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountResponse};
 use cosmos_sdk_proto::cosmos::base::abci::v1beta1::TxResponse;
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::{GetLatestValidatorSetResponse, Validator};
-use side_proto::side::btcbridge::{query_server::Query, DkgParticipant, DkgRequest, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsResponse, QuerySigningRequestsResponse, SigningRequest};
+use oracle::{generate_oracle_file, handle_nonce_submission, handle_oracle_dkg_submission};
+use side_proto::side::btcbridge::query_server::Query;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_server::Query as AuthService;
 use cosmos_sdk_proto::cosmos::tx::v1beta1::service_server::Service as TxService;
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_server::Service as BlockService;
 use cosmos_sdk_proto::tendermint::types::{Block, Header};
 
 use cosmrs::{Any, Tx};
-use serde::{Deserialize, Serialize};
 
 use bitcoin::{hashes::{sha256d, Hash},
     opcodes, psbt::PsbtSighashType, transaction::Version, Amount, OutPoint, Psbt, Sequence, TxIn,
     TxOut, Address, ScriptBuf, Transaction, Txid
 };
-use side_proto::Timestamp;
 
 use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::to_base64;
 
 use crate::helper::now;
 
+mod bridge;
+mod oracle;
+
+pub use bridge::*;
+
 pub const SINGING_FILE_NAME: &str = "signing-requests.json";
-pub const DKG_FILE_NAME: &str = "dkg-request.json";
+pub const BRIDGE_DKG_FILE_NAME: &str = "dkg-request.json";
 pub const VAULT_FILE_NAME: &str = "address.txt";
 
-#[derive(Serialize, Deserialize)]
-pub struct DKG {
-    pub id: u64,
-    pub participants: Vec<String>,
-    pub threshold: u32,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct SR { 
-    address: String, 
-    sequence: u64, 
-    txid: String, 
-    psbt: String, 
-    status: i32, 
+pub fn generate_task(testdir: &Path, module: &str, participants:Vec<String> ) {
+    if module == "bridge" {
+        generate_bridge_file(testdir, participants);
+    } else if module == "oracle" {
+        generate_oracle_file(testdir, participants);
+    }
 }
 
 #[derive(Clone)]
 pub struct MockQuery {
-    home: String
+    pub home: String,
 }
 
 pub struct MockTxService {
@@ -78,156 +73,36 @@ impl MockBlockService {
 impl MockQuery {
     pub fn new(home: String) -> Self {
         Self {
-            home
+            home,
         }
     }
+    pub fn fullpath(&self, file: &str) -> PathBuf {
+        fullpath(&self.home, file)
+    }
 }
-
+fn fullpath(home: &str, file: impl AsRef<Path>) -> PathBuf {
+    let mut path = PathBuf::new();
+    path.push(home);
+    path.push("mock");
+    path.push(file);
+    path
+}
 // produce mock data
 
-fn mock_psbt(home: &str, tx_num: u32, tx_bytes: &Vec<u8>) {
-    
+fn handle_tx_submissions(home: &str, tx_num: u32, tx_bytes: &Vec<u8>) {
     if let Ok(tx) = Tx::from_bytes(tx_bytes) {
         tx.body.messages.iter().for_each(|m| {
             if m.type_url == "/side.btcbridge.MsgCompleteDKG" {
-                if let Ok(msg) = m.to_msg::<MsgCompleteDkg>() {
-                    println!("Received: {} from {}", msg.vaults.join(","), msg.sender);
-                    let num = rand::random::<u32>() % 5 + 1;
-                    // num = 1;
-                    let mut srs = vec![];
-                    msg.vaults.iter().for_each(|addr| {
-                        
-                        // check duplication
-                        let mut path = PathBuf::new();
-                        path.push(home);
-                        path.push("mock");
-                        path.push("addresses");
-                        path.push(addr);
-                        
-                        if path.is_dir() {
-                            return
-                        }
-                        let _ = fs::create_dir_all(path.as_path());
-
-                        // clear dkg request.
-                        let mut path_dkg = PathBuf::new();
-                        path_dkg.push(home);
-                        path_dkg.push("mock");
-                        path_dkg.push(DKG_FILE_NAME);
-                        let _ = fs::write(path_dkg, "");
-
-                        // generate psbt
-                        for _i in 0..tx_num {
-                            let (txid, psbt) = generate_mock_psbt(addr, Some(num));
-                            srs.push(SR {
-                                address: addr.clone(),
-                                sequence: num as u64,
-                                txid,
-                                psbt,
-                                status: 1,
-                            })
-                        }
-                    });
-
-                    if srs.len() == 0 {
-                        return
-                    }
-                    if let Ok(contents) = serde_json::to_string_pretty(&srs) {
-
-                        let mut path = PathBuf::new();
-                        path.push(home);
-                        path.push("mock");
-                        path.push(SINGING_FILE_NAME);
-
-                        println!("txs: {}", contents);
-                        let _ = fs::write(path, &contents);
-                    }
-                }
+                handle_bridge_dkg_submission(home, tx_num, m);
+            } else if m.type_url == "/side.dlc.MsgSubmitOraclePubKey" {
+                handle_oracle_dkg_submission(home, m);
+            } else if m.type_url == "/side.dlc.MsgSubmitNonce" {
+                handle_nonce_submission(home, m);
             } else {
                 println!("Received msg: {}", m.type_url);
             }
         })
     }
-}
-
-// 1. signing requests
-async fn load_signing_requests(home: &str) -> Result<tonic::Response<QuerySigningRequestsResponse>, tonic::Status> {
-    let mut path = PathBuf::new();
-    path.push(home);
-    path.push("mock");
-    path.push(SINGING_FILE_NAME);
-
-    let text = match fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(_) => "[]".to_string(),
-    };
-    let mut srs: Vec<SR> = serde_json::from_str(&text).unwrap();
-
-    let mut path_2 = PathBuf::new();
-    path_2.push(home);
-    path_2.push(VAULT_FILE_NAME);
-    if let Ok(address) = fs::read_to_string(path_2) {
-        srs.push(SR {
-            address,
-            sequence: 3,
-            status: 1,
-            txid: "".to_string(),
-            psbt: "".to_string(),
-        });
-    }
-
-    let requests: Vec<SigningRequest> = srs.iter().map(|i| {
-        SigningRequest { 
-            address: i.address.clone(), 
-            sequence: i.sequence, 
-            txid: i.txid.clone(), 
-            psbt: i.psbt.clone(), 
-            status: i.status,
-            creation_time: Some(Timestamp {
-                seconds: now() as i64,
-                nanos: 0,
-            }) 
-        }
-    }).collect::<Vec<_>>();
-    let res: QuerySigningRequestsResponse = QuerySigningRequestsResponse { requests, pagination: None };
-    Ok(tonic::Response::new(res))
-}
-
-// mock dkg request
-async fn loading_dkg_request(home: &str) -> Result<tonic::Response<QueryDkgRequestsResponse>, tonic::Status> {
-    let mut path = PathBuf::new();
-    path.push(home);
-    path.push("mock");
-    path.push(DKG_FILE_NAME);
-
-    let text = fs::read_to_string(path).unwrap();
-    let mut requests = vec![];
-    if text.len() > 5 {
-        let timeout = Timestamp {
-            seconds: now() as i64 + 180,
-            nanos: 0,
-        };
-        let dkg: DKG = serde_json::from_str(&text).unwrap();
-        let participants = dkg.participants.iter().map(|i: &String| DkgParticipant {
-            moniker: i.clone(),
-            operator_address: i.clone(),
-            consensus_pubkey: i.to_string(),
-        }).collect::<Vec<_>>();
-
-        requests.push( DkgRequest { 
-            id: dkg.id, 
-            participants,
-            threshold: dkg.threshold,
-            vault_types: vec![0], 
-            enable_transfer: true, 
-            target_utxo_num: 100,
-            expiration: Some(timeout), 
-            status: DkgRequestStatus::Pending as i32 
-        })
-    }
-
-    let res = QueryDkgRequestsResponse { requests };
-    Ok(tonic::Response::new(res))
 }
 
 async fn loading_account(address: String) -> Result<tonic::Response<QueryAccountResponse>, tonic::Status> {
@@ -329,7 +204,7 @@ fn query_pending_btc_withdraw_requests<'life0,'async_trait>(&'life0 self,_reques
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
 fn query_signing_requests<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QuerySigningRequestsRequest> ,) ->  
     ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QuerySigningRequestsResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
-        let x = load_signing_requests(&self.home.as_str());
+        let x = bridge::load_signing_requests(&self.home.as_str());
         Box::pin(x)
     }
 
@@ -372,7 +247,7 @@ fn query_dkg_request<'life0,'async_trait>(&'life0 self,_request:tonic::Request<s
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
 fn query_dkg_requests<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::btcbridge::QueryDkgRequestsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<side_proto::side::btcbridge::QueryDkgRequestsResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
-        let x = loading_dkg_request(&self.home.as_str());
+        let x = bridge::loading_dkg_request(&self.home.as_str());
         Box::pin(x)
     }
 
@@ -469,7 +344,7 @@ fn get_tx<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_p
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
 fn broadcast_tx<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::cosmos::tx::v1beta1::BroadcastTxRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::cosmos::tx::v1beta1::BroadcastTxResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
-        mock_psbt(self.home.as_str(), self.tx, &_request.get_ref().tx_bytes);
+        handle_tx_submissions(self.home.as_str(), self.tx, &_request.get_ref().tx_bytes);
 
         let x = mock_broadcast_tx();
         Box::pin(x)
@@ -610,3 +485,4 @@ fn generate_mock_psbt(addr: &str, input_num: Option<u32>) -> (String, String) {
 
     (tx_id, psbt_b64)
 }
+

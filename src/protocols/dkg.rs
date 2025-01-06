@@ -143,10 +143,9 @@ impl DKG {
                 };
 
                 // convert it to <sender, <receiver, Vec<u8>>
-                // let mut merged = BTreeMap::new();
-                // merged.insert(ctx.identifier.clone(), output_packages.clone());
-
-                // self.db_round2.save(&task.id, &merged);
+                let mut local = ctx.db_round2.get(&task_id).unwrap_or(BTreeMap::new()); 
+                local.insert(ctx.identifier.clone(), vec![]); // use empty for local package
+                ctx.db_round2.save(&task.id, &local);
 
                 let data  = Data{task_id, sender: ctx.identifier.clone(), data: output_packages};
                 self.received_round2_packages(ctx, data.clone());
@@ -253,11 +252,11 @@ impl DKG {
 
         local.retain(|id, _| task.dkg_input.participants.contains(id));
 
-        if task.dkg_input.participants.len() - 1 == local.len() {
+        if task.dkg_input.participants.len() == local.len() {
             // info!("Received round2 packets from all participants: {}", task.id);
 
             let mut round2_packages = BTreeMap::new();
-            local.iter().for_each(|(sender, packet)| {
+            local.iter().filter(|(k, _)| *k != &ctx.identifier ).for_each(|(sender, packet)| {
                 
                 let bz = sender.serialize();
                 let source = x25519::PublicKey::from_ed25519(&ed25519_compact::PublicKey::from_slice(bz.as_slice()).unwrap()).unwrap();
@@ -282,15 +281,13 @@ impl DKG {
             };
 
             let mut round1_packages = ctx.db_round1.get(task_id).unwrap_or(BTreeMap::new());
-            // let mut round1_packages_cloned = round1_packages.clone();
-            // remove self
+
             // frost does not need its own package to compute the threshold key
             round1_packages.remove(&ctx.identifier); 
 
             match frost::keys::dkg::part3(&round2_secret_package, &round1_packages, &round2_packages ) {
                 Ok((priv_key, pub_key)) => { 
                     (self.on_complete)(ctx, &mut task, &priv_key, &pub_key);
-                    // self.on_com(ctx, &mut task, priv_key, pub_key);
                 },
                 Err(e) => {
                     error!("Failed to compute threshold key: {} {:?}", task_id, e);

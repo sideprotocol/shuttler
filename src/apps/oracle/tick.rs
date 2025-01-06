@@ -1,8 +1,10 @@
 
 use side_proto::side::dlc::{DlcOracle, DlcOracleStatus, QueryAttestationsRequest, QueryCountNoncesRequest, QueryOraclesRequest, QueryParamsRequest};
 use side_proto::side::dlc::query_client::QueryClient as DLCQueryClient;
-use tracing::error;
+use tracing::{debug, error};
 
+use crate::apps::Status;
+use crate::helper::encoding::from_base64;
 use crate::{
     apps::{Context, Input, Task}, helper::{encoding::pubkey_to_identifier, store::Store}};
 use super::Oracle;
@@ -43,6 +45,8 @@ impl Oracle {
                 return
             },
         };
+
+        debug!("{:?}, {:?}", oracles, nonces);
         if nonces.counts.len() != oracles.len() {return};
 
         oracles.iter().zip(nonces.counts.iter()).for_each(|(oracle, count)| {
@@ -56,6 +60,10 @@ impl Oracle {
                 self.nonce_gen.generate(ctx, &task);
             }
         });
+
+        ctx.task_store.list().iter()
+            .filter(|t| t.status == Status::Connect)
+            .for_each(|t| self.nonce_signer.generate_commitments(ctx, t));
     }
 
     pub async fn fetch_new_key_generation(&self, ctx: &mut Context) {
@@ -74,8 +82,11 @@ impl Oracle {
                 return
             },
         };
+        debug!("oracles: {:?}", oracles);
         oracles.iter().for_each(|oracle| {
             if let Some(task) = new_task_from_oracle(oracle) {
+                
+                debug!("new keygen : {:?}", task);
                 if ctx.task_store.exists(&task.id) { return }
                 ctx.task_store.save(&task.id, &task);
 
@@ -120,19 +131,22 @@ impl Oracle {
 }
 
 fn new_task_from_oracle(oracle: &DlcOracle) -> Option<Task> {
-    let id = if oracle.status == DlcOracleStatus::OracleStatusEnable as i32{
+    let id = if oracle.status == DlcOracleStatus::OracleStatusPending as i32{
         format!("oracle-{}", oracle.id)
     } else {
-        format!("{}-{}", oracle.id, oracle.nonce_index + 1)
+        format!("nonce{}-{}", oracle.id, oracle.nonce_index + 1)
     };
 
     let mut participants = vec![];
     for p in &oracle.participants {
-        match hex::decode(p) {
+        match from_base64(p) {
             Ok(b) => {
                participants.push(pubkey_to_identifier(&b))
             },
-            Err(_) => return None,
+            Err(e) => {
+                error!("error: {}", e);
+                return None
+            },
         };
     }
     Some(Task::new_dkg(id, participants, oracle.threshold as u16))

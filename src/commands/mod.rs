@@ -55,6 +55,8 @@ pub enum Commands {
         tx: u32,
         #[clap(long, default_value = "2")]
         delay: u32,
+        #[clap(long, default_value = "bridge")]
+        module: String
     },
 }
 

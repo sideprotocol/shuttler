@@ -1,6 +1,6 @@
 use ed25519_compact::SecretKey;
 
-use crate::{config::{Config, VaultKeypair}, helper::{encoding::{identifier_to_peer_id, pubkey_to_identifier}, store::{DefaultStore, SledStore, Store}}};
+use crate::{config::Config, helper::encoding::{identifier_to_peer_id, pubkey_to_identifier}};
 
 pub fn execute(home: &str) {
     let conf = Config::from_file(home).unwrap();
