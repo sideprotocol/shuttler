@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use bitcoin::{consensus::encode, Address, Block, BlockHash, OutPoint, Transaction, Txid};
 use bitcoincore_rpc::{Error, RpcApi};
 use prost_types::Any;
@@ -224,16 +222,17 @@ pub async fn scan_vault_txs(relayer: &Relayer) {
     }
 
     debug!("Scanning height: {:?}, side tip: {:?}", height, side_tip);
-    scan_vault_txs_by_height(relayer, height).await;
-    save_last_scanned_height(relayer, height);
+    if scan_vault_txs_by_height(relayer, height).await {
+        save_last_scanned_height(relayer, height);
+    }
 }
 
-pub async fn scan_vault_txs_by_height(relayer: &Relayer, height: u64) {
+pub async fn scan_vault_txs_by_height(relayer: &Relayer, height: u64) -> bool {
     let block_hash = match relayer.bitcoin_client.get_block_hash(height) {
         Ok(hash) => hash,
         Err(e) => {
             error!("Failed to get block hash: {:?}, err: {:?}", height, e);
-            return;
+            return false
         }
     };
 
@@ -241,7 +240,7 @@ pub async fn scan_vault_txs_by_height(relayer: &Relayer, height: u64) {
         Ok(block) => block,
         Err(e) => {
             error!("Failed to get block: {}, err: {}", height, e);
-            return;
+            return false;
         }
     };
 
@@ -255,11 +254,15 @@ pub async fn scan_vault_txs_by_height(relayer: &Relayer, height: u64) {
             i
         );
 
-        check_and_handle_tx(relayer, &block_hash, &block, tx, i, &vaults).await
+        if !check_and_handle_tx(relayer, &block_hash, &block, tx, i, &vaults).await {
+            return false;
+        }
     }
+
+    return true;
 }
 
-pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, block: &Block, tx: &Transaction, index: usize, vaults: &Vec<String>) {
+pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, block: &Block, tx: &Transaction, index: usize, vaults: &Vec<String>) -> bool {
     if bitcoin_utils::may_be_withdraw_tx(&tx) {
         let prev_txid = tx.input[0].previous_output.txid;
         let prev_vout = tx.input[0].previous_output.vout;
@@ -271,7 +274,9 @@ pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, bloc
             Ok(prev_tx) => {
                 if prev_tx.output.len() <= prev_vout as usize {
                     error!("Invalid previous tx");
-                    return;
+
+                    // continue due to the tx is invalid
+                    return true;
                 }
 
                 match Address::from_script(prev_tx.output[prev_vout as usize].script_pubkey.as_script(), relayer.config().bitcoin.network) {
@@ -307,17 +312,17 @@ pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, bloc
                         let tx_response = resp.into_inner().tx_response.unwrap();
                         if tx_response.code != 0 {
                             error!("Failed to submit withdrawal tx: {:?}", tx_response);
-                            return;
+                            return false;
                         }
     
                         info!("Submitted withdrawal tx: {:?}", tx_response);
+                        return true;
                     }
                     Err(e) => {
                         error!("Failed to submit withdrawal tx: {:?}", e);
+                        return false;
                     }
                 }
-
-                return;
             }
         }
     }
@@ -328,14 +333,16 @@ pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, bloc
         if bitcoin_utils::is_runes_deposit(tx) {
             if !relayer.config().relay_runes {
                 debug!("Skip the tx due to runes relaying not enabled");
-                return;
+                return true;
             }
 
             let edict = match bitcoin_utils::parse_runes(tx) {
                 Some(edict) => edict,
                 None => {
                     debug!("Failed to parse runes deposit tx {}", tx.compute_txid());
-                    return;
+
+                    // continue due to the deposit is invalid
+                    return true; 
                 }
             };
 
@@ -344,7 +351,10 @@ pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, bloc
                 Ok(rune) => rune.entry.spaced_rune,
                 Err(e) => {
                     error!("Failed to get rune {}: {}", edict.id, e);
-                    return;
+
+                    // continue due to the deposit may be invalid
+                    // or this can be correctly handled for other relayers
+                    return true;
                 }
             };
 
@@ -353,14 +363,19 @@ pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, bloc
                 Ok(output) => output,
                 Err(e) => {
                     error!("Failed to get output {}:{} from ord: {}", tx.compute_txid(), edict.output, e);
-                    return;
+
+                    // continue due to the deposit may be invalid
+                    // or this can be correctly handled for other relayers
+                    return true;
                 }
             };
 
             // validate if the runes deposit is valid
             if !bitcoin_utils::validate_runes(&edict, &rune, &output) {
                 debug!("Failed to validate runes deposit tx {}", tx.compute_txid());
-                return;
+
+                // continue due to the deposit is invalid
+                return true;
             }
         }
 
@@ -381,7 +396,7 @@ pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, bloc
                     prev_txid, e
                 );
 
-                return;
+                return false;
             }
         };
 
@@ -390,16 +405,20 @@ pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, bloc
                 let tx_response = resp.into_inner().tx_response.unwrap();
                 if tx_response.code != 0 {
                     error!("Failed to submit deposit tx: {:?}", tx_response);
-                    return;
+                    return false;
                 }
 
                 info!("Submitted deposit tx: {:?}", tx_response);
+                return true;
             }
             Err(e) => {
                 error!("Failed to submit deposit tx: {:?}", e);
+                return false;
             }
         }
     }
+
+    return true;
 }
 
 pub async fn check_and_handle_tx_by_hash(relayer: &Relayer, hash: &Txid) {
@@ -450,7 +469,7 @@ pub async fn check_and_handle_tx_by_hash(relayer: &Relayer, hash: &Txid) {
 
     let vaults = get_cached_vaults(relayer).await;
 
-    check_and_handle_tx(relayer, &block_hash, &block, &tx, tx_index, &vaults).await
+    check_and_handle_tx(relayer, &block_hash, &block, &tx, tx_index, &vaults).await;
 }
 
 pub async fn send_withdraw_tx(
