@@ -66,10 +66,12 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
     };
     debug!("Syncing blocks from {} to {}", tip_on_side, batch);
 
-    // check parent blocks hash before syncing blocks
+    // check reorg before syncing blocks
     let confirmations = client_side::get_confirmations_on_side(&relayer.config().side_chain.grpc).await;
     for n in 1..=confirmations {
-        check_block_hash_is_corrent(&relayer, tip_on_side + n - confirmations).await;
+        if check_reorg(&relayer, tip_on_side + n - confirmations).await {
+            handle_reorg(relayer, tip_on_side + n - confirmations, tip_on_side).await;
+        }
     }
 
     let mut block_headers: Vec<BlockHeader> = vec![];
@@ -135,25 +137,39 @@ pub async fn fetch_block_header_by_height(relayer: &Relayer, height: u64) -> Res
     })
 }
 
-pub async fn check_block_hash_is_corrent(relayer: &Relayer, height: u64) {
-    let hash = match relayer.bitcoin_client.get_block_hash(height) {
-        Ok(hash) => hash,
+pub async fn check_reorg(relayer: &Relayer, height: u64) -> bool {
+    let bitcoin_hash = match relayer.bitcoin_client.get_block_hash(height) {
+        Ok(hash) => hash.to_string(),
         Err(e) => {
             error!(error=%e);
-            return;
+            return false;
         }
     };
-    let bitcoin_hash = hash.to_string();
+
     let side_hash =
         match client_side::get_bitcoin_block_header_on_side(&relayer.config().side_chain.grpc, height).await {
             Ok(res) => res.get_ref().block_header.clone().unwrap().hash,
+            Err(e) => {
+                error!(error=%e);
+                return false;
+            }
+        };
+
+    return side_hash.len() != 0 && bitcoin_hash != side_hash;
+}
+
+pub async fn handle_reorg(relayer: &Relayer, height: u64, side_tip: u64) {
+    let mut block_headers: Vec<BlockHeader> = vec![];
+
+    for h in height..=side_tip+1 {
+        let hash = match relayer.bitcoin_client.get_block_hash(h) {
+            Ok(hash) => hash,
             Err(e) => {
                 error!(error=%e);
                 return;
             }
         };
 
-    if side_hash.len() != 0 && bitcoin_hash != side_hash {
         let header = match relayer.bitcoin_client.get_block_header(&hash) {
             Ok(b) => b,
             Err(e) => {
@@ -162,28 +178,27 @@ pub async fn check_block_hash_is_corrent(relayer: &Relayer, height: u64) {
             }
         };
 
-        let mut block_headers: Vec<BlockHeader> = vec![];
         block_headers.push(BlockHeader {
             version: header.version.to_consensus() as u64,
             hash: header.block_hash().to_string(),
-            height,
+            height: h,
             previous_block_hash: header.prev_blockhash.to_string(),
             merkle_root: header.merkle_root.to_string(),
             nonce: header.nonce as u64,
             bits: format!("{:x}", header.bits.to_consensus()),
             time: header.time as u64,
             ntx: 0u64,
-        });
+        })
+    }
 
-        match send_block_headers(relayer, &block_headers).await {
-            Ok(_) => {
-                debug!("Resend block headers to fix block hash, {:?}", block_headers.iter().map(|b| b.height).collect::<Vec<_>>());
-                return;
-            }
-            Err(e) => {
-                error!("Failed to resend block headers: {:?}", e);
-                return;
-            }
+    match send_block_headers(relayer, &block_headers).await {
+        Ok(_) => {
+            debug!("Resend block headers to fix block hash, {:?}", block_headers.iter().map(|b| b.height).collect::<Vec<_>>());
+            return;
+        }
+        Err(e) => {
+            error!("Failed to resend block headers: {:?}", e);
+            return;
         }
     }
 }
