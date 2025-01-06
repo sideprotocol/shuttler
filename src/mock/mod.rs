@@ -40,11 +40,26 @@ pub fn generate_task(testdir: &Path, module: &str, participants:Vec<String> ) {
     }
 }
 
+fn handle_tx_submissions(home: &str, tx_num: u32, tx_bytes: &Vec<u8>) {
+    if let Ok(tx) = Tx::from_bytes(tx_bytes) {
+        tx.body.messages.iter().for_each(|m| {
+            if m.type_url == "/side.btcbridge.MsgCompleteDKG" {
+                handle_bridge_dkg_submission(home, tx_num, m);
+            } else if m.type_url == "/side.dlc.MsgSubmitOraclePubKey" {
+                handle_oracle_dkg_submission(home, m);
+            } else if m.type_url == "/side.dlc.MsgSubmitNonce" {
+                handle_nonce_submission(home, m);
+            } else {
+                println!("Received msg: {}", m.type_url);
+            }
+        })
+    }
+}
+
 #[derive(Clone)]
 pub struct MockQuery {
     pub home: String,
 }
-
 pub struct MockTxService {
     pub home: String,
     pub tx: u32,
@@ -88,22 +103,6 @@ fn fullpath(home: &str, file: impl AsRef<Path>) -> PathBuf {
     path
 }
 // produce mock data
-
-fn handle_tx_submissions(home: &str, tx_num: u32, tx_bytes: &Vec<u8>) {
-    if let Ok(tx) = Tx::from_bytes(tx_bytes) {
-        tx.body.messages.iter().for_each(|m| {
-            if m.type_url == "/side.btcbridge.MsgCompleteDKG" {
-                handle_bridge_dkg_submission(home, tx_num, m);
-            } else if m.type_url == "/side.dlc.MsgSubmitOraclePubKey" {
-                handle_oracle_dkg_submission(home, m);
-            } else if m.type_url == "/side.dlc.MsgSubmitNonce" {
-                handle_nonce_submission(home, m);
-            } else {
-                println!("Received msg: {}", m.type_url);
-            }
-        })
-    }
-}
 
 async fn loading_account(address: String) -> Result<tonic::Response<QueryAccountResponse>, tonic::Status> {
     let mut ba = BaseAccount::default();
