@@ -1,15 +1,16 @@
 use std::{fs, path::{Path, PathBuf}};
 
 use cosmrs::{tx::MessageExt, Any};
-use side_proto::{prost::Message, side::dlc::{query_server::Query as OracleQuery, Agency, DlcNonce, DlcOracle, DlcOracleStatus, MsgSubmitNonce, MsgSubmitOraclePubKey, Params, PriceInterval, QueryAgenciesResponse, QueryAttestationsResponse, QueryCountNoncesResponse, QueryOraclesResponse, QueryParamsResponse}};
+use side_proto::{prost::Message, side::dlc::{query_server::Query as OracleQuery, Agency, DlcAttestation, DlcNonce, DlcOracle, DlcOracleStatus, DlcPriceEvent, MsgSubmitNonce, MsgSubmitOraclePubKey, Params, PriceInterval, QueryAgenciesResponse, QueryAttestationsResponse, QueryCountNoncesResponse, QueryEventResponse, QueryOraclesResponse, QueryParamsResponse}};
 
-use crate::helper::encoding::from_base64;
+use crate::helper::{encoding::from_base64, now};
 
 use super::{fullpath,  MockQuery};
 
 const ORACLE_DKG_FILE_NAME: &str = "oracle.json";
 const AGENCY_DKG_FILE_NAME: &str = "agency.json";
 const NONCE_DKG_FILE_NAME: &str = "nonces.json";
+const EVENT_FILE_NAME: &str = "event.prost";
 
 pub fn generate_oracle_file(testdir: &Path, participants: Vec<String>) {
     let mut oracle = DlcOracle::default(); 
@@ -48,7 +49,7 @@ pub fn handle_oracle_dkg_submission(home: &str, m: &Any) {
 
 pub fn handle_nonce_submission(home: &str, m: &Any) {
     if let Ok(msg) = m.to_msg::<MsgSubmitNonce>() {
-        let hex_str = hex::encode(from_base64(&msg.nonce).unwrap());
+        let hex_str = &msg.nonce;
         let key = fullpath(home, hex_str);
         println!("Received: {:?} from {}", msg.nonce, msg.sender);
         
@@ -66,15 +67,31 @@ pub fn handle_nonce_submission(home: &str, m: &Any) {
             Err(_) => vec![],
         };
 
+        // save nonce
         nonces.push(DlcNonce {
             index: nonces.len() as u64,
-            nonce: msg.nonce,
+            nonce: msg.nonce.clone(),
             oracle_pubkey: o.pubkey.clone(),
             time: None,
         }.encode_to_vec());
         let contents = serde_json::to_vec(&nonces).unwrap();
 
         fs::write(fullpath(home, NONCE_DKG_FILE_NAME), contents).unwrap();
+
+        // create a mock event
+        let event = DlcPriceEvent {
+            id: nonces.len() as u64,
+            trigger_price: "10000".to_owned(),
+            price_decimal: "2".to_owned(),
+            nonce: msg.nonce,
+            pubkey: o.pubkey.clone(),
+            description: "test event".to_owned(),
+            has_triggered: true,
+            publish_at: None,
+        };
+
+        fs::write(fullpath(home, EVENT_FILE_NAME), event.encode_to_vec()).unwrap()
+
     }
 }
 
@@ -93,7 +110,6 @@ impl MockQuery {
     }
 
     async fn loading_agency(&self, status: i32) -> Result<tonic::Response<QueryAgenciesResponse>, tonic::Status> {
-        
         let bytes = fs::read(self.fullpath(AGENCY_DKG_FILE_NAME)).unwrap();
         let o = Agency::decode(bytes.as_slice()).unwrap();
         let mut agencies = vec![];
@@ -124,15 +140,36 @@ impl MockQuery {
     async fn load_param(&self) -> Result<tonic::Response<QueryParamsResponse>, tonic::Status> {
 
         let res = QueryParamsResponse { params: Some(Params {
-            nonce_queue_size: 3,
+            nonce_queue_size: 1,
             price_intervals: vec![PriceInterval { price_pair: "BTC/USDT".to_string(), interval: 100 }],
         }) };
         Ok(tonic::Response::new(res))
     }
 
-    async fn load_atestations(&self) -> Result<tonic::Response<QueryAttestationsResponse>, tonic::Status> {
+    async fn load_event(&self, _id: u64) -> Result<tonic::Response<QueryEventResponse>, tonic::Status> {
+        let bytes = fs::read(self.fullpath(EVENT_FILE_NAME)).unwrap();
+        let o = DlcPriceEvent::decode(bytes.as_slice()).unwrap();
+        let res = QueryEventResponse { event: Some(o) };
+        Ok(tonic::Response::new(res))
+    }
 
-        let res = QueryAttestationsResponse { attestations: vec![], pagination: None };
+    async fn load_atestations(&self) -> Result<tonic::Response<QueryAttestationsResponse>, tonic::Status> {
+        let mut attestations = vec![];
+        if let Ok(bytes) = fs::read(self.fullpath(EVENT_FILE_NAME)) {
+            let o = DlcPriceEvent::decode(bytes.as_slice()).unwrap();
+            if o.has_triggered {
+                attestations.push(DlcAttestation {
+                    event_id: o.id,
+                    id: o.id,
+                    time: None,
+                    pubkey: o.pubkey,
+                    outcome: "10000".to_string(),
+                    signature: "".to_owned(),
+                });
+            }
+        };
+        
+        let res = QueryAttestationsResponse { attestations, pagination: None };
         Ok(tonic::Response::new(res))
     }
 
@@ -147,8 +184,10 @@ fn params<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::
 
     #[must_use]
 #[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn event<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::dlc::QueryEventRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<side_proto::side::dlc::QueryEventResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
-        todo!()
+fn event<'life0,'async_trait>(&'life0 self,request:tonic::Request<side_proto::side::dlc::QueryEventRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<side_proto::side::dlc::QueryEventResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+        let id = request.get_ref().id;
+        let x = self.load_event(id);
+        Box::pin(x)
     }
 
     #[must_use]

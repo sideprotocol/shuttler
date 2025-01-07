@@ -122,7 +122,7 @@ fn nonce_signing_handle_fn(ctx: &mut Context, task: &mut Task) -> anyhow::Result
         if let Some(FrostSignature::Standard(signature)) = input.signature  {
             let cosm_msg = MsgSubmitNonce {
                 sender: ctx.conf.relayer_bitcoin_address(),
-                nonce: to_base64(&input.message),
+                nonce: hex::encode(&input.message),
                 signature: to_base64(&signature.serialize()?),
             };
             let any = Any::from_msg(&cosm_msg)?;

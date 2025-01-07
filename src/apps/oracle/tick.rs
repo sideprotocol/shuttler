@@ -1,10 +1,13 @@
 
-use side_proto::side::dlc::{DlcOracle, DlcOracleStatus, QueryAttestationsRequest, QueryCountNoncesRequest, QueryOraclesRequest, QueryParamsRequest};
+use std::collections::BTreeMap;
+
+use side_proto::side::dlc::{DlcOracle, DlcOracleStatus, QueryAttestationsRequest, QueryCountNoncesRequest, QueryEventRequest, QueryOraclesRequest, QueryParamsRequest};
 use side_proto::side::dlc::query_client::QueryClient as DLCQueryClient;
 use tracing::{debug, error};
 
-use crate::apps::Status;
+use crate::apps::{SignMode, Status};
 use crate::helper::encoding::from_base64;
+use crate::helper::mem_store::count_task_participants;
 use crate::{
     apps::{Context, Input, Task}, helper::{encoding::pubkey_to_identifier, store::Store}};
 use super::Oracle;
@@ -108,23 +111,35 @@ impl Oracle {
             Ok(resp) => resp.into_inner().attestations,
             Err(_) => return,
         };
-        attestations.iter().for_each(|a| {
 
-            let signer = match ctx.keystore.get(&a.pubkey) {
-                Some(s) => s,
-                None => return,
+        debug!("Attestations: {:?}", attestations);
+        for a in attestations.iter() {
+
+            let event = match dlc_client.event(QueryEventRequest{ id: a.event_id}).await {
+                Ok(resp) => match resp.into_inner().event {
+                    Some(e) => e,
+                    None => return,
+                },
+                Err(_) => return,
             };
-            let participants = signer.pub_key.verifying_shares().keys().map(|k| k.clone()).collect::<Vec<_>>();
 
-            let mut task = Task::new_dkg(format!("attest-{}", a.id), participants, *signer.priv_key.min_signers());
-            let message = a.outcome.clone().into_bytes();
-            task.sign_inputs.insert(0, Input::new_with_message(a.pubkey.clone(), message));
+            if !ctx.keystore.exists(&event.pubkey) || !ctx.keystore.exists(&event.nonce) { continue; }
 
+            // let participants = signer.pub_key.verifying_shares().keys().map(|k| k.clone()).collect::<Vec<_>>();
+            let participants = count_task_participants(ctx, &event.pubkey);
+
+            let input = Input::new_with_message_mode(event.pubkey.clone(), a.outcome.clone().into_bytes(), participants, SignMode::SignWithGroupcommitment(event.nonce));
+            let mut inputs = BTreeMap::new();
+            inputs.insert(0, input);
+            let task = Task::new_signing(format!("attest-{}", a.id), "", inputs);
             if ctx.task_store.exists(&task.id) { return }
-            ctx.task_store.save(&task.id, &task);
 
+            println!("{:?}", &task);
+            println!("{:?}", serde_json::to_vec(&task));
+            ctx.task_store.save(&task.id, &task);
+            println!("start");
             self.signer.generate_commitments(ctx, &task);
-        });
+        };
     }
 
 

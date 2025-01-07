@@ -1,5 +1,6 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use bitcoin::hashes::{Hash, sha256};
+use frost_adaptor_signature::keys::PublicKeyPackage;
 use frost_adaptor_signature::Field;
 use frost_adaptor_signature::Group;
 use frost_adaptor_signature::GroupError;
@@ -40,7 +41,17 @@ pub fn pubkey_to_identifier(key_bytes: &[u8]) -> Identifier {
     Identifier::new(id).unwrap()
 }
 
-pub fn hex_to_projective_point(text: &String) -> Result<ProjectivePoint, GroupError> {
-    let b = hex::decode(text).unwrap();
-    Secp256K1Group::deserialize(&b[..].try_into().unwrap())
+pub fn pubkey_to_point(pubkey: PublicKeyPackage) -> anyhow::Result<ProjectivePoint>  {
+   let b= pubkey.serialize()?;
+   Ok(Secp256K1Group::deserialize(&b[..].try_into()?)?)
+}
+
+pub fn hex_to_projective_point(text: &String) -> anyhow::Result<ProjectivePoint> {
+    let b = hex::decode(text)?;
+    Ok(Secp256K1Group::deserialize(&b[..].try_into()?)?)
+}
+
+pub fn base64_to_projective_point(text: &String) -> anyhow::Result<ProjectivePoint> {
+    let b = from_base64(text)?;
+    Ok(Secp256K1Group::deserialize(&b[..].try_into()?)?)
 }

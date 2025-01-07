@@ -75,12 +75,16 @@ impl Input {
         }
     }
 
-    pub fn new_with_message(sign_key: String, message: Vec<u8>) -> Self {
+    pub fn new_with_message(sign_key: String, message: Vec<u8>, participants: Vec<Identifier>) -> Self {
+        Self::new_with_message_mode(sign_key, message, participants, SignMode::SignWithTweak)
+    }
+
+    pub fn new_with_message_mode(sign_key: String, message: Vec<u8>, participants: Vec<Identifier>, mode: SignMode, ) -> Self {
         Self {
             index: 0,
-            participants: vec![],
+            participants,
             key: sign_key,
-            mode: SignMode::Sign,
+            mode,
             message,
             signature: None,
         }
@@ -118,13 +122,13 @@ impl Task {
         }
     }
 
-    pub fn new_signing(id: String, psbt: String, sign_inputs: BTreeMap<usize, Input> ) -> Self {
+    pub fn new_signing(id: String, psbt: impl Into<String>, sign_inputs: BTreeMap<usize, Input> ) -> Self {
         Self {
             id,
             status: Status::SignRound1,
             time: now(),
             dkg_input: DkgInput::default(),
-            psbt,
+            psbt: psbt.into(),
             sign_inputs,
             submitted: false,
         }

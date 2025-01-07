@@ -47,7 +47,7 @@ pub enum Commands {
     Address,
     Reset,
     Test {
-        #[clap(long, default_value = "shuttler")]
+        #[clap(long, default_value = "target/debug/shuttler")]
         bin: String,
         #[clap(long, default_value = "3")]
         n: u32,
