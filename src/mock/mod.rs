@@ -4,7 +4,7 @@ use std::str::FromStr;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountResponse};
 use cosmos_sdk_proto::cosmos::base::abci::v1beta1::TxResponse;
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::{GetLatestValidatorSetResponse, Validator};
-use oracle::{generate_oracle_file, handle_nonce_submission, handle_oracle_dkg_submission};
+use oracle::{generate_agency_file, generate_oracle_file, handle_nonce_submission, handle_oracle_dkg_submission};
 use side_proto::side::btcbridge::query_server::Query;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_server::Query as AuthService;
 use cosmos_sdk_proto::cosmos::tx::v1beta1::service_server::Service as TxService;
@@ -37,6 +37,8 @@ pub fn generate_task(testdir: &Path, module: &str, participants:Vec<String> ) {
         generate_bridge_file(testdir, participants);
     } else if module == "oracle" {
         generate_oracle_file(testdir, participants);
+    } else if module == "agency" {
+        generate_agency_file(testdir, participants);
     }
 }
 

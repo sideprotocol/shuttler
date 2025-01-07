@@ -1,7 +1,7 @@
 use std::{fs, path::{Path, PathBuf}};
 
 use cosmrs::{tx::MessageExt, Any};
-use side_proto::{prost::Message, side::dlc::{query_server::Query as OracleQuery, Agency, DlcAttestation, DlcNonce, DlcOracle, DlcOracleStatus, DlcPriceEvent, MsgSubmitNonce, MsgSubmitOraclePubKey, Params, PriceInterval, QueryAgenciesResponse, QueryAttestationsResponse, QueryCountNoncesResponse, QueryEventResponse, QueryOraclesResponse, QueryParamsResponse}};
+use side_proto::{prost::Message, side::dlc::{query_server::Query as OracleQuery, Agency, AgencyStatus, DlcAttestation, DlcNonce, DlcOracle, DlcOracleStatus, DlcPriceEvent, MsgSubmitNonce, MsgSubmitOraclePubKey, Params, PriceInterval, QueryAgenciesResponse, QueryAttestationsResponse, QueryCountNoncesResponse, QueryEventResponse, QueryOraclesResponse, QueryParamsResponse}};
 
 use crate::helper::{encoding::from_base64, now};
 
@@ -26,6 +26,22 @@ pub fn generate_oracle_file(testdir: &Path, participants: Vec<String>) {
     path.push(ORACLE_DKG_FILE_NAME);
 
     fs::write(path, oracle.encode_to_vec()).unwrap();
+}
+
+pub fn generate_agency_file(testdir: &Path, participants: Vec<String>) {
+    let mut agency = Agency::default(); 
+    agency.id = 1;
+    agency.threshold = (participants.len() * 2 / 3 ) as u32;
+    agency.participants = participants;
+    agency.status = AgencyStatus::Pending as i32;
+    
+    let mut path = PathBuf::new();
+    path.push(testdir);
+    path.push("mock");
+    let _ = fs::create_dir_all(&path);
+    path.push(AGENCY_DKG_FILE_NAME);
+
+    fs::write(path, agency.encode_to_vec()).unwrap();
 }
 
 pub fn handle_oracle_dkg_submission(home: &str, m: &Any) {

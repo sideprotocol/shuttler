@@ -1,6 +1,8 @@
 
 use side_proto::side::dlc::{AgencyStatus, QueryAgenciesRequest};
 use side_proto::side::dlc::query_client::QueryClient as DLCQueryClient;
+use tracing::debug;
+use crate::helper::encoding::from_base64;
 use crate::{
     apps::{Context, Task}, helper::{encoding::pubkey_to_identifier, store::Store}};
 use super::Agency;
@@ -17,15 +19,19 @@ impl Agency {
             Ok(resp) => resp.into_inner().agencies,
             Err(_) => return,
         };
+        debug!("agencies: {:?}", agencies);
         agencies.iter().for_each(|agency| {
 
             let mut participants = vec![];
             for p in &agency.participants {
-                match hex::decode(p) {
+                match from_base64(p) {
                     Ok(b) => {
                        participants.push(pubkey_to_identifier(&b))
                     },
-                    Err(_) => return,
+                    Err(e) => {
+                        tracing::error!{"Invalid Participants: {e}"};
+                        return
+                    },
                 };
             }
 
