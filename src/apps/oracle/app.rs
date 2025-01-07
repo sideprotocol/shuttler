@@ -19,12 +19,13 @@ pub struct Oracle {
 
 impl Oracle {
     pub fn new() -> Self {
-        let signer = StandardSigner::new("nonce_signing", NonceSigningHandler {  });
         Self {
             keygen: DKG::new("oracle_dkg", KeygenHander{}),
             signer: StandardSigner::new("attestation", AttestationHandler{}),
 
-            nonce_gen: DKG::new("nonce_gen", NonceHander { signer: signer }),
+            nonce_gen: DKG::new("nonce_gen", NonceHander { 
+                signer: StandardSigner::new("nonce_signing", NonceSigningHandler {  }) 
+            }),
         }
     }
 }

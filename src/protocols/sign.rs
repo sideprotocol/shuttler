@@ -1,8 +1,7 @@
 use std::collections::BTreeMap;
 
-use bitcoin::secp256k1::Scalar;
-use frost_adaptor_signature::{keys::Tweak, round1::{self, Nonce, SigningCommitments, SigningNonces}, round2::{self, SignatureShare}, Field, Identifier, Secp256K1ScalarField, SigningPackage};
-use libp2p::{gossipsub::IdentTopic, swarm::handler};
+use frost_adaptor_signature::{keys::Tweak, round1::{self, Nonce, SigningNonces}, round2::{self, SignatureShare}, Field, Identifier, Secp256K1ScalarField, SigningPackage};
+use libp2p::gossipsub::IdentTopic;
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
@@ -10,7 +9,7 @@ pub use tracing::error;
 use usize as Index;
 use crate::{apps::{Context, FrostSignature, SignMode, Status, SubscribeMessage, Task}, config::VaultKeypair, 
     helper::{
-        bitcoin::convert_tweak, encoding::{self, base64_to_projective_point, hex_to_projective_point, pubkey_to_point}, 
+        bitcoin::convert_tweak, encoding::{self, hex_to_projective_point}, 
         gossip::publish_topic_message, 
         store::Store
 }};
@@ -237,28 +236,29 @@ impl<H> StandardSigner<H> where H: SigningHandle{
                     &input.message,
                     );
 
-                let signer_nonces = if let SignMode::SignWithGroupcommitment(g) = &input.mode {
+                let signer_nonces = match &input.mode {
+                    SignMode::SignWithGroupcommitment(g) => { 
+                        let nonce = match ctx.keystore.get(g) {
+                            Some(t) => t,
+                            None => return,
+                        };
+                
+                        let hiding = Nonce::from_scalar(nonce.priv_key.signing_share().to_scalar());
+                        let binding = Nonce::from_scalar(Secp256K1ScalarField::zero());
+                
+                        &SigningNonces::from_nonces(hiding, binding)
+                    }, 
+                    _ => {
+                        match stored_nonces.get(&index) {
+                            Some(d) => d,
+                            None => {
+                                debug!("not found local nonce for input {index}");
+                                return;
+                            },
+                        }
+                    }};
 
-                    let nonce = match ctx.keystore.get(g) {
-                        Some(t) => t,
-                        None => return,
-                    };
-            
-                    let hiding = Nonce::from_scalar(nonce.priv_key.signing_share().to_scalar());
-                    let binding = Nonce::from_scalar(Secp256K1ScalarField::zero());
-            
-                    &SigningNonces::from_nonces(hiding, binding)
-                } else {
-                    match stored_nonces.get(&index) {
-                        Some(d) => d,
-                        None => {
-                            debug!("not found local nonce for input {index}");
-                            return;
-                        },
-                    }
-                };
-
-                let signature_shares = match partial_sign(&input.mode, &keypair, &signing_package, signer_nonces, ) {
+                let signature_shares = match sign(&input.mode, &keypair, &signing_package, signer_nonces, ) {
                     Ok(s) => s,
                     Err(_e) => return,
                 };
@@ -387,7 +387,7 @@ impl<H> StandardSigner<H> where H: SigningHandle{
 }
 
 
-fn partial_sign(mode: &SignMode, keypair: &VaultKeypair, signing_package: &SigningPackage, signer_nonces: &SigningNonces) -> anyhow::Result<SignatureShare>  {
+fn sign(mode: &SignMode, keypair: &VaultKeypair, signing_package: &SigningPackage, signer_nonces: &SigningNonces) -> anyhow::Result<SignatureShare>  {
     match mode {
         SignMode::Sign => {
             Ok(round2::sign(signing_package, signer_nonces, &keypair.priv_key)?)
@@ -404,7 +404,7 @@ fn partial_sign(mode: &SignMode, keypair: &VaultKeypair, signing_package: &Signi
         },
         SignMode::SignWithAdaptorPoint(point) => {
             // adatpor signature
-            let adaptor_point = hex_to_projective_point(&point)?;
+            let adaptor_point = hex_to_projective_point(point)?;
             Ok(round2::sign_with_adaptor_point(
                 signing_package, signer_nonces, &keypair.priv_key, &adaptor_point,
             )?)
@@ -426,7 +426,7 @@ fn aggregate(signing_package: &SigningPackage, signature_shares: &BTreeMap<Ident
         },
         SignMode::SignWithGroupcommitment(gc) => {
 
-            let group_commitment = encoding::base64_to_projective_point(gc)?; 
+            let group_commitment = hex_to_projective_point(gc)?; 
             let frost_signature = frost_adaptor_signature::aggregate_with_group_commitment(&signing_package, signature_shares, &keypair.pub_key, &group_commitment)?;
 
             Ok(keypair.pub_key.clone().verifying_key().verify(signing_package.message(), &frost_signature).map(|_| FrostSignature::Standard(frost_signature))?)

@@ -102,9 +102,9 @@ impl BridgeSigner {
     }
 }
 
-fn task_id_to_request_id(task_id: &String) -> u64 {
-    task_id.replace("dkg-", "").parse().unwrap()
-}
+// fn task_id_to_request_id(task_id: &String) -> u64 {
+//     task_id.replace("dkg-", "").parse().unwrap()
+// }
 
 fn request_id_to_task_id(id: u64) -> String {
     format!("dkg-{}", id)

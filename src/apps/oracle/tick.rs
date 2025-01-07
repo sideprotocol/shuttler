@@ -5,7 +5,7 @@ use side_proto::side::dlc::{DlcOracle, DlcOracleStatus, QueryAttestationsRequest
 use side_proto::side::dlc::query_client::QueryClient as DLCQueryClient;
 use tracing::{debug, error};
 
-use crate::apps::{SignMode, Status};
+use crate::apps::SignMode;
 use crate::helper::encoding::from_base64;
 use crate::helper::mem_store::count_task_participants;
 use crate::{

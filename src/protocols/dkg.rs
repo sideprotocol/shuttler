@@ -5,7 +5,6 @@ use std::{collections::BTreeMap, fmt::Debug};
 use ed25519_compact::x25519;
 use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 use libp2p::gossipsub::IdentTopic;
-use libp2p::swarm::handler;
 use rand::thread_rng;
 use serde::de::DeserializeOwned;
 use tracing::{debug, error, info};
