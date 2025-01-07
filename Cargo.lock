@@ -5806,8 +5806,8 @@ dependencies = [
 
 [[package]]
 name = "side-proto"
-version = "0.1.0-dev7"
-source = "git+https://github.com/sideprotocol/side-rust#5352b6c10eee30fb0bc589cd14f003223c1cbd18"
+version = "0.1.0-dev8"
+source = "git+https://github.com/sideprotocol/side-rust#6804305574369f2d562ed5ce3bc0edfaaeb256d8"
 dependencies = [
  "cosmos-sdk-proto",
  "cosmrs",

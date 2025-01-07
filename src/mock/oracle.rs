@@ -1,9 +1,12 @@
 use std::{fs, path::{Path, PathBuf}};
 
-use cosmrs::{tx::MessageExt, Any};
-use side_proto::{prost::Message, side::dlc::{query_server::Query as OracleQuery, Agency, AgencyStatus, DlcAttestation, DlcNonce, DlcOracle, DlcOracleStatus, DlcPriceEvent, MsgSubmitNonce, MsgSubmitOraclePubKey, Params, PriceInterval, QueryAgenciesResponse, QueryAttestationsResponse, QueryCountNoncesResponse, QueryEventResponse, QueryOraclesResponse, QueryParamsResponse}};
-
-use crate::helper::{encoding::from_base64, now};
+use cosmrs::Any;
+use side_proto::{prost::Message, 
+    side::dlc::{query_server::Query as OracleQuery, Agency, AgencyStatus, DlcAttestation, DlcNonce, DlcOracle, 
+        DlcOracleStatus, DlcPriceEvent, MsgSubmitNonce, MsgSubmitOraclePubKey, Params, PriceInterval, 
+        QueryAgenciesResponse, QueryAttestationsResponse, QueryCountNoncesResponse, QueryEventResponse, 
+        QueryOraclesResponse, QueryParamsResponse}, tendermint::google::protobuf::Duration,
+    };
 
 use super::{fullpath,  MockQuery};
 
@@ -11,7 +14,7 @@ const ORACLE_DKG_FILE_NAME: &str = "oracle.json";
 const AGENCY_DKG_FILE_NAME: &str = "agency.json";
 const NONCE_DKG_FILE_NAME: &str = "nonces.json";
 const EVENT_FILE_NAME: &str = "event.prost";
-
+ 
 pub fn generate_oracle_file(testdir: &Path, participants: Vec<String>) {
     let mut oracle = DlcOracle::default(); 
     oracle.id = 1;
@@ -158,6 +161,7 @@ impl MockQuery {
         let res = QueryParamsResponse { params: Some(Params {
             nonce_queue_size: 1,
             price_intervals: vec![PriceInterval { price_pair: "BTC/USDT".to_string(), interval: 100 }],
+            dkg_timeout_period: Some(Duration::default()),
         }) };
         Ok(tonic::Response::new(res))
     }

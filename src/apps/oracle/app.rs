@@ -69,8 +69,9 @@ impl DKGHandle for KeygenHander {
         let cosm_msg = MsgSubmitOraclePubKey {
             oracle_id: task.id.replace("oracle-", "").parse().unwrap(),
             sender: ctx.conf.relayer_bitcoin_address(),
-            pub_key: hexkey,
+            pub_key: hexkey.clone(),
             signature,
+            oracle_pubkey: hexkey,
         };
 
         let any = Any::from_msg(&cosm_msg).unwrap();
@@ -135,6 +136,7 @@ impl SigningHandle for NonceSigningHandler{
                     sender: ctx.conf.relayer_bitcoin_address(),
                     nonce: hex::encode(&input.message),
                     signature: to_base64(&signature.serialize()?),
+                    oracle_pubkey: input.key.clone(),
                 };
                 let any = Any::from_msg(&cosm_msg)?;
                 ctx.tx_sender.send(any)?

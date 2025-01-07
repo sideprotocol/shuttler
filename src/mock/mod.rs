@@ -25,6 +25,7 @@ use crate::helper::now;
 
 mod bridge;
 mod oracle;
+mod agency;
 
 pub use bridge::*;
 

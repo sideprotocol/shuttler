@@ -58,10 +58,12 @@ impl DKGHandle for KeygenHander {
         let signature = hex::encode(ctx.node_key.sign(&rawkey, None));
 
         let cosm_msg = MsgSubmitAgencyPubKey {
-            id: task.id.replace("agency-", "").parse().unwrap(),
+            // id: task.id.replace("agency-", "").parse().unwrap(),
             sender: ctx.conf.relayer_bitcoin_address(),
-            pub_key: pubkey,
+            pub_key: pubkey.clone(),
             signature,
+            agency_id: task.id.replace("agency-", "").parse().unwrap(),
+            agency_pubkey: pubkey,
         };
         let any = Any::from_msg(&cosm_msg).unwrap();
         if let Err(e) = ctx.tx_sender.send(any) {
