@@ -64,9 +64,9 @@ impl Oracle {
             }
         });
 
-        ctx.task_store.list().iter()
-            .filter(|t| t.status == Status::Connect)
-            .for_each(|t| self.nonce_signer.generate_commitments(ctx, t));
+        // ctx.task_store.list().iter()
+        //     .filter(|t| t.status == Status::Connect)
+        //     .for_each(|t| self.nonce_signer.generate_commitments(ctx, t));
     }
 
     pub async fn fetch_new_key_generation(&self, ctx: &mut Context) {

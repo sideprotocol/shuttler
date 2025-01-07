@@ -5,6 +5,7 @@ use std::{collections::BTreeMap, fmt::Debug};
 use ed25519_compact::x25519;
 use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 use libp2p::gossipsub::IdentTopic;
+use libp2p::swarm::handler;
 use rand::thread_rng;
 use serde::de::DeserializeOwned;
 use tracing::{debug, error, info};
@@ -20,22 +21,29 @@ use crate::helper::mem_store;
 use crate::helper::cipher::{decrypt, encrypt};
 
 pub type DKGHandleFn = dyn Fn(&mut Context, &mut Task, &KeyPackage, &PublicKeyPackage) + Send + Sync;
-
-pub struct DKG {
-    name: String,
-    on_complete: Box<DKGHandleFn>,
+pub trait DKGHandle {
+    fn on_complete(&self, ctx: &mut Context, task: &mut Task, key: &KeyPackage, pubkey: &PublicKeyPackage);
 }
 
-impl DKG {
-    pub fn new(name: impl Into<String>, on_complete: Box<DKGHandleFn>) -> Self {
+pub struct DKG<H> where H: DKGHandle {
+    name: String,
+    handler: H,
+}
+
+impl<H> DKG<H> where H: DKGHandle {
+    pub fn new(name: impl Into<String>, handler: H) -> Self {
         Self {
             name: name.into(),
-            on_complete,
+            handler,
         }
     }
 
     pub fn topic(&self) -> IdentTopic {
         IdentTopic::new(&self.name)
+    }
+
+    pub fn hander(&self) -> &H {
+        &self.handler
     }
 }
 
@@ -67,7 +75,7 @@ pub struct Data<T> where T: Serialize + DeserializeOwned{
     pub data: T,
 }
 
-impl DKG {
+impl<H> DKG<H> where H: DKGHandle {
 
     fn broadcast_dkg_packages(&self, ctx: &mut Context, payload: DKGPayload) {
 
@@ -287,7 +295,7 @@ impl DKG {
 
             match frost::keys::dkg::part3(&round2_secret_package, &round1_packages, &round2_packages ) {
                 Ok((priv_key, pub_key)) => { 
-                    (self.on_complete)(ctx, &mut task, &priv_key, &pub_key);
+                    self.handler.on_complete(ctx, &mut task, &priv_key, &pub_key);
                 },
                 Err(e) => {
                     error!("Failed to compute threshold key: {} {:?}", task_id, e);

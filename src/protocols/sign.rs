@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use bitcoin::secp256k1::Scalar;
 use frost_adaptor_signature::{keys::Tweak, round1::{self, Nonce, SigningCommitments, SigningNonces}, round2::{self, SignatureShare}, Field, Identifier, Secp256K1ScalarField, SigningPackage};
-use libp2p::gossipsub::IdentTopic;
+use libp2p::{gossipsub::IdentTopic, swarm::handler};
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
@@ -32,15 +32,20 @@ pub enum SignPackage {
 }
 pub type SigningHandleFn = dyn Fn(&mut Context, &mut Task) -> anyhow::Result<()> + Send + Sync;
 
-pub struct StandardSigner {
-    name: String,
-    on_complete: Box<SigningHandleFn>,
+pub trait SigningHandle {
+    fn on_complete(&self, ctx: &mut Context, task: &mut Task) -> anyhow::Result<()>;
 }
 
-impl StandardSigner{
+#[derive(Clone)]
+pub struct StandardSigner<H: SigningHandle> {
+    name: String,
+    handler: H,
+}
 
-    pub fn new(name: impl Into<String>, on_complete: Box<SigningHandleFn>) -> Self {
-        Self {name: name.into(), on_complete}
+impl<H> StandardSigner<H> where H: SigningHandle{
+
+    pub fn new(name: impl Into<String>, handler: H) -> Self {
+        Self {name: name.into(), handler}
     }
 
     pub fn topic(&self) -> IdentTopic {
@@ -363,7 +368,7 @@ impl StandardSigner{
         task.status = Status::SignComplete;
         ctx.task_store.save(&task.id, &task);
         
-        if let Err(e) = (self.on_complete)(ctx, &mut task) {
+        if let Err(e) = self.handler.on_complete(ctx, &mut task) {
             error!("signing error: {:?}", e);
         }
 
