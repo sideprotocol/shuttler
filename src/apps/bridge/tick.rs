@@ -8,7 +8,7 @@ use tracing::{debug, error, info};
 
 use crate::{
     apps::{Context, Input, SignMode, Task}, 
-    helper::{client_side::get_signing_requests, encoding::{from_base64, pubkey_to_identifier}, mem_store, store::Store}, 
+    helper::{bitcoin::new_task_from_psbt, client_side::get_signing_requests, encoding::{from_base64, pubkey_to_identifier}, mem_store, store::Store}, 
 };
 
 use super::BridgeSigner;
@@ -42,7 +42,7 @@ impl BridgeSigner {
                 debug!("In-process signing tasks: {:?} {:?}", tasks_in_process.len(), tasks_in_process);
                 for request in requests {
                     // create a dkg task
-                    match new_task_from_signing_request(ctx, &request) {
+                    match new_task_from_psbt(ctx, &request.psbt, SignMode::SignWithTweak) {
                         Ok(task) => {
                             if ctx.task_store.exists(&task.id) { continue; }
                             ctx.task_store.save(&task.id, &task);
@@ -124,58 +124,4 @@ fn new_task_from_vault_dkg(request: &DkgRequest) -> Option<Task> {
     Some(Task::new_dkg(request_id_to_task_id(request.id), participants, request.threshold as u16 ))
 }
 
-fn new_task_from_signing_request(ctx: &mut Context, request: &SigningRequest) -> anyhow::Result<Task> {
-
-    let psbt_bytes = from_base64(&request.psbt)?;
-    let task_id = request.txid.clone();
-
-    let psbt = Psbt::deserialize(psbt_bytes.as_slice())?;
-
-    info!("Prepare for signing: {:?} {} inputs ", &request.txid[..6], psbt.inputs.len()  );
-    let mut inputs = BTreeMap::new();
-    let preouts = psbt.inputs.iter()
-        //.filter(|input| input.witness_utxo.is_some())
-        .map(|input| input.witness_utxo.clone().unwrap())
-        .collect::<Vec<_>>();
-
-    for (i, input) in psbt.inputs.iter().enumerate() {
-
-        let script = input.witness_utxo.clone().unwrap().script_pubkey;
-        let address = Address::from_script(&script, ctx.conf.bitcoin.network)?.to_string();
-
-        // check if there are sufficient participants for this tasks
-        let participants = mem_store::count_task_participants(ctx, &address.to_string());
-        debug!("task participant: {:?}", participants);
-        match ctx.keystore.get(&address) {
-            Some(k) => if participants.len() < k.priv_key.min_signers().clone() as usize { return Err(anyhow!("insufficient signers")); },
-            None => continue,
-        };
-
-        // get the message to sign
-        let hash_ty = input
-            .sighash_type
-            .and_then(|psbt_sighash_type| psbt_sighash_type.taproot_hash_ty().ok())
-            .unwrap_or(TapSighashType::Default);
-        let hash = SighashCache::new(&psbt.unsigned_tx).taproot_key_spend_signature_hash( i,&Prevouts::All(&preouts),hash_ty,)?;
-
-        let input = Input {
-            key: address,
-            index: i,
-            participants,
-            message: hash.to_raw_hash().to_byte_array().to_vec(),
-            mode: SignMode::SignWithTweak,
-            signature: None,
-        };
-
-        inputs.insert(i, input);
- 
-    };
-
-    if inputs.len() == 0 {
-        return Err(anyhow!("invalid psbt, 0 input"));
-    }
-
-    Ok(Task::new_signing(task_id, request.psbt.clone(), inputs))
-
-}
 

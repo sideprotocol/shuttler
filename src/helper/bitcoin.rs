@@ -1,14 +1,78 @@
+use std::collections::BTreeMap;
+
+use anyhow::anyhow;
+use bitcoin::sighash::{Prevouts, SighashCache};
+use bitcoin::Psbt;
 use bitcoin::{hashes::Hash,
     consensus::encode::serialize, key::Secp256k1, opcodes, Address, Network, PublicKey, ScriptBuf, TapNodeHash, TapSighashType, Transaction, Txid, XOnlyPublicKey
 };
 use bitcoin::{consensus::encode::deserialize, Transaction as TransactionV30};
 use frost_adaptor_signature::{keys::PublicKeyPackage, VerifyingKey};
 use ordinals::SpacedRune;
+use tracing::info;
+
+use crate::apps::{Context, Input, SignMode, Task};
+use crate::helper::encoding::from_base64;
+use crate::helper::mem_store;
+use crate::helper::store::Store;
 
 use super::merkle_proof;
 
 // Magic txin sequence for withdrawal txs
 const MAGIC_SEQUENCE: u32 = (1 << 31) + 0xde;
+
+pub fn new_task_from_psbt(ctx: &Context, psbt_base64: &String, sign_mode: SignMode) -> anyhow::Result<Task> {
+
+    let psbt_bytes = from_base64(&psbt_base64)?;
+
+    let psbt = Psbt::deserialize(psbt_bytes.as_slice())?;
+    let task_id = &psbt.unsigned_tx.compute_txid().to_string();
+
+    info!("Prepare for signing: {:?} {} inputs ", &task_id[..6], psbt.inputs.len()  );
+    let mut inputs = BTreeMap::new();
+    let preouts = psbt.inputs.iter()
+        //.filter(|input| input.witness_utxo.is_some())
+        .map(|input| input.witness_utxo.clone().unwrap())
+        .collect::<Vec<_>>();
+
+    for (i, input) in psbt.inputs.iter().enumerate() {
+
+        let script = input.witness_utxo.clone().unwrap().script_pubkey;
+        let address = Address::from_script(&script, ctx.conf.bitcoin.network)?.to_string();
+
+        // check if there are sufficient participants for this tasks
+        let participants = mem_store::count_task_participants(ctx, &address.to_string());
+        match ctx.keystore.get(&address) {
+            Some(k) => if participants.len() < k.priv_key.min_signers().clone() as usize { return Err(anyhow!("insufficient signers")); },
+            None => continue,
+        };
+
+        // get the message to sign
+        let hash_ty = input
+            .sighash_type
+            .and_then(|psbt_sighash_type| psbt_sighash_type.taproot_hash_ty().ok())
+            .unwrap_or(TapSighashType::Default);
+        let hash = SighashCache::new(&psbt.unsigned_tx).taproot_key_spend_signature_hash( i,&Prevouts::All(&preouts),hash_ty,)?;
+
+        let input = Input {
+            key: address,
+            index: i,
+            participants,
+            message: hash.to_raw_hash().to_byte_array().to_vec(),
+            mode: sign_mode.clone(),
+            signature: None,
+        };
+
+        inputs.insert(i, input);
+ 
+    };
+
+    if inputs.len() == 0 {
+        return Err(anyhow!("invalid psbt, 0 input"));
+    }
+
+    Ok(Task::new_signing(task_id.to_owned(), psbt_base64.clone(), inputs))
+}
 
 pub fn schnorr_signature_from_frost(frost_signature: frost_adaptor_signature::Signature) -> bitcoin::secp256k1::schnorr::Signature {
     let sig_bytes = frost_signature.serialize().unwrap();
