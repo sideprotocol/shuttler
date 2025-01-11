@@ -4,11 +4,10 @@ use std::{
 
 use cosmrs::Any;
 use ed25519_compact::{PublicKey, SecretKey, Signature};
-use futures::stream::{self, StreamExt};
+use futures::stream::StreamExt;
 use libp2p::{
     gossipsub, identify, identity::Keypair, kad::{self, store::MemoryStore}, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, Multiaddr, PeerId, Swarm
 };
-use tendermint::abci::Code;
 use tendermint_rpc::{query::EventType, event::Event, SubscriptionClient, WebSocketClient};
 use tokio::{select, spawn};
 use tracing::{debug, info, warn, error};
