@@ -1,12 +1,11 @@
-use std::time::Duration;
 use cosmrs::Any;
-use futures::executor::block_on;
 use side_proto::side::dlc::{MsgSubmitAgencyPubKey, MsgSubmitAttestation};
+use tendermint::abci::Event;
 use crate::config::VaultKeypair;
 use crate::helper::encoding::to_base64;
 use crate::helper::store::Store;
-use crate::protocols::sign::{SigningHandle, StandardSigner};
-use crate::protocols::dkg::{DKGHandle, DKG};
+use crate::protocols::sign::{SignAdaptor, StandardSigner};
+use crate::protocols::dkg::{DKGAdaptor, DKG};
 
 use crate::apps::{App, Context, FrostSignature, SubscribeMessage, Task};
 
@@ -34,16 +33,18 @@ impl App for Agency {
     fn subscribe_topics(&self) -> Vec<libp2p::gossipsub::IdentTopic> {
         vec![self.keygen.topic(), self.signer.topic()]
     }
-    fn tick(&self) -> Duration {
-        Duration::from_secs(30)
-    }
-    fn on_tick(&self, ctx: &mut Context) {
-        block_on(self.fetch_new_agency(ctx))
+    fn on_event(&self, ctx: &mut Context, events: &Vec<Event>) {
+       self.keygen.execute(ctx, events);
+       self.signer.execute(ctx, events);
     }
 }
 
+
 pub struct KeygenHander{}
-impl DKGHandle for KeygenHander {
+impl DKGAdaptor for KeygenHander {
+    fn new_task(&self, events: &Vec<Event>) -> Option<Task> {
+        todo!()
+    }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task, priv_key: &frost_adaptor_signature::keys::KeyPackage, pub_key: &frost_adaptor_signature::keys::PublicKeyPackage) {
         let tweak = None;
         let rawkey = pub_key.verifying_key().serialize().unwrap();
@@ -71,10 +72,14 @@ impl DKGHandle for KeygenHander {
         }
 
     }
+    
 }
 
 pub struct SignatureHandler {}
-impl SigningHandle for SignatureHandler {
+impl SignAdaptor for SignatureHandler {
+    fn new_task(&self, events: &Vec<tendermint::abci::Event>) -> Option<Task> {
+        todo!()
+    }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task)-> anyhow::Result<()> {
         for (_, input) in task.sign_inputs.iter() {
             if let Some(FrostSignature::Standard(sig)) = input.signature  {

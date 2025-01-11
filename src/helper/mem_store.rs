@@ -21,7 +21,7 @@ lazy_static! {
     static ref DkgRound2SecretPacket: Mutex<BTreeMap<String, dkg::round2::SecretPackage>> = {
         Mutex::new(BTreeMap::new())
     };
-    pub static ref AliveTable: Mutex<BTreeMap<Identifier, i64>> = {
+    pub static ref AliveTable: Mutex<BTreeMap<Identifier, u64>> = {
         Mutex::new(BTreeMap::new())
     };
     pub static ref TrustedPeers: Mutex<Vec<Identifier>> = {

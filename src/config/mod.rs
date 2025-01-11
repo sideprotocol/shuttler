@@ -74,6 +74,7 @@ pub struct BitcoinCfg {
 pub struct CosmosChain {
     /// the cosmos grpc endpoint, http://localhost:9001
     pub grpc: String,
+    pub rpc: String,
     /// Transaction gas
     pub gas: usize,
     pub fee: Fee,
@@ -227,6 +228,7 @@ impl Config {
             },
             side_chain: CosmosChain {
                 grpc: "http://localhost:9090".to_string(),
+                rpc: "http://localhost:26657".to_owned(),
                 gas: 1000000,
                 fee: Fee {
                     amount: 1000,
@@ -250,6 +252,10 @@ impl Config {
 
     pub fn to_string(&self) -> String {
         toml::to_string(self).unwrap()
+    }
+
+    pub fn websocket_endpoint(&self) -> String {
+        format!("{}/websocket", self.side_chain.rpc.replace("http", "ws") )
     }
 
     pub fn save(&self) -> Result<(), std::io::Error> {

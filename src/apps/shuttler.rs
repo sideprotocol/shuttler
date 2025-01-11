@@ -8,7 +8,9 @@ use futures::stream::{self, StreamExt};
 use libp2p::{
     gossipsub, identify, identity::Keypair, kad::{self, store::MemoryStore}, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, Multiaddr, PeerId, Swarm
 };
-use tokio::{select, spawn, time::interval};
+use tendermint::abci::Code;
+use tendermint_rpc::{query::EventType, event::Event, SubscriptionClient, WebSocketClient};
+use tokio::{select, spawn};
 use tracing::{debug, info, warn, error};
 
 use crate::{
@@ -20,7 +22,6 @@ use crate::{
         client_side::send_cosmos_transaction, encoding::pubkey_to_identifier, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store
     },
 };
-use tokio_stream::wrappers::IntervalStream;
 
 pub struct Shuttler<'a> {
     pub apps: Vec<&'a dyn App>,
@@ -176,29 +177,34 @@ impl<'a> Shuttler<'a> {
             }
         });
 
+        // Connect to the Tendermint WebSocket endpoint
+        let (client, driver) = WebSocketClient::new(conf.websocket_endpoint().as_str())
+        .await
+        .expect("Failed to connect to WebSocket");
+
+        // Spawn the WebSocket driver in a separate task
+        tokio::spawn(async move {
+        if let Err(e) = driver.run().await {
+            eprintln!("WebSocket driver error: {}", e);
+        }
+        });
+
+        // Subscribe to NewBlock events
+        let query = EventType::NewBlock.into();
+        // let query = Query::from_str("/cosmos.bank.v1beta1.MsgSend").unwrap();
+        let mut subscription = client.subscribe(query).await.expect("Subscription failed");
+
         // Common Setting: Context and Heart Beat
         let mut context = Context::new(swarm, tx_sender, identifier, node_key, conf.clone()); 
-        let mut heart_beat = tokio::time::interval(Duration::from_secs(mem_store::HEART_BEAT_WINDOW));
-
-        // App Tickers for schedule tasks
-        let mut tickers = stream::select_all(self.apps.iter().enumerate().map(|(index, app)| {
-            IntervalStream::new(interval(app.tick())).map(move |_| index)
-        }));
 
         loop {
             select! {
-                Some(index) = tickers.next() => {   
-                    if context.swarm.connected_peers().count() < 2 { continue; }
-                    if let Some(app) = self.get_app(index) {
-                        app.on_tick(&mut context);
-                    };
-                }
-                _ = heart_beat.tick() => {
-                    sending_heart_beat(&mut context).await;
+                Some(Ok(event)) = subscription.next() => {
+                    self.handle_block_event(&mut context, event);
                 }
                 swarm_event = context.swarm.select_next_some() => match swarm_event {
                     SwarmEvent::Behaviour(ShuttlerBehaviourEvent::Gossip(gossipsub::Event::Message { message, .. })) => {
-                        update_heartbeat(&context, &message);
+                        update_received_heartbeat(&context, &message);
                         for app in &self.apps {
                             dispatch_messages(app, &mut context, &message);
                         }
@@ -267,6 +273,23 @@ impl<'a> Shuttler<'a> {
     //     self.candidates.sync_from_validators().await;
     // }
 
+    fn handle_block_event(&self, ctx: &mut Context, event: Event) {
+        match event.data {
+            tendermint_rpc::event::EventData::NewBlock { block, result_finalize_block , ..} => {
+                if let Some(b) = block { 
+                    sending_heart_beat(ctx, b.header.height.value());
+                }
+                if let Some(finalize_block) = result_finalize_block {
+                    for tx in finalize_block.tx_results {
+                        if tx.code.is_err() {continue;}
+                        self.apps.iter().for_each(|a| a.on_event(ctx, &tx.events));
+                    }
+                }
+            },
+            _ => debug!("Dose not support {}", event.query),
+        }
+    }
+
 }
 
 fn dispatch_messages(app: &&dyn App, context: &mut Context,  message: &SubscribeMessage) {
@@ -275,7 +298,7 @@ fn dispatch_messages(app: &&dyn App, context: &mut Context,  message: &Subscribe
     }
 }
 
-fn update_heartbeat(ctx: &Context, message: &SubscribeMessage) {
+fn update_received_heartbeat(ctx: &Context, message: &SubscribeMessage) {
     if message.topic == SubscribeTopic::HEARTBEAT.topic().hash() {
         if let Ok(alive) = serde_json::from_slice::<HeartBeatMessage>(&message.data) {
             // Ensure the message is not forged.

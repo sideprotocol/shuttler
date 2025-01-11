@@ -7,6 +7,7 @@ use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 use libp2p::gossipsub::IdentTopic;
 use rand::thread_rng;
 use serde::de::DeserializeOwned;
+use tendermint::abci::Event;
 use tracing::{debug, error, info};
 use serde::{Deserialize, Serialize};
 
@@ -19,17 +20,17 @@ use crate::helper::store::Store;
 use crate::helper::mem_store;
 use crate::helper::cipher::{decrypt, encrypt};
 
-pub type DKGHandleFn = dyn Fn(&mut Context, &mut Task, &KeyPackage, &PublicKeyPackage) + Send + Sync;
-pub trait DKGHandle {
+pub trait DKGAdaptor {
+    fn new_task(&self, events: &Vec<Event>) -> Option<Task>;
     fn on_complete(&self, ctx: &mut Context, task: &mut Task, key: &KeyPackage, pubkey: &PublicKeyPackage);
 }
 
-pub struct DKG<H> where H: DKGHandle {
+pub struct DKG<H> where H: DKGAdaptor {
     name: String,
     handler: H,
 }
 
-impl<H> DKG<H> where H: DKGHandle {
+impl<H> DKG<H> where H: DKGAdaptor {
     pub fn new(name: impl Into<String>, handler: H) -> Self {
         Self {
             name: name.into(),
@@ -43,6 +44,14 @@ impl<H> DKG<H> where H: DKGHandle {
 
     pub fn hander(&self) -> &H {
         &self.handler
+    }
+
+    pub fn execute(&self, ctx: &mut Context, events: &Vec<Event>) {
+        if let Some(task) = self.handler.new_task(events) {
+            if ctx.task_store.exists(&task.id) { return }
+            ctx.task_store.save(&task.id, &task);
+            self.generate(ctx, &task);
+        }
     }
 }
 
@@ -74,7 +83,7 @@ pub struct Data<T> where T: Serialize + DeserializeOwned{
     pub data: T,
 }
 
-impl<H> DKG<H> where H: DKGHandle {
+impl<H> DKG<H> where H: DKGAdaptor {
 
     fn broadcast_dkg_packages(&self, ctx: &mut Context, payload: DKGPayload) {
 

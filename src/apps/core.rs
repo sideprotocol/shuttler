@@ -1,22 +1,65 @@
-
-use std::{collections::BTreeMap, time::Duration};
-use std::sync::mpsc::Sender;
+use bitcoincore_rpc::{Auth, Client as BitcoinClient};
 use cosmrs::Any;
 use ed25519_compact::SecretKey;
 use frost_adaptor_signature::{round1, round2, AdaptorSignature, Identifier, Signature};
 use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{Deserialize, Serialize};
-use bitcoincore_rpc::{Auth, Client as BitcoinClient};
+use std::collections::BTreeMap;
+use std::sync::mpsc::Sender;
+use tendermint::abci::{Event, EventAttribute};
 
-use crate::{apps::ShuttlerBehaviour, config::{Config, VaultKeypair}, helper::{encoding::to_base64, now, store::{MemStore, DefaultStore}}};
+use crate::{
+    apps::ShuttlerBehaviour,
+    config::{Config, VaultKeypair},
+    helper::{
+        encoding::to_base64,
+        now,
+        store::{DefaultStore, MemStore, Store},
+    },
+};
 
 pub type SubscribeMessage = libp2p::gossipsub::Message;
 
 pub trait App {
     fn subscribe_topics(&self) -> Vec<IdentTopic>;
     fn on_message(&self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()>;
-    fn on_tick(&self, ctx: &mut Context);
-    fn tick(&self) -> Duration;
+    fn on_event(&self, ctx: &mut Context, event: &Vec<Event>);
+    // fn on_tick(&self, ctx: &mut Context);
+    // fn tick(&self) -> Duration;
+}
+
+pub mod event {
+    use crate::helper::encoding::to_base64;
+    use tendermint::abci::{Event, EventAttribute};
+
+    pub fn has_event_value(events: &Vec<Event>, value: &str) -> bool {
+        events.iter().any(|e| has_attribute_value(&e.attributes, value))
+    }
+
+    pub fn get_event_value(events: &Vec<Event>, kind: &str, key: &str) -> Option<String> {
+        events.iter().find(|e| e.kind == kind).map(|e| get_attribute_value(&e.attributes, key))?
+    }
+
+    pub fn has_attribute_value(attr: &Vec<EventAttribute>, value: &str) -> bool {
+        attr.iter()
+            .find(|ea| match ea {
+                EventAttribute::V037(event_attribute) => &event_attribute.value == value,
+                EventAttribute::V034(_) => false,
+            })
+            .is_some()
+    }
+
+    pub fn get_attribute_value(attr: &Vec<EventAttribute>, key: &str) -> Option<String> {
+        attr.iter()
+            .find(|ea| match ea {
+                EventAttribute::V037(event_attribute) => &event_attribute.key == key,
+                EventAttribute::V034(_) => false,
+            })
+            .map(|a| match a {
+                EventAttribute::V037(event_attribute) => event_attribute.value.to_string(),
+                EventAttribute::V034(event_attribute) => to_base64(&event_attribute.value),
+            })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,7 +67,6 @@ pub enum Status {
     DkgRound1,
     DkgRound2,
     DkgComplete,
-    Connect,
     SignRound1,
     SignRound2,
     SignComplete,
@@ -41,11 +83,11 @@ pub enum SignMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FrostSignature {
     Standard(Signature),
-    Adaptor(AdaptorSignature)
+    Adaptor(AdaptorSignature),
 }
 
 impl FrostSignature {
-    pub fn inner(&self) -> &Signature{
+    pub fn inner(&self) -> &Signature {
         match self {
             FrostSignature::Standard(signature) => signature,
             FrostSignature::Adaptor(adaptor_signature) => &adaptor_signature.0,
@@ -75,11 +117,20 @@ impl Input {
         }
     }
 
-    pub fn new_with_message(sign_key: String, message: Vec<u8>, participants: Vec<Identifier>) -> Self {
+    pub fn new_with_message(
+        sign_key: String,
+        message: Vec<u8>,
+        participants: Vec<Identifier>,
+    ) -> Self {
         Self::new_with_message_mode(sign_key, message, participants, SignMode::SignWithTweak)
     }
 
-    pub fn new_with_message_mode(sign_key: String, message: Vec<u8>, participants: Vec<Identifier>, mode: SignMode, ) -> Self {
+    pub fn new_with_message_mode(
+        sign_key: String,
+        message: Vec<u8>,
+        participants: Vec<Identifier>,
+        mode: SignMode,
+    ) -> Self {
         Self {
             index: 0,
             participants,
@@ -88,7 +139,7 @@ impl Input {
             message,
             signature: None,
         }
-    } 
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -115,14 +166,22 @@ impl Task {
             id,
             status: Status::DkgRound1,
             time: now(),
-            dkg_input: DkgInput {participants, threshold, tweaks: vec![] },
+            dkg_input: DkgInput {
+                participants,
+                threshold,
+                tweaks: vec![],
+            },
             sign_inputs: BTreeMap::new(),
             psbt: "".to_owned(),
             submitted: false,
         }
     }
 
-    pub fn new_signing(id: String, psbt: impl Into<String>, sign_inputs: BTreeMap<usize, Input> ) -> Self {
+    pub fn new_signing(
+        id: String,
+        psbt: impl Into<String>,
+        sign_inputs: BTreeMap<usize, Input>,
+    ) -> Self {
         Self {
             id,
             status: Status::SignRound1,
@@ -135,11 +194,14 @@ impl Task {
     }
 }
 type Index = usize;
-type CommitmentStore = DefaultStore<String, BTreeMap<Index,BTreeMap<Identifier,round1::SigningCommitments>>>;
-type SignatureShareStore = DefaultStore<String, BTreeMap<Index,BTreeMap<Identifier,round2::SignatureShare>>>;
+type CommitmentStore =
+    DefaultStore<String, BTreeMap<Index, BTreeMap<Identifier, round1::SigningCommitments>>>;
+type SignatureShareStore =
+    DefaultStore<String, BTreeMap<Index, BTreeMap<Identifier, round2::SignatureShare>>>;
 type SignerNonceStore = DefaultStore<String, BTreeMap<Index, round1::SigningNonces>>;
 
-pub type Round1Store = MemStore<String, BTreeMap<Identifier, frost_adaptor_signature::keys::dkg::round1::Package>>;
+pub type Round1Store =
+    MemStore<String, BTreeMap<Identifier, frost_adaptor_signature::keys::dkg::round1::Package>>;
 pub type Round2Store = MemStore<String, BTreeMap<Identifier, Vec<u8>>>;
 
 pub struct Context {
@@ -161,7 +223,13 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn new(swarm: Swarm<ShuttlerBehaviour>, tx_sender: Sender<Any>,identifier: Identifier, node_key: SecretKey, conf: Config) -> Self {
+    pub fn new(
+        swarm: Swarm<ShuttlerBehaviour>,
+        tx_sender: Sender<Any>,
+        identifier: Identifier,
+        node_key: SecretKey,
+        conf: Config,
+    ) -> Self {
         let id_base64 = to_base64(&identifier.serialize());
         let auth = if !conf.bitcoin.user.is_empty() {
             Auth::UserPass(conf.bitcoin.user.clone(), conf.bitcoin.password.clone())
@@ -169,21 +237,24 @@ impl Context {
             Auth::None
         };
 
-        let bitcoin_client = BitcoinClient::new( &conf.bitcoin.rpc, auth).expect("Could not initial bitcoin RPC client");
+        let bitcoin_client = BitcoinClient::new(&conf.bitcoin.rpc, auth)
+            .expect("Could not initial bitcoin RPC client");
 
-        Self { 
+        Self {
             bitcoin_client,
-            swarm, 
+            swarm,
             tx_sender,
-            identifier, 
-            node_key, 
-            id_base64, 
+            identifier,
+            node_key,
+            id_base64,
             keystore: DefaultStore::new(conf.get_database_with_name("keypairs")),
             task_store: DefaultStore::new(conf.get_database_with_name("tasks")),
             nonce_store: SignerNonceStore::new(conf.get_database_with_name("nonces")),
             commitment_store: CommitmentStore::new(conf.get_database_with_name("commitments")),
-            signature_store: SignatureShareStore::new(conf.get_database_with_name("signature_shares")),
-            conf, 
+            signature_store: SignatureShareStore::new(
+                conf.get_database_with_name("signature_shares"),
+            ),
+            conf,
 
             db_round1: Round1Store::new(),
             db_round2: Round2Store::new(),

@@ -1,14 +1,11 @@
 
-use std::collections::BTreeMap;
 
-use anyhow::anyhow;
-use bitcoin::{hashes::Hash, sighash::{Prevouts, SighashCache}, Address, Psbt, TapSighashType};
-use side_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, DkgRequest, DkgRequestStatus, QueryDkgRequestsRequest, SigningRequest};
-use tracing::{debug, error, info};
+use side_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, DkgRequest, DkgRequestStatus, QueryDkgRequestsRequest};
+use tracing::{debug, error};
 
 use crate::{
-    apps::{Context, Input, SignMode, Task}, 
-    helper::{bitcoin::new_task_from_psbt, client_side::get_signing_requests, encoding::{from_base64, pubkey_to_identifier}, mem_store, store::Store}, 
+    apps::{Context, SignMode, Task}, 
+    helper::{bitcoin::new_task_from_psbt, client_side::get_signing_requests, encoding::{from_base64, pubkey_to_identifier}, store::Store}, 
 };
 
 use super::BridgeSigner;

@@ -1,13 +1,12 @@
-use std::time::Duration;
 use cosmrs::Any;
-use futures::executor::block_on;
 use side_proto::side::dlc::{MsgSubmitAttestation, MsgSubmitNonce, MsgSubmitOraclePubKey};
+use tendermint::abci::Event;
 
 use crate::config::VaultKeypair;
 use crate::helper::encoding::to_base64;
 use crate::helper::store::Store;
-use crate::protocols::sign::{SigningHandle, StandardSigner};
-use crate::protocols::dkg::{DKGHandle, DKG};
+use crate::protocols::sign::{SignAdaptor, StandardSigner};
+use crate::protocols::dkg::{DKGAdaptor, DKG};
 
 use crate::apps::{App, Context, FrostSignature, Status, SubscribeMessage, Task};
 
@@ -42,17 +41,17 @@ impl App for Oracle {
     fn subscribe_topics(&self) -> Vec<libp2p::gossipsub::IdentTopic> {
         vec![self.keygen.topic(), self.signer.topic(), self.nonce_gen.topic(), self.nonce_gen.hander().signer.topic()]
     }
-    fn tick(&self) -> Duration {
-        Duration::from_secs(30)
-    }
-    fn on_tick(&self, ctx: &mut Context) {
-        block_on(self.fetch_new_attestation(ctx));
-        block_on(self.fetch_new_nonce_generation(ctx));
-        block_on(self.fetch_new_key_generation(ctx));
+    fn on_event(&self, ctx: &mut Context, events: &Vec<Event>) {
+        self.signer.execute(ctx, events);
+        self.keygen.execute(ctx, events);
+        self.nonce_gen.execute(ctx, events);
     }
 }
 pub struct KeygenHander{}
-impl DKGHandle for KeygenHander {
+impl DKGAdaptor for KeygenHander {
+    fn new_task(&self, events: &Vec<Event>) -> Option<Task> {
+        todo!()
+    }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task, priv_key: &frost_adaptor_signature::keys::KeyPackage, pub_key: &frost_adaptor_signature::keys::PublicKeyPackage) {
         let tweak = None;
         let rawkey = pub_key.verifying_key().serialize().unwrap();
@@ -82,7 +81,10 @@ impl DKGHandle for KeygenHander {
     }
 }
 pub struct AttestationHandler{}
-impl SigningHandle for AttestationHandler {
+impl SignAdaptor for AttestationHandler {
+    fn new_task(&self, events: &Vec<Event>) -> Option<Task> {
+        todo!()
+    }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task)-> anyhow::Result<()> {
         for (_, input) in task.sign_inputs.iter() {
             if let Some(FrostSignature::Standard(sig)) = input.signature  {
@@ -104,7 +106,10 @@ impl SigningHandle for AttestationHandler {
 pub struct NonceHander{
     pub signer: StandardSigner<NonceSigningHandler>
 }
-impl DKGHandle for NonceHander {
+impl DKGAdaptor for NonceHander {
+    fn new_task(&self, events: &Vec<Event>) -> Option<Task> {
+        todo!()
+    }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task, priv_key: &frost_adaptor_signature::keys::KeyPackage, pub_key: &frost_adaptor_signature::keys::PublicKeyPackage) {
         let tweak = None;
         let message = pub_key.verifying_key().serialize().unwrap();
@@ -128,7 +133,10 @@ impl DKGHandle for NonceHander {
 }
 
 pub struct NonceSigningHandler{}
-impl SigningHandle for NonceSigningHandler{
+impl SignAdaptor for NonceSigningHandler{
+    fn new_task(&self, events: &Vec<Event>) -> Option<Task> {
+        None
+    }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task) -> anyhow::Result<()> {
         for (_, input) in task.sign_inputs.iter() {
             if let Some(FrostSignature::Standard(signature)) = input.signature  {

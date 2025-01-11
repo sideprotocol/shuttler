@@ -4,6 +4,7 @@ use frost_adaptor_signature::{keys::Tweak, round1::{self, Nonce, SigningNonces},
 use libp2p::gossipsub::IdentTopic;
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
+use tendermint::abci::Event;
 use tracing::{debug, info};
 pub use tracing::error;
 use usize as Index;
@@ -29,19 +30,19 @@ pub enum SignPackage {
     Round1(BTreeMap<Index,BTreeMap<Identifier,round1::SigningCommitments>>),
     Round2(BTreeMap<Index,BTreeMap<Identifier,round2::SignatureShare>>),
 }
-pub type SigningHandleFn = dyn Fn(&mut Context, &mut Task) -> anyhow::Result<()> + Send + Sync;
 
-pub trait SigningHandle {
+pub trait SignAdaptor {
+    fn new_task(&self, events: &Vec<Event>) -> Option<Task>;
     fn on_complete(&self, ctx: &mut Context, task: &mut Task) -> anyhow::Result<()>;
 }
 
 #[derive(Clone)]
-pub struct StandardSigner<H: SigningHandle> {
+pub struct StandardSigner<H: SignAdaptor> {
     name: String,
     handler: H,
 }
 
-impl<H> StandardSigner<H> where H: SigningHandle{
+impl<H> StandardSigner<H> where H: SignAdaptor{
 
     pub fn new(name: impl Into<String>, handler: H) -> Self {
         Self {name: name.into(), handler}
@@ -49,6 +50,18 @@ impl<H> StandardSigner<H> where H: SigningHandle{
 
     pub fn topic(&self) -> IdentTopic {
         IdentTopic::new(&self.name)
+    }
+
+    // pub fn hander(&self) -> &H {
+    //     &self.handler
+    // }
+
+    pub fn execute(&self, ctx: &mut Context, events: &Vec<Event>) {
+        if let Some(task) = self.handler.new_task(events) {
+            if ctx.task_store.exists(&task.id) { return }
+            ctx.task_store.save(&task.id, &task);
+            self.generate_commitments(ctx, &task);
+        }
     }
     
     pub fn generate_commitments(&self, ctx: &mut Context, task: &Task) {

@@ -48,6 +48,7 @@ cosmrs = {version = "0.21", features = ["grpc"]}
 cosmos-sdk-proto = "*"
 tendermint = "*"
 tendermint-config = "*"
+tendermint-rpc = {version="0.40.1", features=["websocket-client"]}
 side-proto = {git = "https://github.com/sideprotocol/side-rust", features = ["grpc"]}
 # Optional dependencies
 ed25519-consensus = "2.1.0"

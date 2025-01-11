@@ -1,4 +1,4 @@
 mod app;
-mod tick;
+// mod tick;
 
 pub use app::Oracle;

@@ -31,14 +31,8 @@ impl App for Relayer {
     fn subscribe_topics(&self) -> Vec<IdentTopic> {
         vec![]
     }
-    
-    fn tick(&self) -> Duration {
-        Duration::from_secs(30)
-    }
-    fn on_tick(&self, _ctxx: &mut Context) {
-        block_on(scan_vault_txs(&self));
-        block_on(submit_fee_rate(&self));
-        block_on(sync_btc_blocks(&self));
+    fn on_event(&self, ctx: &mut Context, event: &Vec<tendermint::abci::Event>) {
+        
     }
 }
 

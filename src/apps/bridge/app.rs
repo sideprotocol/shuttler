@@ -1,10 +1,8 @@
 use std::collections::BTreeMap;
 
-use std::time::Duration;
-
 use cosmrs::Any;
-use futures::executor::block_on;
 use libp2p::gossipsub::IdentTopic;
+use tendermint::abci::Event;
 use tracing::{error, info};
 use bitcoin::{Network, Psbt, TapNodeHash, TapSighashType, Witness, XOnlyPublicKey};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
@@ -12,13 +10,14 @@ use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 
 use side_proto::side::btcbridge::{MsgCompleteDkg, MsgSubmitSignatures};
 
+use crate::apps::event::{get_event_value, has_event_value};
 use crate::apps::{App, Context, Status, SubscribeMessage, Task };
-use crate::config::{Config, VaultKeypair, TASK_INTERVAL};
+use crate::config::{Config, VaultKeypair};
 use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::encoding::{from_base64, to_base64};
 use crate::helper::store::Store;
-use crate::protocols::dkg::{DKGHandle, DKG};
-use crate::protocols::sign::{SigningHandle, StandardSigner};
+use crate::protocols::dkg::{DKGAdaptor, DKG};
+use crate::protocols::sign::{SignAdaptor, StandardSigner};
 
 // #[derive(Debug)]
 pub struct BridgeSigner {
@@ -44,7 +43,6 @@ impl BridgeSigner {
 }
 
 impl App for BridgeSigner {
-
     fn on_message(&self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()> {
         // debug!("Received {:?}", message);
         self.keygen.on_message(ctx, message)?;
@@ -54,16 +52,25 @@ impl App for BridgeSigner {
     fn subscribe_topics(&self) -> Vec<IdentTopic> {
         vec![self.keygen.topic(), self.signer.topic()]
     }
-    fn tick(&self) -> Duration {
-        TASK_INTERVAL
-    }
-    fn on_tick(&self, ctx: &mut Context) {
-        block_on(self.tasks_executor(ctx));
+    fn on_event(&self, ctx: &mut Context, events: &Vec<Event>) {
+        self.keygen.execute(ctx, events);
+        self.signer.execute(ctx, events);
     }
 }
 
 pub struct KeygenHander{}
-impl DKGHandle for KeygenHander {
+impl DKGAdaptor for KeygenHander {
+    fn new_task(&self, events: &Vec<tendermint::abci::Event>) -> Option<Task> {
+        if has_event_value(events, "") {
+            let id = get_event_value(events, "message", "id")?;
+            let participants = get_event_value(events, "message", "id")?;
+            let threshold = get_event_value(events, "message", "id")?.parse().unwrap_or(0);
+            if threshold < 2 {return None;}
+            Some(Task::new_dkg(id, vec![], threshold))
+        } else {
+            None
+        }
+    }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task, priv_key: &frost_adaptor_signature::keys::KeyPackage, pub_key: &frost_adaptor_signature::keys::PublicKeyPackage) {
 
         let vaults = generate_vault_addresses(ctx, pub_key.clone(), priv_key.clone(), &task.dkg_input.tweaks, ctx.conf.bitcoin.network);
@@ -132,7 +139,10 @@ pub fn generate_vault_addresses(
 }
 
 pub struct SignatureHandler{}
-impl SigningHandle for SignatureHandler {
+impl SignAdaptor for SignatureHandler {
+    fn new_task(&self, events: &Vec<tendermint::abci::Event>) -> Option<Task> {
+        todo!()
+    }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task) -> anyhow::Result<()> {
         println!("Signing completed: {:?}, {:?}", ctx.identifier, task.id);
         if task.submitted {
