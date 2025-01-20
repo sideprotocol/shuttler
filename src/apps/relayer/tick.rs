@@ -32,6 +32,10 @@ const DB_KEY_VAULTS_LAST_UPDATE: &str = "bitcoin_vaults_last_update";
 // }
 
 pub async fn sync_btc_blocks(relayer: &Relayer) {
+    if !is_trusted_btc_relayer(relayer, &relayer.config().relayer_bitcoin_address()).await {
+        return;
+    }
+
     let interval = relayer.config().loop_interval;
 
     let tip_on_bitcoin = match relayer.bitcoin_client.get_block_count() {
@@ -565,6 +569,31 @@ async fn get_cached_vaults(relayer: &Relayer) -> Vec<String> {
         }
         None => vec![]
     }
+}
+
+async fn is_trusted_btc_relayer(relayer: &Relayer, sender: &String) -> bool {
+    let grpc = relayer.config().side_chain.grpc.clone();
+    let mut client = match cosmos_sdk_proto::side::btcbridge::query_client::QueryClient::connect(grpc).await {
+        Ok(client) => client,
+        Err(_) => {
+            return false;
+        }
+    };
+
+    let res = match client.query_params(QueryParamsRequest{}).await {
+        Ok(res) => res.into_inner(),
+        Err(_) => {
+            return false;
+        }
+    };
+
+    match res.params {
+        Some(params) => {
+            let trusted_btc_relayers = params.trusted_btc_relayers;
+            return trusted_btc_relayers.is_empty() || trusted_btc_relayers.contains(sender)
+        }
+        None => return false
+    };
 }
 
 pub async fn submit_fee_rate(relayer: &Relayer) {
