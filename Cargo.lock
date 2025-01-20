@@ -1310,7 +1310,7 @@ dependencies = [
 [[package]]
 name = "cosmos-sdk-proto"
 version = "0.23.0-pre"
-source = "git+https://github.com/sideprotocol/cosmos-rust?branch=main#11a525e17fddf81a07bb798345cf19fe7ebb58cb"
+source = "git+https://github.com/sideprotocol/cosmos-rust?branch=main#3b7b5cce1ead4f7a987bd88e575e2022809c4221"
 dependencies = [
  "prost",
  "prost-types",
@@ -1321,7 +1321,7 @@ dependencies = [
 [[package]]
 name = "cosmrs"
 version = "0.18.0-pre"
-source = "git+https://github.com/sideprotocol/cosmos-rust?branch=main#11a525e17fddf81a07bb798345cf19fe7ebb58cb"
+source = "git+https://github.com/sideprotocol/cosmos-rust?branch=main#3b7b5cce1ead4f7a987bd88e575e2022809c4221"
 dependencies = [
  "bip32",
  "cosmos-sdk-proto",
@@ -4684,7 +4684,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "157c5a9d7ea5c2ed2d9fb8f495b64759f7816c7eaea54ba3978f0d63000162e3"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.93",
