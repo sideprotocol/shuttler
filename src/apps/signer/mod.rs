@@ -90,11 +90,17 @@ impl Signer {
         let identifier = pubkey_to_identifier(local_key.public_key().as_slice());
         info!("Threshold Signature Identifier: {:?}", identifier);
 
+        let auth = if !conf.bitcoin.user.is_empty() {
+            Auth::UserPass(conf.bitcoin.user.clone(), conf.bitcoin.password.clone())
+        } else {
+            Auth::None
+        };
+
         let bitcoin_client = Client::new(
             &conf.bitcoin.rpc,
-            Auth::UserPass(conf.bitcoin.user.clone(), conf.bitcoin.password.clone()),
+            auth,
         )
-        .expect("Could not initial bitcoin RPC client");
+        .expect("Could not initialize bitcoin RPC client");
 
         let db_sign = sled::open(conf.get_database_with_name("sign-task"))
             .expect("Counld not create database!");
