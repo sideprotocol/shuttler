@@ -71,10 +71,10 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
     debug!("Syncing blocks from {} to {}", tip_on_side, batch);
 
     // check reorg before syncing blocks
-    let confirmations = client_side::get_confirmations_on_side(&relayer.config().side_chain.grpc).await;
-    for n in 1..=confirmations {
-        if check_reorg(&relayer, tip_on_side + n - confirmations).await {
-            handle_reorg(relayer, tip_on_side + n - confirmations, tip_on_side).await;
+    let max_depth = client_side::get_max_reorg_depth(&relayer.config().side_chain.grpc).await;
+    for n in 1..=max_depth {
+        if check_reorg(&relayer, tip_on_side + n - max_depth).await {
+            handle_reorg(relayer, tip_on_side + n - max_depth, tip_on_side).await;
         }
     }
 
@@ -234,7 +234,7 @@ pub async fn scan_vault_txs(relayer: &Relayer) {
             }
         };
 
-    let confirmations = client_side::get_confirmations_on_side(&relayer.config().side_chain.grpc).await;
+    let confirmations = client_side::get_confirmation_depth(&relayer.config().side_chain.grpc).await;
     if height > side_tip - confirmations + 1 {
         debug!("No new txs to sync, height: {}, side tip: {}, sleep for {} seconds...", height, side_tip, interval);
         return;
@@ -273,12 +273,25 @@ pub async fn scan_vault_txs_by_height(relayer: &Relayer, height: u64) -> bool {
             i
         );
 
-        if !check_and_handle_tx(relayer, &block_hash, &block, tx, i, &vaults).await {
-            return false;
-        }
+        check_and_handle_tx_with_retry(relayer, &block_hash, &block, tx, i, &vaults).await;
     }
 
     return true;
+}
+
+pub async fn check_and_handle_tx_with_retry(relayer: &Relayer, block_hash: &BlockHash, block: &Block, tx: &Transaction, index: usize, vaults: &Vec<String>) {
+    let mut attempts = 0;
+
+    loop {
+        if check_and_handle_tx(relayer, &block_hash, &block, tx, index, &vaults).await {
+            return;
+        }
+
+        attempts += 1;
+        if attempts >= relayer.config.max_attempts {
+            return;
+        }
+    }
 }
 
 pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, block: &Block, tx: &Transaction, index: usize, vaults: &Vec<String>) -> bool {

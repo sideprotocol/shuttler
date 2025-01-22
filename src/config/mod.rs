@@ -47,6 +47,8 @@ pub struct Config {
 
     pub loop_interval: u64,
     pub batch_relayer_count: u64,
+
+    pub max_attempts: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -255,6 +257,7 @@ impl Config {
             last_scanned_height: 0,
             loop_interval: 60,
             batch_relayer_count: 10,
+            max_attempts: 5,
         }
     }
 
