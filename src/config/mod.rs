@@ -216,7 +216,7 @@ impl Config {
         let bitcoin = if network == Network::Bitcoin {
             BitcoinCfg {
                 network,
-                rpc: "http://127.0.0.1:8332".to_string(),
+                rpc: "".to_string(),
                 user: "<rpc_user_name>".to_string(),
                 password: "<rpc_user_password>".to_string(),
             }
