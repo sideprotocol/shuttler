@@ -15,7 +15,7 @@ pub mod tick;
 pub struct Relayer {
     enabled: bool,
     config: Config,
-    pub bitcoin_client: Client,
+    pub bitcoin_client: Option<Client>,
     pub ordinals_client: OrdinalsClient,
     pub fee_provider_client: FeeProviderClient,
     pub db_relayer: sled::Db,
@@ -53,10 +53,11 @@ impl Relayer {
             Auth::None
         };
 
-        let bitcoin_client = Client::new(
-            &conf.bitcoin.rpc, 
-            auth,
-        ).expect("Could not initial bitcoin RPC client");
+        let bitcoin_client = if conf.bitcoin.rpc.len() > 0 {
+            Some(Client::new(&conf.bitcoin.rpc, auth ).expect("Could not initial bitcoin RPC client"))
+        } else {
+            None
+        };
 
         let ordinals_client = OrdinalsClient::new(&conf.ordinals.endpoint);
         let fee_provider_client = FeeProviderClient::new(&conf.fee_provider);

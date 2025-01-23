@@ -191,9 +191,7 @@ impl Shuttler {
                         // debug!("Swarm event: {:?}", swarm_event);
                     },
                 },
-                _ = self.relayer.tick(), if self.relayer.enabled() => {
-                    self.relayer.on_tick(&mut context).await;
-                },
+
                 _ = self.oracle.tick(), if self.oracle.enabled() => {
                     self.oracle.on_tick(&mut context).await;
                 },
@@ -320,4 +318,3 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<ShuttlerBehaviour>, conf: &Config) {
         }
     }
 }
-

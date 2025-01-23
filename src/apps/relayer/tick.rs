@@ -1,5 +1,5 @@
 use bitcoin::{consensus::encode, Address, Block, BlockHash, OutPoint, Transaction, Txid};
-use bitcoincore_rpc::{Error, RpcApi};
+use bitcoincore_rpc::{jsonrpc::error::Error as RpcError, Error, RpcApi};
 use prost_types::Any;
 use tonic::{Response, Status};
 use tracing::{debug, error, info};
@@ -38,7 +38,12 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
 
     let interval = relayer.config().loop_interval;
 
-    let tip_on_bitcoin = match relayer.bitcoin_client.get_block_count() {
+    let client = match &relayer.bitcoin_client {
+        Some(c) => c,
+        None => return,
+    };
+
+    let tip_on_bitcoin = match client.get_block_count() {
         Ok(height) => height,
         Err(e) => {
             error!(error=%e);
@@ -112,7 +117,12 @@ pub async fn sync_btc_blocks(relayer: &Relayer) {
 }
 
 pub async fn fetch_block_header_by_height(relayer: &Relayer, height: u64) -> Result<BlockHeader, Error> {
-    let hash = match relayer.bitcoin_client.get_block_hash(height) {
+    let client = match &relayer.bitcoin_client {
+        Some(c) => c,
+        None => return Err(Error::JsonRpc(RpcError::EmptyBatch)),
+    };
+
+    let hash = match client.get_block_hash(height) {
         Ok(hash) => hash,
         Err(e) => {
             error!(error=%e);
@@ -120,7 +130,7 @@ pub async fn fetch_block_header_by_height(relayer: &Relayer, height: u64) -> Res
         }
     };
 
-    let header = match relayer.bitcoin_client.get_block_header(&hash) {
+    let header = match client.get_block_header(&hash) {
         Ok(b) => b,
         Err(e) => {
             error!(error=%e);
@@ -142,7 +152,13 @@ pub async fn fetch_block_header_by_height(relayer: &Relayer, height: u64) -> Res
 }
 
 pub async fn check_reorg(relayer: &Relayer, height: u64) -> bool {
-    let bitcoin_hash = match relayer.bitcoin_client.get_block_hash(height) {
+
+    let client = match &relayer.bitcoin_client {
+        Some(c) => c,
+        None => return false,
+    };
+
+    let bitcoin_hash = match client.get_block_hash(height) {
         Ok(hash) => hash.to_string(),
         Err(e) => {
             error!(error=%e);
@@ -165,8 +181,13 @@ pub async fn check_reorg(relayer: &Relayer, height: u64) -> bool {
 pub async fn handle_reorg(relayer: &Relayer, height: u64, side_tip: u64) {
     let mut block_headers: Vec<BlockHeader> = vec![];
 
+    let client = match &relayer.bitcoin_client {
+        Some(c) => c,
+        None => return,
+    };
+
     for h in height..=side_tip+1 {
-        let hash = match relayer.bitcoin_client.get_block_hash(h) {
+        let hash = match client.get_block_hash(h) {
             Ok(hash) => hash,
             Err(e) => {
                 error!(error=%e);
@@ -174,7 +195,7 @@ pub async fn handle_reorg(relayer: &Relayer, height: u64, side_tip: u64) {
             }
         };
 
-        let header = match relayer.bitcoin_client.get_block_header(&hash) {
+        let header = match client.get_block_header(&hash) {
             Ok(b) => b,
             Err(e) => {
                 error!(error=%e);
@@ -247,7 +268,11 @@ pub async fn scan_vault_txs(relayer: &Relayer) {
 }
 
 pub async fn scan_vault_txs_by_height(relayer: &Relayer, height: u64) -> bool {
-    let block_hash = match relayer.bitcoin_client.get_block_hash(height) {
+    let client = match &relayer.bitcoin_client {
+        Some(c) => c,
+        None => return false,
+    };
+    let block_hash = match client.get_block_hash(height) {
         Ok(hash) => hash,
         Err(e) => {
             error!("Failed to get block hash: {:?}, err: {:?}", height, e);
@@ -255,7 +280,7 @@ pub async fn scan_vault_txs_by_height(relayer: &Relayer, height: u64) -> bool {
         }
     };
 
-    let block = match relayer.bitcoin_client.get_block(&block_hash) {
+    let block = match client.get_block(&block_hash) {
         Ok(block) => block,
         Err(e) => {
             error!("Failed to get block: {}, err: {}", height, e);
@@ -296,13 +321,15 @@ pub async fn check_and_handle_tx_with_retry(relayer: &Relayer, block_hash: &Bloc
 
 pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, block: &Block, tx: &Transaction, index: usize, vaults: &Vec<String>) -> bool {
     if bitcoin_utils::may_be_withdraw_tx(&tx) {
+        let client = match &relayer.bitcoin_client {
+            Some(c) => c,
+            None => return false,
+        };
+
         let prev_txid = tx.input[0].previous_output.txid;
         let prev_vout = tx.input[0].previous_output.vout;
 
-        let address = match relayer
-            .bitcoin_client
-            .get_raw_transaction (&prev_txid, None)
-        {
+        let address = match client.get_raw_transaction (&prev_txid, None) {
             Ok(prev_tx) => {
                 if prev_tx.output.len() <= prev_vout as usize {
                     error!("Invalid previous tx");
@@ -415,12 +442,12 @@ pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, bloc
             block.txdata.iter().map(|tx| tx.compute_txid()).collect(),
             index,
         );
-
+        let client = match &relayer.bitcoin_client {
+            Some(c) => c,
+            None => return false,
+        };
         let prev_txid = tx.input[0].previous_output.txid;
-        let prev_tx = match relayer
-            .bitcoin_client
-            .get_raw_transaction(&prev_txid, None)
-        {
+        let prev_tx = match client.get_raw_transaction(&prev_txid, None) {
             Ok(prev_tx) => prev_tx,
             Err(e) => {
                 error!(
@@ -454,10 +481,12 @@ pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, bloc
 }
 
 pub async fn check_and_handle_tx_by_hash(relayer: &Relayer, hash: &Txid) {
-    let tx_info = match relayer
-        .bitcoin_client
-        .get_raw_transaction_info(&hash, None)
-    {
+    let client = match &relayer.bitcoin_client {
+        Some(c) => c,
+        None => return,
+    };
+
+    let tx_info = match client.get_raw_transaction_info(&hash, None) {
         Ok(tx_info) => tx_info,
         Err(e) => {
             error!(
@@ -488,8 +517,11 @@ pub async fn check_and_handle_tx_by_hash(relayer: &Relayer, hash: &Txid) {
             return;
         }
     };
-
-    let block = match relayer.bitcoin_client.get_block(&block_hash) {
+    let client = match &relayer.bitcoin_client {
+        Some(c) => c,
+        None => return,
+    };
+    let block = match client.get_block(&block_hash) {
         Ok(block) => block,
         Err(e) => {
             error!("Failed to get block: {}, err: {}", &block_hash, e);
