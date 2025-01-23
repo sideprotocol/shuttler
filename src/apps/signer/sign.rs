@@ -603,15 +603,16 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
             None => return,
         };
     };
-    match signer.bitcoin_client.send_raw_transaction(&signed_tx) {
-        Ok(txid) => {
-            info!("PSBT broadcasted to Bitcoin: {}", txid);
-        }
-        Err(err) => {
-            error! ("Failed to broadcast PSBT: {:?}, err: {:?}", signed_tx.compute_txid(), err);
-            // return;
-        }
-    }
+    
+    // match signer.bitcoin_client.send_raw_transaction(&signed_tx) {
+    //     Ok(txid) => {
+    //         info!("PSBT broadcasted to Bitcoin: {}", txid);
+    //     }
+    //     Err(err) => {
+    //         error! ("Failed to broadcast PSBT: {:?}, err: {:?}", signed_tx.compute_txid(), err);
+    //         // return;
+    //     }
+    // }
 
     let psbt_bytes = psbt.serialize();
     let psbt_base64 = to_base64(&psbt_bytes);
