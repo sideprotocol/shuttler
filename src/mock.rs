@@ -6,7 +6,7 @@ use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountResponse}
 use cosmos_sdk_proto::cosmos::base::abci::v1beta1::TxResponse;
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::{GetLatestValidatorSetResponse, Validator};
 use cosmos_sdk_proto::side::btcbridge::query_server::Query;
-use cosmos_sdk_proto::side::btcbridge::{DkgParticipant, DkgRequest, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsResponse, QuerySigningRequestsResponse, SigningRequest};
+use cosmos_sdk_proto::side::btcbridge::{DkgParticipant, DkgRequest, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsResponse, QuerySigningRequestResponse, QuerySigningRequestsResponse, SigningRequest};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_server::Query as AuthService;
 use cosmos_sdk_proto::cosmos::tx::v1beta1::service_server::Service as TxService;
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_server::Service as BlockService;
@@ -150,6 +150,25 @@ fn mock_psbt(home: &str, tx_num: u32, tx_bytes: &Vec<u8>) {
             }
         })
     }
+}
+
+// mock signing request
+async fn mock_signing_request() -> Result<tonic::Response<QuerySigningRequestResponse>, tonic::Status> {
+    let request = SigningRequest {
+        address: "".to_string(),
+        sequence: 1,
+        r#type: 1 as i32,
+        txid: "".to_string(),
+        psbt: "".to_string(),
+        status: 2 as i32,
+        creation_time: Some(Timestamp {
+            seconds: now() as i64,
+            nanos: 0,
+        })
+    };
+
+    let res: QuerySigningRequestResponse = QuerySigningRequestResponse { request: Some(request)};
+    Ok(tonic::Response::new(res))
 }
 
 // 1. signing requests
@@ -326,6 +345,14 @@ fn query_withdraw_requests_by_tx_hash<'life0,'async_trait>(&'life0 self,_request
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
 fn query_pending_btc_withdraw_requests<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QueryPendingBtcWithdrawRequestsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QueryPendingBtcWithdrawRequestsResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
+    }
+
+    #[must_use]
+#[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
+fn query_signing_request<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QuerySigningRequestRequest> ,) ->  
+    ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QuerySigningRequestResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+        let x = mock_signing_request();
+        Box::pin(x)
     }
 
     #[must_use]
