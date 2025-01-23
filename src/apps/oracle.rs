@@ -11,7 +11,7 @@ pub struct Oracle {
 }
 
 impl Oracle {
-    pub fn new(conf: Config, enabled: bool) -> Self {
+    pub fn new(conf: Config, _enabled: bool) -> Self {
         Self {
             config: conf,
         }

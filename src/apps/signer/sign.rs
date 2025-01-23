@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use bitcoin::{sighash::{self, SighashCache}, Address, Psbt, TapSighashType, Witness};
 use bitcoin_hashes::Hash;
-use bitcoincore_rpc::RpcApi;
 use cosmos_sdk_proto::side::btcbridge::{MsgSubmitSignatures, SigningRequest, SigningStatus};
 use cosmrs::Any;
 
@@ -603,7 +602,7 @@ pub async fn submit_signatures(psbt: Psbt, signer: &Signer) {
             None => return,
         };
     };
-    
+
     // match signer.bitcoin_client.send_raw_transaction(&signed_tx) {
     //     Ok(txid) => {
     //         info!("PSBT broadcasted to Bitcoin: {}", txid);

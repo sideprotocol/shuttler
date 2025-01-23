@@ -23,7 +23,6 @@ use crate::config::{self, Config, TASK_INTERVAL};
 use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::encoding::{identifier_to_peer_id, pubkey_to_identifier};
 use crate::helper::gossip::{publish_message, SubscribeTopic};
-use crate::helper::mem_store;
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -64,7 +63,7 @@ pub struct Signer {
     /// Identifier is derived from the public key of the identity key
     /// used to identify the signer in the threshold signature scheme
     identifier: Identifier,
-    pub bitcoin_client: Client,
+    pub bitcoin_client: Option<Client>,
     db_sign_variables: sled::Db,
     db_sign: sled::Db,
     db_dkg: sled::Db,
@@ -96,11 +95,12 @@ impl Signer {
             Auth::None
         };
 
-        let bitcoin_client = Client::new(
-            &conf.bitcoin.rpc,
-            auth,
-        )
-        .expect("Could not initialize bitcoin RPC client");
+        let bitcoin_client = if conf.bitcoin.rpc.len() > 0 {
+            Some(Client::new(&conf.bitcoin.rpc, auth ).expect("Could not initialize bitcoin RPC client"))
+        } else {
+            None
+        };
+
 
         let db_sign = sled::open(conf.get_database_with_name("sign-task"))
             .expect("Counld not create database!");
