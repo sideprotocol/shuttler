@@ -182,6 +182,7 @@ async fn load_signing_requests(home: &str) -> Result<tonic::Response<QuerySignin
         SigningRequest { 
             address: i.address.clone(), 
             sequence: i.sequence, 
+            r#type: 1 as i32,
             txid: i.txid.clone(), 
             psbt: i.psbt.clone(), 
             status: i.status,
