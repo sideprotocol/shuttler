@@ -31,7 +31,7 @@ impl App for Relayer {
     fn subscribe_topics(&self) -> Vec<IdentTopic> {
         vec![]
     }
-    fn on_event(&self, ctx: &mut Context, event: &Vec<tendermint::abci::Event>) {
+    fn on_event(&self, _ctx: &mut Context, _event: &Vec<tendermint::abci::Event>) {
         
     }
 }

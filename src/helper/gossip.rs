@@ -47,31 +47,6 @@ pub fn subscribe_gossip_topics(swarm: &mut Swarm<ShuttlerBehaviour>, app: &Shutt
 
 pub fn sending_heart_beat(ctx: &mut Context, block_height: u64) {
 
-        // let mut client = match BlockService::connect(ctx.conf.side_chain.grpc.clone()).await {
-        //     Ok(c) => c,
-        //     Err(e) => {
-        //         tracing::error!("{}", e);
-        //         return;
-        //     },
-        // };
-        // let block = match client.get_latest_block(GetLatestBlockRequest{}).await {
-        //     Ok(res) => res.into_inner().block,
-        //     Err(e) => {
-        //         tracing::error!("{}", e);
-        //         return;
-        //     },
-        // };
-
-        // tracing::debug!("block: {:?}", block);
-
-        // let block_height = match block {
-        //     Some(b) => match b.header {
-        //         Some(h) => h.height,
-        //         None => return,
-        //     }
-        //     None => return,
-        // };
-
         let last_seen = now() + mem_store::HEART_BEAT_WINDOW;
         let payload = HeartBeatPayload {
             identifier: ctx.identifier.clone(),
