@@ -1,19 +1,23 @@
-use bitcoin::{consensus::encode, Address, Block, BlockHash, OutPoint, Transaction, Txid};
+use std::sync::{atomic::{AtomicU64, Ordering}, LazyLock};
+
+use bitcoin::{consensus::encode, Address, Block, BlockHash, OutPoint, Psbt, Transaction, Txid};
 use bitcoincore_rpc::{jsonrpc::error::Error as RpcError, Error, RpcApi};
 use prost_types::Any;
 use tonic::{Response, Status};
 use tracing::{debug, error, info};
 
+use cosmos_sdk_proto::{cosmos::base::query::v1beta1::PageRequest, side::btcbridge::{query_client::QueryClient as BridgeQueryClient, QuerySigningRequestRequest, QuerySigningRequestsRequest}};
+
 use crate::{
     apps::relayer::Relayer,
     helper::{
-        bitcoin::{self as bitcoin_utils}, client_side::{self, send_cosmos_transaction}, encoding::to_base64, 
+        bitcoin::{self as bitcoin_utils}, client_side::{self, send_cosmos_transaction}, encoding::{from_base64, to_base64}, 
     },
 };
 
 use cosmos_sdk_proto::{
     cosmos::tx::v1beta1::BroadcastTxResponse,
-    side::btcbridge::{BlockHeader, MsgSubmitBlockHeaders, MsgSubmitDepositTransaction, MsgSubmitFeeRate, MsgSubmitWithdrawTransaction, QueryParamsRequest},
+    side::btcbridge::{BlockHeader, MsgSubmitBlockHeaders, MsgSubmitDepositTransaction, MsgSubmitFeeRate, MsgSubmitWithdrawTransaction, QueryParamsRequest, SigningStatus},
 };
 
 const DB_KEY_BITCOIN_TIP: &str = "bitcoin_tip";
@@ -30,6 +34,95 @@ const DB_KEY_VAULTS_LAST_UPDATE: &str = "bitcoin_vaults_last_update";
 //         submit_fee_rate_loop(&relayer),
 //     );
 // }
+
+static SEQUENCE: LazyLock<AtomicU64> = LazyLock::new(|| AtomicU64::new(0));
+
+
+pub async fn sync_signed_transactions(relayer: &Relayer) {
+
+    let host = relayer.config().side_chain.grpc.as_str();
+
+    let bitcoin_client = match &relayer.bitcoin_client {
+        Some(c) => c,
+        None => return,
+    };
+
+    let mut bridge_client = match BridgeQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(_) => {
+            return;
+        }
+    };
+
+
+    if SEQUENCE.load(Ordering::SeqCst) == 0 {
+        let x = bridge_client.query_signing_requests(QuerySigningRequestsRequest {
+            status: SigningStatus::Broadcasted as i32,
+            pagination: Some(PageRequest {
+                key: vec![],
+                offset: 0,
+                limit: 1,
+                count_total: false,
+                reverse: false,
+            }),
+        }).await;
+
+        let resp = match x {
+            Ok(r) => r.into_inner(),
+            Err(_) => return,
+        };
+
+        if resp.requests.len() == 0 { return } else {
+            let s = resp.requests[0].sequence;
+            if s >= 1 { 
+                // latest sequence on chain
+                SEQUENCE.fetch_add(s - 1, Ordering::SeqCst); 
+            };
+        }
+        
+    }
+
+    loop {
+        let sequence = SEQUENCE.fetch_add( 1, Ordering::SeqCst); 
+        let request = bridge_client.query_signing_request(QuerySigningRequestRequest {
+            sequence
+        }).await;
+
+        if let Ok(r) = request {
+
+            if let Some(sr) = r.into_inner().request {
+                if sr.status != SigningStatus::Broadcasted as i32 && sr.psbt.len() == 0{
+                    return
+                }
+
+                let psbt_bytes = from_base64(&sr.psbt).unwrap();
+                let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
+                    Ok(psbt) => psbt,
+                    Err(e) => {
+                        error!("Failed to deserialize PSBT: {}", e);
+                        continue;
+                    }
+                };
+
+                let signed_tx = psbt.clone().extract_tx().expect("failed to extract signed tx");
+
+                match bitcoin_client.send_raw_transaction(&signed_tx) {
+                    Ok(txid) => {
+                        info!("PSBT broadcasted to Bitcoin: {}", txid);
+                    }
+                    Err(err) => {
+                        error! ("Failed to broadcast PSBT: {:?}, err: {:?}", signed_tx.compute_txid(), err);
+                        // return;
+                    }
+                }
+            }
+            
+        } else {
+            return
+        }
+    }
+
+}
 
 pub async fn sync_btc_blocks(relayer: &Relayer) {
     if !is_trusted_btc_relayer(relayer, &relayer.config().relayer_bitcoin_address()).await {
