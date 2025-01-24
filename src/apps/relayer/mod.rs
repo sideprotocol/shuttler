@@ -24,7 +24,7 @@ pub struct Relayer {
 
 impl App for Relayer {
     fn on_message(&self, _ctx: &mut Context, _message: &SubscribeMessage) {
-        todo!()
+        // todo!()
     }
 
     fn enabled(&self) -> bool {
