@@ -50,14 +50,17 @@ impl Candidate {
 
         self.last_sync_time = now();
 
-        self.peers.clear();
+        // self.peers.clear();
         self.identifiers.clear();
 
         validators.iter().for_each(|v| {
             if let Some(k) = &v.pub_key {
                 let pub_key = PublicKey::try_from(k).unwrap();
                 let id = pubkey_to_identifier(&pub_key.to_bytes());
-                self.peers.push(identifier_to_peer_id(&id ));
+                let peer_id = identifier_to_peer_id(&id );
+                if !self.peers.contains(&peer_id) {
+                    self.peers.push(peer_id);
+                }
                 self.identifiers.push( id );
             }
         });
