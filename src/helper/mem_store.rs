@@ -26,13 +26,17 @@ lazy_static! {
     pub static ref TrustedPeers: Mutex<Vec<Identifier>> = {
         Mutex::new(Vec::new())
     };
+    pub static ref VALIDATOR_NAMES: Mutex<BTreeMap<Identifier, String>> = {
+        Mutex::new(BTreeMap::new())
+    };
+    
 }
 
 pub const ALIVE_WINDOW: u64 = TASK_INTERVAL.as_secs() * 2;
 pub const BLOCK_TOLERENCE: u64 = 5;
 
 pub fn update_alive_table(self_identifier: &Identifier, alive: HeartBeatMessage) {
-    tracing::debug!("{:?} {}, {} ", alive.payload.identifier, alive.payload.block_height, if alive.payload.last_seen > now() {alive.payload.last_seen - now()} else {0} );
+    tracing::debug!("{:?} {}, {} ", get_name(&alive.payload.identifier), alive.payload.block_height, if alive.payload.last_seen > now() {alive.payload.last_seen - now()} else {0} );
     if alive.payload.last_seen < now() { return }
 
     let mut table= AliveTable.lock().unwrap();
@@ -90,6 +94,16 @@ pub fn remove_dkg_round1_secret_packet(task_id: &str) {
 pub fn get_dkg_round2_secret_packet(task_id: &str) -> Option<dkg::round2::SecretPackage> {
     let map = DkgRound2SecretPacket.lock().unwrap();
     map.get(task_id).cloned()
+}
+
+pub fn add_name(id: Identifier, name: String) {
+    let mut map = VALIDATOR_NAMES.lock().unwrap();
+    map.insert(id, name);
+}
+
+pub fn get_name(id: &Identifier) -> String {
+    let map = VALIDATOR_NAMES.lock().unwrap();
+    map.get(id).unwrap_or(&format!("{:?}", id)).to_string()
 }
 
 pub fn set_dkg_round2_secret_packet(task_id: &str, secret_packet: dkg::round2::SecretPackage) {

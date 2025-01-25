@@ -91,7 +91,9 @@ async fn fetch_dkg_requests(signer: &Signer) {
                                     Ok(b) => b,
                                     Err(_) => return false,
                                 };
-                                !mem_store::is_peer_alive(&pubkey_to_identifier(&key_bytes))
+                                let id = pubkey_to_identifier(&key_bytes);
+                                mem_store::add_name(id.clone(), p.moniker.clone());
+                                !mem_store::is_peer_alive(&id)
                             }).map(|p| p.moniker.clone()).collect::<Vec<_>>();
             println!("Inactive Signer: {:?}", offchain);
             if request
