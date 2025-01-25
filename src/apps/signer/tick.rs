@@ -5,7 +5,7 @@ use tracing::{debug, error, info};
 
 use crate::{
     apps::{signer::{dkg::{generate_round1_package, DKGTask}, sign::save_task_into_signing_queue, Signer}, Context}, 
-    helper::{client_side::{get_signing_requests, send_cosmos_transaction}, encoding::{from_base64, pubkey_to_identifier}, gossip::sending_heart_beat}, 
+    helper::{client_side::{get_signing_requests, send_cosmos_transaction}, encoding::{from_base64, pubkey_to_identifier}, gossip::sending_heart_beat, mem_store}, 
 };
 
 use super::{dkg::sync_dkg_task_packages, sign::dispatch_executions, Round};
@@ -85,6 +85,15 @@ async fn fetch_dkg_requests(signer: &Signer) {
         });
 
         for request in requests {
+            let offchain = request.participants.iter()
+                            .filter(|p|{
+                                let key_bytes = match from_base64(&p.consensus_pubkey) {
+                                    Ok(b) => b,
+                                    Err(_) => return false,
+                                };
+                                !mem_store::is_peer_alive(&pubkey_to_identifier(&key_bytes))
+                            }).map(|p| p.moniker.clone()).collect::<Vec<_>>();
+            println!("Inactive Signer: {:?}", offchain);
             if request
                 .participants
                 .iter()
