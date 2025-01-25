@@ -286,7 +286,7 @@ fn update_heartbeat(self_identifier: &Identifier, message: &SubscribeMessage) {
     if message.topic == SubscribeTopic::HEARTBEAT.topic().hash() {
         if let Ok(alive) = serde_json::from_slice::<HeartBeatMessage>(&message.data) {
             if let Some(s) = message.source {
-                let msg_sender = identifier_to_peer_id(&alive.payload.identifier)
+                let msg_sender = identifier_to_peer_id(&alive.payload.identifier);
                 debug!("{:?}, {:?}", s, msg_sender);
             }
             // Ensure the message is not forged.

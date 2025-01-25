@@ -65,7 +65,7 @@ pub async fn sending_heart_beat(ctx: &mut Context, signer: &Signer) {
             },
         };
 
-        tracing::debug!("block: {:?}", block);
+        // tracing::debug!("block: {:?}", block);
 
         let block_height = match block {
             Some(b) => match b.header {
