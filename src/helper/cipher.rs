@@ -1,7 +1,10 @@
 //! Cipher
+use std::hash::{DefaultHasher, Hasher};
+
 use chacha20poly1305::{
     aead::Aead, ChaCha20Poly1305, KeyInit, Nonce
 };
+use frost_secp256k1_tr::Identifier;
 use rand::RngCore;
 use rand_core::OsRng;
 
@@ -25,6 +28,12 @@ pub fn decrypt(data: &[u8], secret: &[u8; 32]) -> Vec<u8> {
     let text = cipher.decrypt(nonce, data).expect("decryption failure!");
     // println!("{:?}", text);
     return text;
+}
+
+pub fn footprint(p: &Vec<Identifier>) -> String {
+    let mut dh = DefaultHasher::new();
+    p.iter().for_each(|i| dh.write(&i.serialize()));
+    format!("{:x}", dh.finish())
 }
 
 #[test]

@@ -17,7 +17,7 @@ use crate::{
     },
     config::{candidate::Candidate, Config},
     helper::{
-        encoding::pubkey_to_identifier,
+        encoding::{identifier_to_peer_id, pubkey_to_identifier},
         gossip::{subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store,
     },
 };
@@ -285,6 +285,10 @@ fn dispatch_messages<T: App>(app: &T, context: &mut Context,  message: &Subscrib
 fn update_heartbeat(self_identifier: &Identifier, message: &SubscribeMessage) {
     if message.topic == SubscribeTopic::HEARTBEAT.topic().hash() {
         if let Ok(alive) = serde_json::from_slice::<HeartBeatMessage>(&message.data) {
+            if let Some(s) = message.source {
+                let msg_sender = identifier_to_peer_id(&alive.payload.identifier)
+                debug!("{:?}, {:?}", s, msg_sender);
+            }
             // Ensure the message is not forged.
             match PublicKey::from_slice(&alive.payload.identifier.serialize()) {
                 Ok(public_key) => {

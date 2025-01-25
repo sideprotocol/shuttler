@@ -16,7 +16,7 @@ use frost_secp256k1_tr::{self as frost, round1::{SigningCommitments, SigningNonc
 use crate::{
     apps::{signer::Signer, Context}, config::TASK_INTERVAL,
     helper::{
-        client_side::{get_signing_request_by_txid, send_cosmos_transaction}, encoding::{from_base64, to_base64}, mem_store, now
+        cipher::footprint, client_side::{get_signing_request_by_txid, send_cosmos_transaction}, encoding::{from_base64, to_base64}, mem_store, now
     },
 };
 
@@ -42,6 +42,7 @@ pub struct SignResponse {
 pub struct SignMesage {
     pub task_id: String,
     pub package: SignPackage,
+    pub footprint: String,
     pub nonce: u64,
     pub sender: Identifier,
     pub signature: Vec<u8>,
@@ -69,7 +70,8 @@ pub struct SignTask {
     pub is_signature_submitted: bool,
     pub start_time: u64,
     pub retry: u64,
-    pub participants: Vec<Identifier>
+    pub participants: Vec<Identifier>,
+    pub footprint: String,
 }
 
 impl SignTask {
@@ -87,6 +89,7 @@ impl SignTask {
             start_time,
             retry: 0,
             participants: vec![],
+            footprint: "".to_string(),
         }
     }
 }
@@ -122,20 +125,10 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
         .map(|input| input.witness_utxo.clone().unwrap())
         .collect::<Vec<_>>();
 
-    let participants = mem_store::count_task_participants();
-
-    debug!("participants: {:?}", participants);
-
     psbt.inputs.iter().enumerate().for_each(|(i, input)| {
 
         let script = input.witness_utxo.clone().unwrap().script_pubkey;
         let address: Address = Address::from_script(&script, signer.config().bitcoin.network).unwrap();
-
-        // check if there are sufficient participants for this tasks
-        match signer.get_keypair_from_db(&address.to_string()) {
-            Some(k) => if participants.len() < k.priv_key.min_signers().clone() as usize { return },
-            None => return,
-        };
 
         // get the message to sign
         let hash_ty = input
@@ -170,8 +163,25 @@ pub fn save_task_into_signing_queue(request: SigningRequest, signer: &Signer) {
     }
 
     let mut task = SignTask::new(task_id, request.psbt, inputs, request.creation_time);
+    let address = match task.inputs.get(&0) {
+        Some(i) => i.address.clone(),
+        None => return,
+    };
 
+    let vk = match signer.get_keypair_from_db(&address) {
+        Some(k) => k,
+        None => return,
+    };
+
+    let mut participants = vk.pub_key.verifying_shares().keys().cloned().collect::<Vec<_>>();
+    participants.retain(|p| mem_store::is_peer_alive(p));
+
+
+    if participants.len() < vk.priv_key.min_signers().clone().into() { return }
+
+    task.footprint = footprint(&participants);
     task.participants = participants;
+    
     signer.save_signing_task(&task);
 
 }
@@ -226,6 +236,22 @@ pub async fn dispatch_executions(ctx: &mut Context, signer: &Signer) {
             },
             Status::RESET => {
                 task.status = Status::WIP;
+
+                let address = match task.inputs.get(&0) {
+                    Some(i) => i.address.clone(),
+                    None => return,
+                };
+
+                let vk = match signer.get_keypair_from_db(&address) {
+                    Some(k) => k,
+                    None => return,
+                };
+
+                let mut participants = vk.pub_key.verifying_shares().keys().cloned().collect::<Vec<_>>();
+                participants.retain(|p| mem_store::is_peer_alive(p));
+                task.footprint = footprint(&participants);
+                task.participants = participants;
+
                 signer.save_signing_task(&task);
                 generate_commitments(ctx, signer, &mut task);
             },
@@ -271,7 +297,8 @@ fn generate_commitments(ctx: &mut Context, signer: &Signer, task: &SignTask) {
         package: SignPackage::Round1(commitments),
         nonce: now(),
         sender: signer.identifier().clone(),
-        signature: vec![], 
+        signature: vec![],
+        footprint: task.footprint.clone(), 
     };
     broadcast_signing_packages(ctx, signer, &mut msg);
 
@@ -455,6 +482,7 @@ pub fn try_generate_signature_shares(ctx: &mut Context, signer: &Signer, task_id
         task_id: task.id.clone(),
         package: SignPackage::Round2(broadcast_packages),
         nonce: now(),
+        footprint: footprint(&task.participants),
         sender: signer.identifier().clone(),
         signature: vec![],
     };
