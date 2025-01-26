@@ -153,21 +153,36 @@ fn mock_psbt(home: &str, tx_num: u32, tx_bytes: &Vec<u8>) {
 }
 
 // mock signing request
-async fn mock_signing_request() -> Result<tonic::Response<QuerySigningRequestResponse>, tonic::Status> {
-    let request = SigningRequest {
-        address: "".to_string(),
-        sequence: 1,
-        r#type: 1 as i32,
-        txid: "".to_string(),
-        psbt: "".to_string(),
-        status: 2 as i32,
-        creation_time: Some(Timestamp {
-            seconds: now() as i64,
-            nanos: 0,
+async fn mock_signing_request(home: &str) -> Result<tonic::Response<QuerySigningRequestResponse>, tonic::Status> {
+    // let mut path = PathBuf::new();
+    // path.push(home);
+    // path.push("mock");
+    // path.push(SINGING_FILE_NAME);
+
+    println!("response: {home}");
+
+    let mut path_2 = PathBuf::new();
+    path_2.push(home);
+    path_2.push(VAULT_FILE_NAME);
+    let request = if let Ok(address) = fs::read_to_string(path_2) {
+        let (txid, psbt) = generate_mock_psbt(&address, Some(1));
+        Some(SigningRequest { 
+            address: address.clone(), 
+            sequence: 1u64, 
+            r#type: 1i32,
+            txid, 
+            psbt, 
+            status: 2i32,
+            creation_time: Some(Timestamp {
+                seconds: now() as i64,
+                nanos: 0,
+            }) 
         })
+    } else {
+        None
     };
 
-    let res: QuerySigningRequestResponse = QuerySigningRequestResponse { request: Some(request)};
+    let res: QuerySigningRequestResponse = QuerySigningRequestResponse { request };
     Ok(tonic::Response::new(res))
 }
 
@@ -351,7 +366,7 @@ fn query_pending_btc_withdraw_requests<'life0,'async_trait>(&'life0 self,_reques
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
 fn query_signing_request<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QuerySigningRequestRequest> ,) ->  
     ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QuerySigningRequestResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
-        let x = mock_signing_request();
+        let x = mock_signing_request(&self.home.as_str());
         Box::pin(x)
     }
 
