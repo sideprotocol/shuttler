@@ -62,7 +62,9 @@ impl Candidate {
         });
         // println!("Top50: {:?}", validators);
 
-        validators[0..50].iter().for_each(|v| {
+        let candidate_num = std::cmp::min(validators.len(), 50);
+
+        validators[0..candidate_num].iter().for_each(|v| {
             if let Some(k) = &v.pub_key {
                 let pub_key = PublicKey::try_from(k).unwrap();
                 let id = pubkey_to_identifier(&pub_key.to_bytes());
