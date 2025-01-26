@@ -60,7 +60,7 @@ impl Candidate {
                 return Ordering::Less;
             }
         });
-        println!("Top50: {:?}", validators);
+        // println!("Top50: {:?}", validators);
 
         validators[0..50].iter().for_each(|v| {
             if let Some(k) = &v.pub_key {
