@@ -17,13 +17,12 @@ pub async fn tasks_executor(ctx: &mut Context, signer: &Signer ) {
     }
 
     // 1. dkg tasks
-    if ctx.last_dkg_time + 1800 <= now() {
+    if ctx.last_dkg_time + 600 <= now() {
         sync_dkg_task_packages(ctx, signer);
         submit_dkg_address(signer).await;
         fetch_dkg_requests(signer).await;    
         ctx.last_dkg_time = now();
     }
-
     // 2 signing tasks
     dispatch_executions(ctx, signer).await;
     // fetch request for next execution
@@ -98,7 +97,10 @@ async fn fetch_dkg_requests(signer: &Signer) {
                                 mem_store::add_name(id.clone(), p.moniker.clone());
                                 !mem_store::is_peer_alive(&id)
                             }).map(|p| p.moniker.clone()).collect::<Vec<_>>();
-            println!("Inactive Signer: {:?}", offchain);
+            if offchain.len() > 0 {
+                println!("Waiting:{:?} {} to be ready.", offchain, offchain.len());
+                continue;
+            }
             if request
                 .participants
                 .iter()
