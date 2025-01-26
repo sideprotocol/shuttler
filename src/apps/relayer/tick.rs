@@ -1,6 +1,6 @@
 use std::sync::{atomic::{AtomicU64, Ordering}, LazyLock};
 
-use bitcoin::{consensus::encode, Address, Block, BlockHash, OutPoint, Psbt, Transaction, Txid};
+use bitcoin::{consensus::encode, hex::error, Address, Block, BlockHash, OutPoint, Psbt, Transaction, Txid};
 use bitcoincore_rpc::{jsonrpc::error::Error as RpcError, Error, RpcApi};
 use prost_types::Any;
 use tonic::{Response, Status};
@@ -44,18 +44,22 @@ pub async fn sync_signed_transactions(relayer: &Relayer) {
 
     let bitcoin_client = match &relayer.bitcoin_client {
         Some(c) => c,
-        None => return,
+        None => {
+            error!("Haven't set bitcoin RPC endpoint");
+            return
+        },
     };
 
     let mut bridge_client = match BridgeQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
-        Err(_) => {
+        Err(e) => {
+            error!("Error: {:?}", e);
             return;
         }
     };
 
+    if SEQUENCE.load(Ordering::Relaxed) == 0 {
 
-    if SEQUENCE.load(Ordering::SeqCst) == 0 {
         let x = bridge_client.query_signing_requests(QuerySigningRequestsRequest {
             status: SigningStatus::Broadcasted as i32,
             pagination: Some(PageRequest {
@@ -69,57 +73,69 @@ pub async fn sync_signed_transactions(relayer: &Relayer) {
 
         let resp = match x {
             Ok(r) => r.into_inner(),
-            Err(_) => return,
+            Err(e) => {
+                error!("Error: {:?}", e);
+                return
+            },
         };
 
-        if resp.requests.len() == 0 { return } else {
+        println!("{:?}", resp.requests);
+
+        if resp.requests.len() > 0 {
             let s = resp.requests[0].sequence;
             if s >= 1 { 
                 // latest sequence on chain
-                SEQUENCE.fetch_add(s - 1, Ordering::SeqCst); 
+                SEQUENCE.fetch_add(s - 1, Ordering::Relaxed); 
             };
         }
         
     }
 
+    let sequence = SEQUENCE.fetch_add( 1, Ordering::SeqCst); 
+
     loop {
-        let sequence = SEQUENCE.fetch_add( 1, Ordering::SeqCst); 
-        let request = bridge_client.query_signing_request(QuerySigningRequestRequest {
-            sequence
-        }).await;
 
-        if let Ok(r) = request {
+        info!("Start sync signed transaction {}", sequence);
 
-            if let Some(sr) = r.into_inner().request {
-                if sr.status != SigningStatus::Broadcasted as i32 && sr.psbt.len() == 0{
+        match bridge_client.query_signing_request(QuerySigningRequestRequest { sequence }).await {
+            Ok(r) => {
+
+                if let Some(sr) = r.into_inner().request {
+                    
+                    if sr.status != SigningStatus::Broadcasted as i32 && sr.psbt.len() == 0{
+                        return
+                    }
+
+                    let psbt_bytes = from_base64(&sr.psbt).unwrap();
+                    let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
+                        Ok(psbt) => psbt,
+                        Err(e) => {
+                            error!("Failed to deserialize PSBT: {}", e);
+                            return;
+                        }
+                    };
+
+                    let signed_tx = psbt.clone().extract_tx().expect("failed to extract signed tx");
+
+                    match bitcoin_client.send_raw_transaction(&signed_tx) {
+                        Ok(txid) => {
+                            SEQUENCE.fetch_add( 1, Ordering::SeqCst); 
+                            info!("PSBT broadcasted to Bitcoin: {}", txid);
+                        }
+                        Err(err) => {
+                            error! ("Failed to broadcast PSBT: {:?}, err: {:?}", signed_tx.compute_txid(), err);
+                            return;
+                        }
+                    }
+                } else {
                     return
                 }
-
-                let psbt_bytes = from_base64(&sr.psbt).unwrap();
-                let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
-                    Ok(psbt) => psbt,
-                    Err(e) => {
-                        error!("Failed to deserialize PSBT: {}", e);
-                        continue;
-                    }
-                };
-
-                let signed_tx = psbt.clone().extract_tx().expect("failed to extract signed tx");
-
-                match bitcoin_client.send_raw_transaction(&signed_tx) {
-                    Ok(txid) => {
-                        info!("PSBT broadcasted to Bitcoin: {}", txid);
-                    }
-                    Err(err) => {
-                        error! ("Failed to broadcast PSBT: {:?}, err: {:?}", signed_tx.compute_txid(), err);
-                        // return;
-                    }
-                }
-            }
-            
-        } else {
-            return
-        }
+            },
+            Err(e) => {
+                error!("Error: {:?}", e);
+                return
+            } 
+        };
     }
 
 }

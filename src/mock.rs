@@ -21,6 +21,7 @@ use bitcoin::{
     TxOut, Address, ScriptBuf, Transaction, Txid
 };
 use bitcoin_hashes::{sha256d, Hash};
+use tonic::Status;
 
 use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::to_base64;
@@ -159,12 +160,11 @@ async fn mock_signing_request(home: &str) -> Result<tonic::Response<QuerySigning
     // path.push("mock");
     // path.push(SINGING_FILE_NAME);
 
-    println!("response: {home}");
-
-    let mut path_2 = PathBuf::new();
-    path_2.push(home);
-    path_2.push(VAULT_FILE_NAME);
-    let request = if let Ok(address) = fs::read_to_string(path_2) {
+    // let mut path_2 = PathBuf::new();
+    // path_2.push(home);
+    // path_2.push(VAULT_FILE_NAME);
+    let loaded: Result<String, Status> = Ok("bc1qcae5r4m7rx9ge240rgpdcyyu5kj4kkx3fe4z5v".to_string());
+    let request = if let Ok(address) = loaded {
         let (txid, psbt) = generate_mock_psbt(&address, Some(1));
         Some(SigningRequest { 
             address: address.clone(), 
@@ -430,12 +430,6 @@ fn query_all_dkg_requests<'life0,'async_trait>(&'life0 self,_request:tonic::Requ
     #[must_use]
 #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
 fn query_dkg_completion_requests<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QueryDkgCompletionRequestsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QueryDkgCompletionRequestsResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
-        todo!()
-    }
-    
-    #[must_use]
-    #[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
-    fn query_signing_request<'life0,'async_trait>(&'life0 self,_request:tonic::Request<cosmos_sdk_proto::side::btcbridge::QuerySigningRequestRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = std::result::Result<tonic::Response<cosmos_sdk_proto::side::btcbridge::QuerySigningRequestResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
     

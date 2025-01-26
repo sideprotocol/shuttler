@@ -25,7 +25,7 @@ pub enum Commands {
     Start {
         #[clap(long, default_value = "false")]
         relayer: bool,
-        #[clap(long, default_value = "true")]
+        #[clap(long, default_value = "false")]
         signer: bool,
         #[clap(long, default_value = "false")]
         seed: bool,
