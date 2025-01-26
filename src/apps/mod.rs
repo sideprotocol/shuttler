@@ -17,5 +17,6 @@ pub trait App {
 }
 
 pub struct Context {
-    pub swarm: Swarm<ShuttlerBehaviour>
+    pub swarm: Swarm<ShuttlerBehaviour>,
+    pub last_dkg_time: u64,
 }

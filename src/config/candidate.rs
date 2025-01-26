@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{cmp::Ordering, str::FromStr};
 
 use frost_secp256k1_tr::Identifier;
 use libp2p::PeerId;
@@ -40,7 +40,7 @@ impl Candidate {
             return 
         }
         
-        let validators: Vec<cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::Validator> = match client_side::get_latest_validators(&self.host).await {
+        let mut validators: Vec<cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::Validator> = match client_side::get_latest_validators(&self.host).await {
             Ok(r) => r.into_inner().validators,
             Err(e) => {
                 warn!("failed to sync valdiators: {:?}", e);
@@ -53,7 +53,16 @@ impl Candidate {
         // self.peers.clear();
         self.identifiers.clear();
 
-        validators.iter().for_each(|v| {
+        validators.sort_by(|a, b| {
+            if b.voting_power - a.voting_power >= 0 {
+                return Ordering::Greater;
+            } else {
+                return Ordering::Less;
+            }
+        });
+        println!("Top50: {:?}", validators);
+
+        validators[0..50].iter().for_each(|v| {
             if let Some(k) = &v.pub_key {
                 let pub_key = PublicKey::try_from(k).unwrap();
                 let id = pubkey_to_identifier(&pub_key.to_bytes());

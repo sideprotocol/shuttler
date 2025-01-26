@@ -164,7 +164,7 @@ impl Shuttler {
         dail_bootstrap_nodes(&mut swarm, &self.conf);
         subscribe_gossip_topics(&mut swarm);
 
-        let mut context = Context{swarm};
+        let mut context = Context{swarm, last_dkg_time: 0u64};
 
         loop {
             select! {

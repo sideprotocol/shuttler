@@ -5,7 +5,7 @@ use tracing::{debug, error, info};
 
 use crate::{
     apps::{signer::{dkg::{generate_round1_package, DKGTask}, sign::save_task_into_signing_queue, Signer}, Context}, 
-    helper::{client_side::{get_signing_requests, send_cosmos_transaction}, encoding::{from_base64, pubkey_to_identifier}, gossip::sending_heart_beat, mem_store}, 
+    helper::{client_side::{get_signing_requests, send_cosmos_transaction}, encoding::{from_base64, pubkey_to_identifier}, gossip::sending_heart_beat, mem_store, now}, 
 };
 
 use super::{dkg::sync_dkg_task_packages, sign::dispatch_executions, Round};
@@ -17,9 +17,12 @@ pub async fn tasks_executor(ctx: &mut Context, signer: &Signer ) {
     }
 
     // 1. dkg tasks
-    sync_dkg_task_packages(ctx, signer);
-    submit_dkg_address(signer).await;
-    fetch_dkg_requests(signer).await;
+    if ctx.last_dkg_time + 600 <= now() {
+        sync_dkg_task_packages(ctx, signer);
+        submit_dkg_address(signer).await;
+        fetch_dkg_requests(signer).await;    
+        ctx.last_dkg_time = now();
+    }
 
     // 2 signing tasks
     dispatch_executions(ctx, signer).await;
