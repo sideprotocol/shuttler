@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use bitcoincore_rpc::{Auth, Client};
-use tick::{scan_vault_txs, submit_fee_rate, sync_btc_blocks};
+use tick::{scan_vault_txs, submit_fee_rate, sync_btc_blocks, sync_signed_transactions};
 use tokio::{join, time::Instant};
 use crate::{config::Config, helper::{client_fee_provider::FeeProviderClient, client_ordinals::OrdinalsClient}};
 
@@ -40,6 +40,7 @@ impl App for Relayer {
             sync_btc_blocks(self),
             scan_vault_txs(self),
             submit_fee_rate(self),
+            sync_signed_transactions(self)
         );
     }
 }

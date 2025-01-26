@@ -157,7 +157,7 @@ pub async fn get_max_reorg_depth(host: &str) -> u64 {
     };
 }
 
-pub async fn get_signing_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {
+pub async fn get_signing_requests(host: &str, status: i32) -> Result<Response<QuerySigningRequestsResponse>, Status> {
     let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
         Err(e) => {
@@ -173,7 +173,7 @@ pub async fn get_signing_requests(host: &str) -> Result<Response<QuerySigningReq
             count_total: false,
             reverse: false,
         }),
-        status: 1i32
+        status
     }).await
 }
 

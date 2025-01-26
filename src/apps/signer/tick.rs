@@ -1,5 +1,5 @@
 
-use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsRequest};
+use cosmos_sdk_proto::side::btcbridge::{query_client::QueryClient as BtcQueryClient, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsRequest, SigningStatus};
 use cosmrs::Any;
 use tracing::{debug, error, info};
 
@@ -39,7 +39,7 @@ pub async fn fetch_signing_requests(
 ) {
     let host = signer.config().side_chain.grpc.as_str();
 
-    match get_signing_requests(&host).await {
+    match get_signing_requests(&host, SigningStatus::Pending as i32).await {
         Ok(response) => {
             let requests = response.into_inner().requests;
             let tasks_in_process = requests.iter().map(|r| r.txid.clone() ).collect::<Vec<_>>();
