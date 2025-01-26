@@ -91,7 +91,7 @@ pub async fn sync_signed_transactions(relayer: &Relayer) {
         
     }
 
-    let sequence = SEQUENCE.fetch_add( 1, Ordering::SeqCst); 
+    let mut sequence = SEQUENCE.fetch_add( 1, Ordering::SeqCst); 
 
     loop {
 
@@ -119,7 +119,7 @@ pub async fn sync_signed_transactions(relayer: &Relayer) {
 
                     match bitcoin_client.send_raw_transaction(&signed_tx) {
                         Ok(txid) => {
-                            SEQUENCE.fetch_add( 1, Ordering::SeqCst); 
+                            sequence = SEQUENCE.fetch_add( 1, Ordering::SeqCst); 
                             info!("PSBT broadcasted to Bitcoin: {}", txid);
                         }
                         Err(err) => {
