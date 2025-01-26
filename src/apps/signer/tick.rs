@@ -17,7 +17,7 @@ pub async fn tasks_executor(ctx: &mut Context, signer: &Signer ) {
     }
 
     // 1. dkg tasks
-    if ctx.last_dkg_time + 600 <= now() {
+    if ctx.last_dkg_time + 1800 <= now() {
         sync_dkg_task_packages(ctx, signer);
         submit_dkg_address(signer).await;
         fetch_dkg_requests(signer).await;    
