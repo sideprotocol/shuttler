@@ -154,7 +154,7 @@ fn mock_psbt(home: &str, tx_num: u32, tx_bytes: &Vec<u8>) {
 }
 
 // mock signing request
-async fn mock_signing_request(home: &str) -> Result<tonic::Response<QuerySigningRequestResponse>, tonic::Status> {
+async fn mock_signing_request(_home: &str) -> Result<tonic::Response<QuerySigningRequestResponse>, tonic::Status> {
     // let mut path = PathBuf::new();
     // path.push(home);
     // path.push("mock");

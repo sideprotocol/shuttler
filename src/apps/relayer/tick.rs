@@ -1,6 +1,6 @@
 use std::sync::{atomic::{AtomicU64, Ordering}, LazyLock};
 
-use bitcoin::{consensus::encode, hex::error, Address, Block, BlockHash, OutPoint, Psbt, Transaction, Txid};
+use bitcoin::{consensus::encode, Address, Block, BlockHash, OutPoint, Psbt, Transaction, Txid};
 use bitcoincore_rpc::{jsonrpc::error::Error as RpcError, Error, RpcApi};
 use prost_types::Any;
 use tonic::{Response, Status};
