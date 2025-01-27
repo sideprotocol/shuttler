@@ -34,6 +34,7 @@ pub struct HeartBeatPayload {
     pub identifier: Identifier<Secp256K1Sha256>,
     pub last_seen: u64,
     pub block_height: i64,
+    pub version: String,
 }
 
 pub fn subscribe_gossip_topics(swarm: &mut Swarm<ShuttlerBehaviour>) {
@@ -79,13 +80,14 @@ pub async fn sending_heart_beat(ctx: &mut Context, signer: &Signer) {
             identifier: signer.identifier().clone(),
             last_seen,
             block_height,
+            version: format!(env!("CARGO_PKG_VERSION")), 
         };
         let bytes = serde_json::to_vec(&payload).unwrap();
         let signature = signer.identity_key.sign(bytes, None).to_vec();
         let alive = HeartBeatMessage { payload, signature };
         let message = serde_json::to_vec(&alive).unwrap();
 
-        tracing::debug!("message: {:?}", alive);
+        tracing::debug!("Send: {:?}", alive);
         publish_message(ctx, SubscribeTopic::HEARTBEAT, message);
         
         mem_store::update_alive_table(signer.identifier(), alive);

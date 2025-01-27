@@ -287,7 +287,8 @@ fn update_heartbeat(self_identifier: &Identifier, message: &SubscribeMessage) {
         if let Ok(alive) = serde_json::from_slice::<HeartBeatMessage>(&message.data) {
             if let Some(s) = message.source {
                 let msg_sender = identifier_to_peer_id(&alive.payload.identifier);
-                debug!("{:?}, {:?}", s, msg_sender);
+                // debug!("{:?}, {:?}", s, msg_sender);
+                if s != msg_sender { return }
             }
             // Ensure the message is not forged.
             match PublicKey::from_slice(&alive.payload.identifier.serialize()) {
