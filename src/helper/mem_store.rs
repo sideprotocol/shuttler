@@ -33,20 +33,19 @@ lazy_static! {
 }
 
 pub const ALIVE_WINDOW: u64 = TASK_INTERVAL.as_secs() * 2;
-pub const BLOCK_TOLERENCE: u64 = 5;
+pub const BLOCK_TOLERENCE: u64 = ALIVE_WINDOW / 6 + 1 ;
 
-pub fn update_alive_table(self_identifier: &Identifier, alive: HeartBeatMessage) {
-    tracing::debug!("{}, {}, {}, {} ", get_name(&alive.payload.identifier), alive.payload.version, alive.payload.block_height, if alive.payload.last_seen > now() {alive.payload.last_seen - now()} else {0} );
-    if alive.payload.last_seen < now() { return }
-
+pub fn update_alive_table(self_identifier: &Identifier, hbm: HeartBeatMessage) {
+    // tracing::debug!("Received {}, {}, {}, {} ", get_name(&hbm.payload.identifier), hbm.payload.version, hbm.payload.block_height, if hbm.payload.last_seen > now() {hbm.payload.last_seen - now()} else {0} );
     let mut table= AliveTable.lock().unwrap();
 
-    if let Some(t) = table.get(&self_identifier) {
-        if alive.payload.block_height.abs_diff(t.clone()) > BLOCK_TOLERENCE { return }
+    table.insert(hbm.payload.identifier, hbm.payload.block_height);
+    
+    if let Some(t) = table.get(&self_identifier).cloned() {
+        table.retain(|_, v| v.abs_diff(t) <= BLOCK_TOLERENCE);
     }
 
-    table.insert(alive.payload.identifier, alive.payload.block_height);
-    table.retain(|_, v| v.abs_diff(alive.payload.block_height) <= BLOCK_TOLERENCE);
+    tracing::debug!("Heartbeats: {:?}", table.iter().map(|(k, v) | (get_name(k), v)).collect::<Vec<_>>());
 
 }
 

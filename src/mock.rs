@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::fs;
 use std::str::FromStr;
+use std::sync::atomic::AtomicI64;
 
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountResponse};
 use cosmos_sdk_proto::cosmos::base::abci::v1beta1::TxResponse;
@@ -282,11 +283,13 @@ async fn mock_broadcast_tx() -> Result<tonic::Response<cosmos_sdk_proto::cosmos:
     }))
 }
 
+static BLOCK_HEIGHT: AtomicI64 = AtomicI64::new(120);
+
 async fn mock_latest_block() -> Result<tonic::Response<cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::GetLatestBlockResponse>, tonic::Status> {
     
     let mut header = Header::default();
     header.chain_id = "mock-testnet".to_owned();
-    header.height = 123;
+    header.height = BLOCK_HEIGHT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     header.time = Some(cosmos_sdk_proto::tendermint::google::protobuf::Timestamp {
         seconds: now() as i64,
         nanos: 0
