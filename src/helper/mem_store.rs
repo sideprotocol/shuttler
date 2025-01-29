@@ -11,7 +11,7 @@ use lazy_static::lazy_static;
 
 use crate::apps::signer::Signer;
 use crate::config::TASK_INTERVAL;
-use super::{gossip::HeartBeatMessage, now};
+use super::gossip::HeartBeatMessage;
 
 lazy_static! {
     static ref DkgRound1SecretPacket: Mutex<BTreeMap<String, dkg::round1::SecretPackage>> = {
