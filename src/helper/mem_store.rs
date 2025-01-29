@@ -11,6 +11,7 @@ use lazy_static::lazy_static;
 
 use crate::apps::signer::Signer;
 use crate::config::TASK_INTERVAL;
+use crate::helper::now;
 use super::gossip::HeartBeatMessage;
 
 lazy_static! {
@@ -36,7 +37,7 @@ pub const ALIVE_WINDOW: u64 = TASK_INTERVAL.as_secs() * 2;
 pub const BLOCK_TOLERENCE: u64 = ALIVE_WINDOW / 6 + 1 ;
 
 pub fn update_alive_table(self_identifier: &Identifier, hbm: HeartBeatMessage) {
-    // tracing::debug!("Received {}, {}, {}, {} ", get_name(&hbm.payload.identifier), hbm.payload.version, hbm.payload.block_height, if hbm.payload.last_seen > now() {hbm.payload.last_seen - now()} else {0} );
+    tracing::debug!("Received {}, {}, {}, {} ", get_name(&hbm.payload.identifier), hbm.payload.version, hbm.payload.block_height, if hbm.payload.last_seen > now() {hbm.payload.last_seen - now()} else {0} );
     let mut table= AliveTable.lock().unwrap();
 
     table.insert(hbm.payload.identifier, hbm.payload.block_height);
@@ -45,7 +46,7 @@ pub fn update_alive_table(self_identifier: &Identifier, hbm: HeartBeatMessage) {
         table.retain(|_, v| v.abs_diff(t) <= BLOCK_TOLERENCE);
     }
 
-    tracing::debug!("Heartbeats: {:?}", table.iter().map(|(k, v) | (get_name(k), v)).collect::<Vec<_>>());
+    // tracing::debug!("Heartbeats: {:?}", table.iter().map(|(k, v) | (get_name(k), v)).collect::<Vec<_>>());
 
 }
 
