@@ -85,13 +85,13 @@ pub async fn sync_signed_transactions(relayer: &Relayer) {
             let s = resp.requests[0].sequence;
             if s >= 1 { 
                 // latest sequence on chain
-                SEQUENCE.fetch_add(s - 1, Ordering::Relaxed); 
+                SEQUENCE.fetch_add(s, Ordering::Relaxed); 
             };
         }
         
     }
 
-    let mut sequence = SEQUENCE.fetch_add( 1, Ordering::SeqCst); 
+    let mut sequence = SEQUENCE.load(Ordering::SeqCst); 
 
     loop {
 
@@ -101,8 +101,14 @@ pub async fn sync_signed_transactions(relayer: &Relayer) {
             Ok(r) => {
 
                 if let Some(sr) = r.into_inner().request {
+
+                    if sr.status == SigningStatus::Confirmed as i32 || sr.status == SigningStatus::Failed as i32 {
+                        sequence += 1; 
+                        SEQUENCE.fetch_add( 1, Ordering::SeqCst);
+                        continue;
+                    }
                     
-                    if sr.status != SigningStatus::Broadcasted as i32 && sr.psbt.len() == 0{
+                    if sr.status != SigningStatus::Broadcasted as i32 || sr.psbt.len() == 0 {
                         return
                     }
 
@@ -119,7 +125,8 @@ pub async fn sync_signed_transactions(relayer: &Relayer) {
 
                     match bitcoin_client.send_raw_transaction(&signed_tx) {
                         Ok(txid) => {
-                            sequence = SEQUENCE.fetch_add( 1, Ordering::SeqCst); 
+                            sequence += 1; 
+                            SEQUENCE.fetch_add( 1, Ordering::SeqCst); 
                             info!("PSBT broadcasted to Bitcoin: {}", txid);
                         }
                         Err(err) => {
