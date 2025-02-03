@@ -131,6 +131,11 @@ pub async fn sync_signed_transactions(relayer: &Relayer) {
                         }
                         Err(err) => {
                             error! ("Failed to broadcast PSBT: {:?}, err: {:?}", signed_tx.compute_txid(), err);
+                            if err.to_string().contains("Transaction already in block chain") {
+                                sequence += 1; 
+                                SEQUENCE.fetch_add( 1, Ordering::SeqCst);
+                                continue;
+                            }
                             return;
                         }
                     }
