@@ -4,7 +4,7 @@ use ed25519_compact::SecretKey;
 use frost_adaptor_signature::{round1, round2, AdaptorSignature, Identifier, Signature};
 use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 use std::sync::mpsc::Sender;
 use tendermint::abci::{Event, EventAttribute};
 
@@ -15,7 +15,7 @@ use crate::{
         encoding::to_base64,
         now,
         store::{DefaultStore, MemStore, Store},
-    },
+    }, providers::PriceStore,
 };
 
 pub type SubscribeMessage = libp2p::gossipsub::Message;
@@ -216,6 +216,7 @@ pub struct Context {
     pub nonce_store: SignerNonceStore,
     pub commitment_store: CommitmentStore,
     pub signature_store: SignatureShareStore,
+    pub price_store: Arc<PriceStore>,
     pub bitcoin_client: BitcoinClient,
 
     pub db_round1: Round1Store,
@@ -251,9 +252,8 @@ impl Context {
             task_store: DefaultStore::new(conf.get_database_with_name("tasks")),
             nonce_store: SignerNonceStore::new(conf.get_database_with_name("nonces")),
             commitment_store: CommitmentStore::new(conf.get_database_with_name("commitments")),
-            signature_store: SignatureShareStore::new(
-                conf.get_database_with_name("signature_shares"),
-            ),
+            signature_store: SignatureShareStore::new(conf.get_database_with_name("signature_shares")),
+            price_store: Arc::new(PriceStore::new(conf.get_database_with_name("prices"))),
             conf,
 
             db_round1: Round1Store::new(),

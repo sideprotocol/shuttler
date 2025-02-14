@@ -1,5 +1,5 @@
 use std::{
-    hash::{DefaultHasher, Hash, Hasher}, io, str::FromStr, time::Duration
+    hash::{DefaultHasher, Hash, Hasher}, io::{self}, ops::Deref, str::FromStr, sync::Arc, time::Duration
 };
 
 use cosmrs::Any;
@@ -9,7 +9,7 @@ use libp2p::{
     gossipsub, identify, identity::Keypair, kad::{self, store::MemoryStore}, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, Multiaddr, PeerId, Swarm
 };
 use tendermint_rpc::{query::EventType, event::Event, SubscriptionClient, WebSocketClient};
-use tokio::{select, spawn};
+use tokio::{select, signal, spawn};
 use tracing::{debug, info, warn, error};
 
 use crate::{
@@ -19,7 +19,7 @@ use crate::{
     config::{candidate::Candidate, Config},
     helper::{
         client_side::send_cosmos_transaction, encoding::pubkey_to_identifier, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store
-    },
+    }, providers::{PriceSubscriber, PRICE_PROVIDERS}, rpc::run_rpc_server,
 };
 
 pub struct Shuttler<'a> {
@@ -177,32 +177,46 @@ impl<'a> Shuttler<'a> {
         });
 
         // Connect to the Tendermint WebSocket endpoint
-        let (client, driver) = WebSocketClient::new(conf.websocket_endpoint().as_str())
-        .await
-        .expect("Failed to connect to WebSocket");
+        // let (client, driver) = WebSocketClient::new(conf.websocket_endpoint().as_str())
+        // .await
+        // .expect("Failed to connect to WebSocket");
 
-        // Spawn the WebSocket driver in a separate task
-        tokio::spawn(async move {
-        if let Err(e) = driver.run().await {
-            eprintln!("WebSocket driver error: {}", e);
-        }
-        });
+        // // Spawn the WebSocket driver in a separate task
+        // tokio::spawn(async move {
+        //     if let Err(e) = driver.run().await {
+        //         eprintln!("WebSocket driver error: {}", e);
+        //     }
+        // });
 
         // Subscribe to NewBlock events
-        let query = EventType::NewBlock.into();
-        // let query = Query::from_str("/cosmos.bank.v1beta1.MsgSend").unwrap();
-        let mut subscription = client.subscribe(query).await.expect("Subscription failed");
+        // let query = EventType::NewBlock.into();
+        // // let query = Query::from_str("/cosmos.bank.v1beta1.MsgSend").unwrap();
+        // let mut subscription = client.subscribe(query).await.expect("Subscription failed");
 
         // Common Setting: Context and Heart Beat
         let mut context = Context::new(swarm, tx_sender, identifier, node_key, conf.clone()); 
 
+        for provider in PRICE_PROVIDERS.deref() {
+            let price_store = Arc::clone(&context.price_store);
+            tokio::spawn(async move {
+                let ps = PriceSubscriber::new(provider.to_owned());
+                ps.start(price_store.as_ref()).await;
+            });
+        }
+
+        let price_store = Arc::clone(&context.price_store);
+        tokio::spawn(async move{
+            run_rpc_server(price_store).await.expect("RPC Server stopped");
+        });
+
+        // let mut context = Arc::clone(&arc_context);
         loop {
             select! {
-                Some(Ok(event)) = subscription.next() => {
-                    self.handle_block_event(&mut context, event);
-                }
+                // Some(Ok(event)) = subscription.next() => {
+                //     self.handle_block_event(&mut context, event);
+                // }
                 swarm_event = context.swarm.select_next_some() => match swarm_event {
-                    SwarmEvent::Behaviour(ShuttlerBehaviourEvent::Gossip(gossipsub::Event::Message { message, .. })) => {
+                    SwarmEvent::Behaviour(ShuttlerBehaviourEvent::Gossip(gossipsub::Event::Message{ message, .. })) => {
                         update_received_heartbeat(&context, &message);
                         for app in &self.apps {
                             dispatch_messages(app, &mut context, &message);
@@ -252,6 +266,9 @@ impl<'a> Shuttler<'a> {
                         // debug!("Swarm event: {:?}", swarm_event);
                     },
                 },
+                _ = signal::ctrl_c() => {
+                    break;
+                }
             }
         }
     }
