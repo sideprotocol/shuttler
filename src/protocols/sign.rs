@@ -71,7 +71,7 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
             return
         }
 
-        debug!("Start a new signing task: {}", task.id);
+        debug!("Start a new signing task: {}, {}", task.id, task.sign_inputs.len());
 
         let mut nonces = BTreeMap::new();
         let mut commitments = BTreeMap::new();
@@ -81,7 +81,10 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
             let mut rng = thread_rng();
             let key = match ctx.keystore.get(&input.key) {
                 Some(k) => k,
-                None => return,
+                None => {
+                    debug!("Signing key [{:?}] not found:", input.key);
+                    return
+                },
             };
 
             let (nonce, commitment) = round1::commit(key.priv_key.signing_share(), &mut rng);

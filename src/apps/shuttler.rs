@@ -19,7 +19,7 @@ use crate::{
     config::{candidate::Candidate, Config},
     helper::{
         client_side::send_cosmos_transaction, encoding::pubkey_to_identifier, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store
-    }, providers::{PriceSubscriber, PRICE_PROVIDERS}, rpc::run_rpc_server,
+    }, providers::{PriceStore, PriceSubscriber, PRICE_PROVIDERS}, rpc::run_rpc_server,
 };
 
 pub struct Shuttler<'a> {
@@ -196,18 +196,20 @@ impl<'a> Shuttler<'a> {
         // Common Setting: Context and Heart Beat
         let mut context = Context::new(swarm, tx_sender, identifier, node_key, conf.clone()); 
 
-        // for provider in PRICE_PROVIDERS.deref() {
-        //     let price_store = Arc::clone(&context.price_store);
-        //     tokio::spawn(async move {
-        //         let ps = PriceSubscriber::new(provider.to_owned());
-        //         ps.start(price_store.as_ref()).await;
-        //     });
-        // }
+        let price_store = Arc::new(PriceStore::new(conf.get_database_with_name("prices")));
+        for provider in PRICE_PROVIDERS.deref() {
+            let price_store2 = Arc::clone(&price_store);
+            tokio::spawn(async move {
+                let ps = PriceSubscriber::new(provider.to_owned());
+                ps.start(price_store2.as_ref()).await;
+            });
+        }
 
-        // let price_store = Arc::clone(&context.price_store);
-        // tokio::spawn(async move{
-        //     run_rpc_server(price_store).await.expect("RPC Server stopped");
-        // });
+        let price_store2 = Arc::clone(&price_store);
+        let rpc = conf.rpc_address.clone();
+        tokio::spawn(async move{
+            run_rpc_server(price_store2, rpc).await.expect("RPC Server stopped");
+        });
 
         // let mut context = Arc::clone(&arc_context);
         loop {

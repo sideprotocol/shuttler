@@ -4,6 +4,7 @@ use anyhow::anyhow;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use tokio_tungstenite::tungstenite::Message;
+use tracing::debug;
 
 use super::{Price, Provider};
 

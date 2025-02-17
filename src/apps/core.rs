@@ -21,6 +21,7 @@ use crate::{
 
 pub type SubscribeMessage = libp2p::gossipsub::Message;
 
+#[derive(Debug, Clone)]
 pub enum SideEvent {
     BlockEvent(BTreeMap<String, Vec<String>>),
     TxEvent(Vec<TxEvent>)
@@ -222,7 +223,7 @@ pub struct Context {
     pub nonce_store: SignerNonceStore,
     pub commitment_store: CommitmentStore,
     pub signature_store: SignatureShareStore,
-    pub price_store: Arc<PriceStore>,
+    // pub price_store: Arc<PriceStore>,
     pub bitcoin_client: BitcoinClient,
 
     pub db_round1: Round1Store,
@@ -259,7 +260,7 @@ impl Context {
             nonce_store: SignerNonceStore::new(conf.get_database_with_name("nonces")),
             commitment_store: CommitmentStore::new(conf.get_database_with_name("commitments")),
             signature_store: SignatureShareStore::new(conf.get_database_with_name("signature_shares")),
-            price_store: Arc::new(PriceStore::new(conf.get_database_with_name("prices"))),
+            // price_store: Arc::new(PriceStore::new(conf.get_database_with_name("prices"))),
             conf,
 
             db_round1: Round1Store::new(),
