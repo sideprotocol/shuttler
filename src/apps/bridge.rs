@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use cosmrs::Any;
 use libp2p::gossipsub::IdentTopic;
-use tendermint::abci::Event;
 use tracing::{error, info};
 use bitcoin::{Network, Psbt, TapNodeHash, TapSighashType, Witness, XOnlyPublicKey};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
@@ -18,6 +17,8 @@ use crate::helper::encoding::{from_base64, to_base64};
 use crate::helper::store::Store;
 use crate::protocols::dkg::{DKGAdaptor, DKG};
 use crate::protocols::sign::{SignAdaptor, StandardSigner};
+
+use super::SideEvent;
 
 // #[derive(Debug)]
 pub struct BridgeSigner {
@@ -52,24 +53,25 @@ impl App for BridgeSigner {
     fn subscribe_topics(&self) -> Vec<IdentTopic> {
         vec![self.keygen.topic(), self.signer.topic()]
     }
-    fn on_event(&self, ctx: &mut Context, events: &Vec<Event>) {
-        self.keygen.execute(ctx, events);
-        self.signer.execute(ctx, events);
+    fn on_event(&self, ctx: &mut Context, event: &SideEvent) {
+        self.keygen.execute(ctx, event);
+        self.signer.execute(ctx, event);
     }
 }
 
 pub struct KeygenHander{}
 impl DKGAdaptor for KeygenHander {
-    fn new_task(&self, events: &Vec<tendermint::abci::Event>) -> Option<Task> {
-        if has_event_value(events, "") {
-            let id = get_event_value(events, "message", "id")?;
-            let participants = get_event_value(events, "message", "id")?;
-            let threshold = get_event_value(events, "message", "id")?.parse().unwrap_or(0);
-            if threshold < 2 {return None;}
-            Some(Task::new_dkg(id, vec![], threshold))
-        } else {
-            None
-        }
+    fn new_task(&self, event: &SideEvent) -> Option<Vec<Task>> {
+        // if has_event_value(events, "") {
+        //     let id = get_event_value(events, "message", "id")?;
+        //     let participants = get_event_value(events, "message", "id")?;
+        //     let threshold = get_event_value(events, "message", "id")?.parse().unwrap_or(0);
+        //     if threshold < 2 {return None;}
+        //     Some(Task::new_dkg(id, vec![], threshold))
+        // } else {
+        //     None
+        // }
+        None
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task, priv_key: &frost_adaptor_signature::keys::KeyPackage, pub_key: &frost_adaptor_signature::keys::PublicKeyPackage) {
 
@@ -140,8 +142,8 @@ pub fn generate_vault_addresses(
 
 pub struct SignatureHandler{}
 impl SignAdaptor for SignatureHandler {
-    fn new_task(&self, events: &Vec<tendermint::abci::Event>) -> Option<Task> {
-        todo!()
+    fn new_task(&self, _events: &SideEvent) -> Option<Vec<Task>> {
+        None
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task) -> anyhow::Result<()> {
         println!("Signing completed: {:?}, {:?}", ctx.identifier, task.id);

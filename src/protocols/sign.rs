@@ -4,13 +4,12 @@ use frost_adaptor_signature::{keys::Tweak, round1::{self, Nonce, SigningNonces},
 use libp2p::gossipsub::IdentTopic;
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
-use tendermint::abci::Event;
 use tracing::{debug, info};
 pub use tracing::error;
 use usize as Index;
-use crate::{apps::{Context, FrostSignature, SignMode, Status, SubscribeMessage, Task}, config::VaultKeypair, 
+use crate::{apps::{Context, FrostSignature, SideEvent, SignMode, Status, SubscribeMessage, Task}, config::VaultKeypair, 
     helper::{
-        bitcoin::convert_tweak, encoding::{self, hex_to_projective_point}, 
+        bitcoin::convert_tweak, encoding::hex_to_projective_point, 
         gossip::publish_topic_message, 
         store::Store
 }};
@@ -32,7 +31,7 @@ pub enum SignPackage {
 }
 
 pub trait SignAdaptor {
-    fn new_task(&self, events: &Vec<Event>) -> Option<Task>;
+    fn new_task(&self, events: &SideEvent) -> Option<Vec<Task>>;
     fn on_complete(&self, ctx: &mut Context, task: &mut Task) -> anyhow::Result<()>;
 }
 
@@ -56,11 +55,13 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
     //     &self.handler
     // }
 
-    pub fn execute(&self, ctx: &mut Context, events: &Vec<Event>) {
-        if let Some(task) = self.handler.new_task(events) {
-            if ctx.task_store.exists(&task.id) { return }
-            ctx.task_store.save(&task.id, &task);
-            self.generate_commitments(ctx, &task);
+    pub fn execute(&self, ctx: &mut Context, event: &SideEvent) {
+        if let Some(tasks) = self.handler.new_task(event) {
+            tasks.iter().for_each(|task| {
+                if ctx.task_store.exists(&task.id) { return }
+                ctx.task_store.save(&task.id, &task);
+                self.generate_commitments(ctx, &task);
+            });
         }
     }
     

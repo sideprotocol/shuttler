@@ -1,13 +1,14 @@
 use cosmrs::Any;
 use side_proto::side::dlc::{MsgSubmitAgencyPubKey, MsgSubmitAttestation};
-use tendermint::abci::Event;
 use crate::config::VaultKeypair;
-use crate::helper::encoding::to_base64;
+use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier, to_base64};
 use crate::helper::store::Store;
 use crate::protocols::sign::{SignAdaptor, StandardSigner};
 use crate::protocols::dkg::{DKGAdaptor, DKG};
 
 use crate::apps::{App, Context, FrostSignature, SubscribeMessage, Task};
+
+use super::SideEvent;
 
 pub struct Agency {
     pub keygen: DKG<KeygenHander>,
@@ -17,7 +18,7 @@ pub struct Agency {
 impl Agency {
     pub fn new() -> Self {
         Self {
-            keygen: DKG::new("oracle_dkg", KeygenHander{}),
+            keygen: DKG::new("agency_dkg", KeygenHander{}),
             signer: StandardSigner::new("attestation2", SignatureHandler {  }),
         }
     }
@@ -33,22 +34,40 @@ impl App for Agency {
     fn subscribe_topics(&self) -> Vec<libp2p::gossipsub::IdentTopic> {
         vec![self.keygen.topic(), self.signer.topic()]
     }
-    fn on_event(&self, ctx: &mut Context, events: &Vec<Event>) {
-       self.keygen.execute(ctx, events);
-       self.signer.execute(ctx, events);
+    fn on_event(&self, ctx: &mut Context, event: &SideEvent) {
+       self.keygen.execute(ctx, event);
+       self.signer.execute(ctx, event);
     }
 }
 
-
 pub struct KeygenHander{}
 impl DKGAdaptor for KeygenHander {
-    fn new_task(&self, events: &Vec<Event>) -> Option<Task> {
-        todo!()
+    fn new_task(&self, event: &SideEvent) -> Option<Vec<Task>> {
+        match event {
+            SideEvent::BlockEvent(events) => {
+                if events.contains_key("create_agency.id") {
+                    let id = events.get("create_agency.id")?.get(0)?.to_owned();
+                    let mut participants = vec![];
+                    for p in events.get("create_agency.participants")? {
+                        if let Ok(identifier) = from_base64(p) {
+                            participants.push(pubkey_to_identifier(&identifier));
+                        }
+                    };
+                    if let Ok(threshold) = events.get("create_agency.threshold")?.get(0)?.parse() {
+                        if threshold as usize * 3 >= participants.len() * 2  {
+                            return Some(vec![Task::new_dkg(id, participants, threshold)])
+                        }
+                    }
+                }
+            },
+            _ => {},
+        }
+        None
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task, priv_key: &frost_adaptor_signature::keys::KeyPackage, pub_key: &frost_adaptor_signature::keys::PublicKeyPackage) {
         let tweak = None;
         let rawkey = pub_key.verifying_key().serialize().unwrap();
-        let pubkey = hex::encode(&rawkey);
+        let pubkey = hex::encode(&rawkey[1..]);
         let keyshare = VaultKeypair {
             pub_key: pub_key.clone(),
             priv_key: priv_key.clone(),
@@ -56,14 +75,15 @@ impl DKGAdaptor for KeygenHander {
         };
         ctx.keystore.save(&pubkey, &keyshare);
 
-        let signature = hex::encode(ctx.node_key.sign(&rawkey, None));
+        let id: u64 = task.id.replace("agency-", "").parse().unwrap();
+        let message = hash(&[&id.to_be_bytes()[..], &rawkey[1..]].concat());
+        let signature = hex::encode(ctx.node_key.sign(&hex::decode(message).unwrap(), None));
 
         let cosm_msg = MsgSubmitAgencyPubKey {
-            // id: task.id.replace("agency-", "").parse().unwrap(),
             sender: ctx.conf.relayer_bitcoin_address(),
-            pub_key: pubkey.clone(),
+            pub_key: to_base64(ctx.node_key.public_key().as_slice()),
             signature,
-            agency_id: task.id.replace("agency-", "").parse().unwrap(),
+            agency_id: id,
             agency_pubkey: pubkey,
         };
         let any = Any::from_msg(&cosm_msg).unwrap();
@@ -77,8 +97,8 @@ impl DKGAdaptor for KeygenHander {
 
 pub struct SignatureHandler {}
 impl SignAdaptor for SignatureHandler {
-    fn new_task(&self, events: &Vec<tendermint::abci::Event>) -> Option<Task> {
-        todo!()
+    fn new_task(&self, event: &SideEvent) -> Option<Vec<Task>> {
+        None
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task)-> anyhow::Result<()> {
         for (_, input) in task.sign_inputs.iter() {

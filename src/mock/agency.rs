@@ -1,4 +1,4 @@
-use side_proto::side::lending::{query_server::Query as LendingQuery, QueryCollateralAddressRequest, QueryCollateralAddressResponse, QueryLiquidationEventRequest, QueryLiquidationEventResponse, QueryLoanCetRequest, QueryLoanCetResponse, QueryParamsRequest, QueryParamsResponse, QueryRepaymentTxRequest, QueryRepaymentTxResponse};
+use side_proto::side::lending::{query_server::Query as LendingQuery, QueryCollateralAddressRequest, QueryCollateralAddressResponse, QueryLiquidationEventRequest, QueryLiquidationEventResponse, QueryLoanCetsRequest, QueryLoanCetsResponse, QueryParamsRequest, QueryParamsResponse, QueryRepaymentTxRequest, QueryRepaymentTxResponse};
 
 use super::MockQuery;
 
@@ -23,7 +23,7 @@ fn liquidation_event<'life0,'async_trait>(&'life0 self,_request:tonic::Request<Q
 
     #[must_use]
 #[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn loan_cet<'life0,'async_trait>(&'life0 self, _request:tonic::Request<QueryLoanCetRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<QueryLoanCetResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn loan_cets<'life0,'async_trait>(&'life0 self, _request:tonic::Request<QueryLoanCetsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<QueryLoanCetsResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 

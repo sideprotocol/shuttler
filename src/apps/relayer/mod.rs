@@ -3,12 +3,10 @@
 use std::time::Duration;
 
 use bitcoincore_rpc::{Auth, Client};
-use futures::executor::block_on;
 use libp2p::gossipsub::IdentTopic;
-use tick::{scan_vault_txs, submit_fee_rate, sync_btc_blocks};
 use crate::{config::Config, helper::{client_fee_provider::FeeProviderClient, client_ordinals::OrdinalsClient}};
 
-use super::{App, Context, SubscribeMessage};
+use super::{App, Context, SideEvent, SubscribeMessage};
 
 pub mod tick;
 
@@ -31,7 +29,7 @@ impl App for Relayer {
     fn subscribe_topics(&self) -> Vec<IdentTopic> {
         vec![]
     }
-    fn on_event(&self, _ctx: &mut Context, _event: &Vec<tendermint::abci::Event>) {
+    fn on_event(&self, _ctx: &mut Context, _event: &SideEvent) {
         
     }
 }

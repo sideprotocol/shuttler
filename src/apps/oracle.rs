@@ -1,14 +1,16 @@
+
 use cosmrs::Any;
 use side_proto::side::dlc::{MsgSubmitAttestation, MsgSubmitNonce, MsgSubmitOraclePubKey};
-use tendermint::abci::Event;
 
-use crate::config::VaultKeypair;
-use crate::helper::encoding::to_base64;
+use crate::config::{Config, VaultKeypair};
+use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier, to_base64};
 use crate::helper::store::Store;
 use crate::protocols::sign::{SignAdaptor, StandardSigner};
 use crate::protocols::dkg::{DKGAdaptor, DKG};
 
 use crate::apps::{App, Context, FrostSignature, Status, SubscribeMessage, Task};
+
+use super::SideEvent;
 
 pub struct Oracle {
     pub keygen: DKG<KeygenHander>,
@@ -17,12 +19,13 @@ pub struct Oracle {
 }
 
 impl Oracle {
-    pub fn new() -> Self {
+    pub fn new(conf: Config) -> Self {
         Self {
             keygen: DKG::new("oracle_dkg", KeygenHander{}),
             signer: StandardSigner::new("attestation", AttestationHandler{}),
 
             nonce_gen: DKG::new("nonce_gen", NonceHander { 
+                conf,
                 signer: StandardSigner::new("nonce_signing", NonceSigningHandler {  }) 
             }),
         }
@@ -41,21 +44,41 @@ impl App for Oracle {
     fn subscribe_topics(&self) -> Vec<libp2p::gossipsub::IdentTopic> {
         vec![self.keygen.topic(), self.signer.topic(), self.nonce_gen.topic(), self.nonce_gen.hander().signer.topic()]
     }
-    fn on_event(&self, ctx: &mut Context, events: &Vec<Event>) {
-        self.signer.execute(ctx, events);
-        self.keygen.execute(ctx, events);
-        self.nonce_gen.execute(ctx, events);
+    fn on_event(&self, ctx: &mut Context, event: &SideEvent) {
+        self.signer.execute(ctx, event);
+        self.keygen.execute(ctx, event);
+        self.nonce_gen.execute(ctx, event);
     }
 }
 pub struct KeygenHander{}
 impl DKGAdaptor for KeygenHander {
-    fn new_task(&self, events: &Vec<Event>) -> Option<Task> {
-        todo!()
+    fn new_task(&self, event: &SideEvent) -> Option<Vec<Task>> {
+        let mut tasks = vec![];
+        match event {
+            SideEvent::BlockEvent(events) => {
+                if events.contains_key("create_oracle.id") {
+                    let id = events.get("create_oracle.id")?.get(0)?.to_owned();
+                    let mut participants = vec![];
+                    for p in events.get("create_oracle.participants")? {
+                        if let Ok(identifier) = from_base64(p) {
+                            participants.push(pubkey_to_identifier(&identifier));
+                        }
+                    };
+                    if let Ok(threshold) = events.get("create_oracle.threshold")?.get(0)?.parse() {
+                        if threshold as usize * 3 >= participants.len() * 2  {
+                            tasks.push(Task::new_dkg(id, participants, threshold));
+                        }
+                    }
+                }
+            },
+            _ => {},
+        }
+        Some(tasks)
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task, priv_key: &frost_adaptor_signature::keys::KeyPackage, pub_key: &frost_adaptor_signature::keys::PublicKeyPackage) {
         let tweak = None;
         let rawkey = pub_key.verifying_key().serialize().unwrap();
-        let hexkey = hex::encode(&rawkey);
+        let hexkey = hex::encode(&rawkey[1..]);
         let keyshare = VaultKeypair {
             pub_key: pub_key.clone(),
             priv_key: priv_key.clone(),
@@ -63,12 +86,14 @@ impl DKGAdaptor for KeygenHander {
         };
         ctx.keystore.save(&hexkey, &keyshare);
 
-        let signature = hex::encode(ctx.node_key.sign(&rawkey, None));
+        let id: u64 = task.id.replace("oracle-", "").parse().unwrap();
+        let message = hash(&[&id.to_be_bytes()[..], &rawkey[1..]].concat());
+        let signature = hex::encode(ctx.node_key.sign(&hex::decode(message).unwrap(), None));
 
         let cosm_msg = MsgSubmitOraclePubKey {
-            oracle_id: task.id.replace("oracle-", "").parse().unwrap(),
+            oracle_id: id,
             sender: ctx.conf.relayer_bitcoin_address(),
-            pub_key: hexkey.clone(),
+            pub_key: to_base64(ctx.node_key.public_key().as_slice()),
             signature,
             oracle_pubkey: hexkey,
         };
@@ -82,8 +107,11 @@ impl DKGAdaptor for KeygenHander {
 }
 pub struct AttestationHandler{}
 impl SignAdaptor for AttestationHandler {
-    fn new_task(&self, events: &Vec<Event>) -> Option<Task> {
-        todo!()
+    fn new_task(&self, event: &SideEvent) -> Option<Vec<Task>> {
+        if let SideEvent::BlockEvent(_events) = event {
+            
+        }
+        None
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task)-> anyhow::Result<()> {
         for (_, input) in task.sign_inputs.iter() {
@@ -104,11 +132,12 @@ impl SignAdaptor for AttestationHandler {
 }
 
 pub struct NonceHander{
+    pub conf: Config,
     pub signer: StandardSigner<NonceSigningHandler>
 }
 impl DKGAdaptor for NonceHander {
-    fn new_task(&self, events: &Vec<Event>) -> Option<Task> {
-        todo!()
+    fn new_task(&self, event: &SideEvent) -> Option<Vec<Task>> {
+        Some(vec![])
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task, priv_key: &frost_adaptor_signature::keys::KeyPackage, pub_key: &frost_adaptor_signature::keys::PublicKeyPackage) {
         let tweak = None;
@@ -134,7 +163,10 @@ impl DKGAdaptor for NonceHander {
 
 pub struct NonceSigningHandler{}
 impl SignAdaptor for NonceSigningHandler{
-    fn new_task(&self, events: &Vec<Event>) -> Option<Task> {
+    fn new_task(&self, event: &SideEvent) -> Option<Vec<Task>> {
+        if let SideEvent::BlockEvent(_events) = event {
+            
+        }
         None
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task) -> anyhow::Result<()> {

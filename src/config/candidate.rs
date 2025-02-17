@@ -4,7 +4,7 @@ use frost_adaptor_signature::Identifier;
 use libp2p::PeerId;
 use tracing::warn;
 
-use crate::helper::{client_side, encoding::{identifier_to_peer_id, pubkey_to_identifier}, now};
+use crate::helper::{client_side, encoding::{base64_to_projective_point, identifier_to_peer_id, pubkey_to_identifier}, now};
 
 #[derive(Debug)]
 pub struct Candidate {
@@ -53,9 +53,11 @@ impl Candidate {
 
         validators.iter().for_each(|v| {
             if let Some(k) = &v.pub_key {
-                let id = pubkey_to_identifier(&k.value);
-                self.peers.push(identifier_to_peer_id(&id ));
-                self.identifiers.push( id );
+                println!("pubkey: {:?}", k.value );
+                // let point = base64_to_projective_point(&k.value);
+                // let id = pubkey_to_identifier(&k.value);
+                // self.peers.push(identifier_to_peer_id(&id ));
+                // self.identifiers.push( id );
             }
         });
     }

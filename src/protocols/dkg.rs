@@ -7,21 +7,20 @@ use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 use libp2p::gossipsub::IdentTopic;
 use rand::thread_rng;
 use serde::de::DeserializeOwned;
-use tendermint::abci::Event;
 use tracing::{debug, error, info};
 use serde::{Deserialize, Serialize};
 
 use frost_adaptor_signature as frost;
 use frost::{Identifier, keys::dkg::round1};
 
-use crate::apps::{Context, Status, SubscribeMessage, Task};
+use crate::apps::{Context, SideEvent, Status, SubscribeMessage, Task};
 use crate::helper::gossip::publish_topic_message;
 use crate::helper::store::Store;
 use crate::helper::mem_store;
 use crate::helper::cipher::{decrypt, encrypt};
 
 pub trait DKGAdaptor {
-    fn new_task(&self, events: &Vec<Event>) -> Option<Task>;
+    fn new_task(&self, events: &SideEvent) -> Option<Vec<Task>>;
     fn on_complete(&self, ctx: &mut Context, task: &mut Task, key: &KeyPackage, pubkey: &PublicKeyPackage);
 }
 
@@ -46,11 +45,13 @@ impl<H> DKG<H> where H: DKGAdaptor {
         &self.handler
     }
 
-    pub fn execute(&self, ctx: &mut Context, events: &Vec<Event>) {
-        if let Some(task) = self.handler.new_task(events) {
-            if ctx.task_store.exists(&task.id) { return }
-            ctx.task_store.save(&task.id, &task);
-            self.generate(ctx, &task);
+    pub fn execute(&self, ctx: &mut Context, event: &SideEvent) {
+        if let Some(tasks) = self.handler.new_task(event) {
+            tasks.iter().for_each(|task| {
+                if ctx.task_store.exists(&task.id) { return }
+                ctx.task_store.save(&task.id, &task);
+                self.generate(ctx, &task);
+            })
         }
     }
 }

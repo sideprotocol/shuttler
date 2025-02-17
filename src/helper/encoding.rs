@@ -3,7 +3,6 @@ use bitcoin::hashes::{Hash, sha256};
 use frost_adaptor_signature::keys::PublicKeyPackage;
 use frost_adaptor_signature::Field;
 use frost_adaptor_signature::Group;
-use frost_adaptor_signature::GroupError;
 use frost_adaptor_signature::Identifier;
 use frost_adaptor_signature::Secp256K1Group;
 use frost_adaptor_signature::Secp256K1ScalarField;

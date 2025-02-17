@@ -8,7 +8,7 @@ use futures::stream::StreamExt;
 use libp2p::{
     gossipsub, identify, identity::Keypair, kad::{self, store::MemoryStore}, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, Multiaddr, PeerId, Swarm
 };
-use tendermint_rpc::{query::EventType, event::Event, SubscriptionClient, WebSocketClient};
+use tendermint_rpc::{event::Event, query::EventType, SubscriptionClient, WebSocketClient};
 use tokio::{select, signal, spawn};
 use tracing::{debug, info, warn, error};
 
@@ -177,44 +177,44 @@ impl<'a> Shuttler<'a> {
         });
 
         // Connect to the Tendermint WebSocket endpoint
-        // let (client, driver) = WebSocketClient::new(conf.websocket_endpoint().as_str())
-        // .await
-        // .expect("Failed to connect to WebSocket");
+        let (client, driver) = WebSocketClient::new(conf.websocket_endpoint().as_str())
+        .await
+        .expect("Failed to connect to WebSocket");
 
-        // // Spawn the WebSocket driver in a separate task
-        // tokio::spawn(async move {
-        //     if let Err(e) = driver.run().await {
-        //         eprintln!("WebSocket driver error: {}", e);
-        //     }
-        // });
+        // Spawn the WebSocket driver in a separate task
+        tokio::spawn(async move {
+            if let Err(e) = driver.run().await {
+                eprintln!("WebSocket driver error: {}", e);
+            }
+        });
 
         // Subscribe to NewBlock events
-        // let query = EventType::NewBlock.into();
-        // // let query = Query::from_str("/cosmos.bank.v1beta1.MsgSend").unwrap();
-        // let mut subscription = client.subscribe(query).await.expect("Subscription failed");
+        let query = EventType::NewBlock.into();
+        // let query = Query::from_str("/cosmos.bank.v1beta1.MsgSend").unwrap();
+        let mut subscription = client.subscribe(query).await.expect("Subscription failed");
 
         // Common Setting: Context and Heart Beat
         let mut context = Context::new(swarm, tx_sender, identifier, node_key, conf.clone()); 
 
-        for provider in PRICE_PROVIDERS.deref() {
-            let price_store = Arc::clone(&context.price_store);
-            tokio::spawn(async move {
-                let ps = PriceSubscriber::new(provider.to_owned());
-                ps.start(price_store.as_ref()).await;
-            });
-        }
+        // for provider in PRICE_PROVIDERS.deref() {
+        //     let price_store = Arc::clone(&context.price_store);
+        //     tokio::spawn(async move {
+        //         let ps = PriceSubscriber::new(provider.to_owned());
+        //         ps.start(price_store.as_ref()).await;
+        //     });
+        // }
 
-        let price_store = Arc::clone(&context.price_store);
-        tokio::spawn(async move{
-            run_rpc_server(price_store).await.expect("RPC Server stopped");
-        });
+        // let price_store = Arc::clone(&context.price_store);
+        // tokio::spawn(async move{
+        //     run_rpc_server(price_store).await.expect("RPC Server stopped");
+        // });
 
         // let mut context = Arc::clone(&arc_context);
         loop {
             select! {
-                // Some(Ok(event)) = subscription.next() => {
-                //     self.handle_block_event(&mut context, event);
-                // }
+                Some(Ok(event)) = subscription.next() => {
+                    self.handle_block_event(&mut context, event);
+                }
                 swarm_event = context.swarm.select_next_some() => match swarm_event {
                     SwarmEvent::Behaviour(ShuttlerBehaviourEvent::Gossip(gossipsub::Event::Message{ message, .. })) => {
                         update_received_heartbeat(&context, &message);
@@ -290,18 +290,27 @@ impl<'a> Shuttler<'a> {
     // }
 
     fn handle_block_event(&self, ctx: &mut Context, event: Event) {
+        if let Some(events) = event.events {
+            let e = crate::apps::SideEvent::BlockEvent(events);
+            self.apps.iter().for_each(|a| a.on_event(ctx, &e));
+        }
         match event.data {
             tendermint_rpc::event::EventData::NewBlock { block, result_finalize_block , ..} => {
                 if let Some(b) = block { 
                     sending_heart_beat(ctx, b.header.height.value());
                 }
                 if let Some(finalize_block) = result_finalize_block {
+                    // debug!("tx_result: {:?}", finalize_block.tx_results);
                     for tx in finalize_block.tx_results {
                         if tx.code.is_err() {continue;}
-                        self.apps.iter().for_each(|a| a.on_event(ctx, &tx.events));
+                        let e = crate::apps::SideEvent::TxEvent(tx.events);
+                        self.apps.iter().for_each(|a| a.on_event(ctx, &e ));
                     }
                 }
             },
+            tendermint_rpc::event::EventData::Tx { tx_result } => {
+                debug!("tx_info: {:?}", tx_result);
+            }
             _ => debug!("Dose not support {}", event.query),
         }
     }

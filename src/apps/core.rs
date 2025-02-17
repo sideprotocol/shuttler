@@ -4,9 +4,10 @@ use ed25519_compact::SecretKey;
 use frost_adaptor_signature::{round1, round2, AdaptorSignature, Identifier, Signature};
 use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{Deserialize, Serialize};
+use tendermint_rpc::event::Event;
 use std::{collections::BTreeMap, sync::Arc};
 use std::sync::mpsc::Sender;
-use tendermint::abci::{Event, EventAttribute};
+use tendermint::abci::Event as TxEvent;
 
 use crate::{
     apps::ShuttlerBehaviour,
@@ -20,10 +21,15 @@ use crate::{
 
 pub type SubscribeMessage = libp2p::gossipsub::Message;
 
+pub enum SideEvent {
+    BlockEvent(BTreeMap<String, Vec<String>>),
+    TxEvent(Vec<TxEvent>)
+}
+
 pub trait App {
     fn subscribe_topics(&self) -> Vec<IdentTopic>;
     fn on_message(&self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()>;
-    fn on_event(&self, ctx: &mut Context, event: &Vec<Event>);
+    fn on_event(&self, ctx: &mut Context, event: &SideEvent);
     // fn on_tick(&self, ctx: &mut Context);
     // fn tick(&self) -> Duration;
 }
