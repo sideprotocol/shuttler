@@ -4,8 +4,7 @@ use ed25519_compact::SecretKey;
 use frost_adaptor_signature::{round1, round2, AdaptorSignature, Identifier, Signature};
 use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{Deserialize, Serialize};
-use tendermint_rpc::event::Event;
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 use std::sync::mpsc::Sender;
 use tendermint::abci::Event as TxEvent;
 
@@ -15,8 +14,8 @@ use crate::{
     helper::{
         encoding::to_base64,
         now,
-        store::{DefaultStore, MemStore, Store},
-    }, providers::PriceStore,
+        store::{DefaultStore, MemStore},
+    },
 };
 
 pub type SubscribeMessage = libp2p::gossipsub::Message;

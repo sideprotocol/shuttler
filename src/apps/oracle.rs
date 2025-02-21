@@ -9,9 +9,9 @@ use crate::helper::store::Store;
 use crate::protocols::sign::{SignAdaptor, StandardSigner};
 use crate::protocols::dkg::{DKGAdaptor, DKG};
 
-use crate::apps::{App, Context, FrostSignature, Input, Status, SubscribeMessage, Task};
+use crate::apps::{App, Context, FrostSignature, Input, SubscribeMessage, Task};
 
-use super::{SideEvent, SignMode};
+use super::SideEvent;
 
 pub struct Oracle {
     pub keygen: DKG<KeygenHander>,
@@ -58,7 +58,7 @@ impl DKGAdaptor for KeygenHander {
         match event {
             SideEvent::BlockEvent(events) => {
                 if events.contains_key("create_oracle.id") {
-                    let id = events.get("create_oracle.id")?.get(0)?.to_owned();
+                    let id = format!("oracle-{}", events.get("create_oracle.id")?.get(0)?.to_owned());
                     let mut participants = vec![];
                     for p in events.get("create_oracle.participants")? {
                         if let Ok(identifier) = from_base64(p) {
@@ -110,7 +110,7 @@ impl DKGAdaptor for KeygenHander {
 }
 pub struct AttestationHandler{}
 impl SignAdaptor for AttestationHandler {
-    fn new_task(&self, event: &SideEvent) -> Option<Vec<Task>> {
+    fn new_task(&self, _ctx: &mut Context, event: &SideEvent) -> Option<Vec<Task>> {
         if let SideEvent::BlockEvent(_events) = event {
             
         }
@@ -186,11 +186,10 @@ impl DKGAdaptor for NonceHander {
 
 pub struct NonceSigningHandler{}
 impl SignAdaptor for NonceSigningHandler{
-    fn new_task(&self, _event: &SideEvent) -> Option<Vec<Task>> {
+    fn new_task(&self, _ctx: &mut Context,  _event: &SideEvent) -> Option<Vec<Task>> {
         None
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task) -> anyhow::Result<()> {
-        debug!(" Completed: {:?}", task.id);
         for (_, input) in task.sign_inputs.iter() {
             if let Some(FrostSignature::Standard(signature)) = input.signature  {
                 let cosm_msg = MsgSubmitNonce {

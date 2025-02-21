@@ -3,7 +3,6 @@
 use frost_adaptor_signature::Identifier;
 use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{Deserialize, Serialize};
-use side_proto::cosmos::base::tendermint::v1beta1::{service_client::ServiceClient as BlockService, GetLatestBlockRequest};
 
 use crate::apps::{Context, Shuttler, ShuttlerBehaviour};
 

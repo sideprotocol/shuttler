@@ -46,7 +46,7 @@ impl DKGAdaptor for KeygenHander {
         match event {
             SideEvent::BlockEvent(events) => {
                 if events.contains_key("create_agency.id") {
-                    let id = events.get("create_agency.id")?.get(0)?.to_owned();
+                    let id = format!("agency-{}", events.get("create_agency.id")?.get(0)?.to_owned());
                     let mut participants = vec![];
                     for p in events.get("create_agency.participants")? {
                         if let Ok(identifier) = from_base64(p) {
@@ -97,7 +97,26 @@ impl DKGAdaptor for KeygenHander {
 
 pub struct SignatureHandler {}
 impl SignAdaptor for SignatureHandler {
-    fn new_task(&self, event: &SideEvent) -> Option<Vec<Task>> {
+    fn new_task(&self, _ctx: &mut Context, event: &SideEvent) -> Option<Vec<Task>> {
+        match event {
+            SideEvent::BlockEvent(events) => {
+                if events.contains_key("create_agency.id") {
+                    // let id = format!("agency-{}", events.get("create_agency.id")?.get(0)?.to_owned());
+                    // let mut participants = vec![];
+                    // for p in events.get("create_agency.participants")? {
+                    //     if let Ok(identifier) = from_base64(p) {
+                    //         participants.push(pubkey_to_identifier(&identifier));
+                    //     }
+                    // };
+                    // if let Ok(threshold) = events.get("create_agency.threshold")?.get(0)?.parse() {
+                    //     if threshold as usize * 3 >= participants.len() * 2  {
+                    //         return Some(vec![Task::new_dkg(id, participants, threshold)])
+                    //     }
+                    // }
+                }
+            },
+            _ => {},
+        }
         None
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task)-> anyhow::Result<()> {

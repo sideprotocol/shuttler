@@ -27,7 +27,7 @@ pub async fn home() -> &'static str  {
 pub async fn health() -> &'static str {
     "hello health"
 }
-pub async fn metrics(State(state): State<AppState>) -> &'static str {
+pub async fn metrics(State(_state): State<AppState>) -> &'static str {
     "hello metrics"
 }
 
@@ -35,11 +35,11 @@ pub async fn prices(State(s): State<AppState>) -> String {
     let x: Vec<BTreeMap<String, Price>> = s.list_prices();
     match serde_json::to_string(&x) {
         Ok(t) => t,
-        Err(e) => "error".to_string(),
+        Err(_e) => "error".to_string(),
     }
 }
 
-pub async fn addresses(State(state): State<AppState>) -> &'static str {
+pub async fn addresses(State(_state): State<AppState>) -> &'static str {
 
     // ...
     "hello metrics"

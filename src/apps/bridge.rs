@@ -9,7 +9,6 @@ use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 
 use side_proto::side::btcbridge::{MsgCompleteDkg, MsgSubmitSignatures};
 
-use crate::apps::event::{get_event_value, has_event_value};
 use crate::apps::{App, Context, Status, SubscribeMessage, Task };
 use crate::config::{Config, VaultKeypair};
 use crate::helper::bitcoin::get_group_address_by_tweak;
@@ -61,7 +60,7 @@ impl App for BridgeSigner {
 
 pub struct KeygenHander{}
 impl DKGAdaptor for KeygenHander {
-    fn new_task(&self, event: &SideEvent) -> Option<Vec<Task>> {
+    fn new_task(&self, _event: &SideEvent) -> Option<Vec<Task>> {
         // if has_event_value(events, "") {
         //     let id = get_event_value(events, "message", "id")?;
         //     let participants = get_event_value(events, "message", "id")?;
@@ -142,7 +141,7 @@ pub fn generate_vault_addresses(
 
 pub struct SignatureHandler{}
 impl SignAdaptor for SignatureHandler {
-    fn new_task(&self, _events: &SideEvent) -> Option<Vec<Task>> {
+    fn new_task(&self, _ctx: &mut Context,  _events: &SideEvent) -> Option<Vec<Task>> {
         None
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task) -> anyhow::Result<()> {

@@ -31,7 +31,7 @@ pub enum SignPackage {
 }
 
 pub trait SignAdaptor {
-    fn new_task(&self, events: &SideEvent) -> Option<Vec<Task>>;
+    fn new_task(&self, ctx: &mut Context, events: &SideEvent) -> Option<Vec<Task>>;
     fn on_complete(&self, ctx: &mut Context, task: &mut Task) -> anyhow::Result<()>;
 }
 
@@ -56,7 +56,7 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
     // }
 
     pub fn execute(&self, ctx: &mut Context, event: &SideEvent) {
-        if let Some(tasks) = self.handler.new_task(event) {
+        if let Some(tasks) = self.handler.new_task(ctx, event) {
             tasks.iter().for_each(|task| {
                 if ctx.task_store.exists(&task.id) { return }
                 ctx.task_store.save(&task.id, &task);

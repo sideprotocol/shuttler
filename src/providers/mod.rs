@@ -6,7 +6,7 @@ use mexc::MEXC_PROVIDER;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
-use crate::{apps::Context, helper::store::{DefaultStore, SledStore, Store}};
+use crate::helper::store::{DefaultStore, Store};
 use std::time::Duration;
 
 use tokio::{net::TcpStream, time::sleep};
