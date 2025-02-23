@@ -82,8 +82,8 @@ pub enum Status {
 pub enum SignMode {
     Sign,
     SignWithTweak,
-    SignWithGroupcommitment(String),
-    SignWithAdaptorPoint(String),
+    SignWithGroupcommitment(frost_adaptor_signature::VerifyingKey),
+    SignWithAdaptorPoint(frost_adaptor_signature::VerifyingKey),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

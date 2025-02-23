@@ -19,6 +19,10 @@ pub fn from_base64(input: &str) -> Result<Vec<u8>, base64::DecodeError> {
     STANDARD.decode(input)
 }
 
+pub fn hash_byte(bytes: &[u8]) -> Vec<u8> {
+    let x = sha256::Hash::hash(bytes);
+    x.as_byte_array().as_slice().to_vec()
+}
 pub fn hash(bytes: &[u8]) -> String {
     let x = sha256::Hash::hash(bytes);
     x.to_string()

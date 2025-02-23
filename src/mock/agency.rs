@@ -1,4 +1,4 @@
-use side_proto::side::lending::{query_server::Query as LendingQuery, QueryCollateralAddressRequest, QueryCollateralAddressResponse, QueryLiquidationCetRequest, QueryLiquidationCetResponse, QueryLiquidationEventRequest, QueryLiquidationEventResponse, QueryLoanDlcMetaRequest, QueryLoanDlcMetaResponse, QueryLoanRequest, QueryLoanResponse, QueryLoansRequest, QueryLoansResponse, QueryParamsRequest, QueryParamsResponse, QueryRepaymentRequest, QueryRepaymentResponse};
+use side_proto::side::lending::{query_server::Query as LendingQuery, QueryPoolRequest, QueryPoolResponse, QueryCollateralAddressRequest, QueryCollateralAddressResponse, QueryLiquidationCetRequest, QueryLiquidationCetResponse, QueryLiquidationEventRequest, QueryLiquidationEventResponse, QueryLoanDlcMetaRequest, QueryLoanDlcMetaResponse, QueryLoanRequest, QueryLoanResponse, QueryLoansRequest, QueryLoansResponse, QueryParamsRequest, QueryParamsResponse, QueryPoolsRequest, QueryPoolsResponse, QueryRepaymentRequest, QueryRepaymentResponse};
 
 use super::MockQuery;
 
@@ -48,6 +48,18 @@ fn liquidation_event<'life0,'async_trait>(&'life0 self,_request:tonic::Request<Q
     #[must_use]
     #[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
     fn repayment<'life0,'async_trait>(&'life0 self,_request:tonic::Request<QueryRepaymentRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<QueryRepaymentResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+        todo!()
+    }
+    
+    #[must_use]
+    #[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
+    fn pool<'life0,'async_trait>(&'life0 self,_request:tonic::Request<QueryPoolRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<QueryPoolResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+        todo!()
+    }
+    
+    #[must_use]
+    #[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
+    fn pools<'life0,'async_trait>(&'life0 self,_request:tonic::Request<QueryPoolsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<QueryPoolsResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 

@@ -1,5 +1,10 @@
+use std::collections::BTreeMap;
+
 use cosmrs::Any;
-use side_proto::side::dlc::{MsgSubmitAgencyPubKey, MsgSubmitAttestation};
+use frost_adaptor_signature::VerifyingKey;
+use side_proto::side::dlc::MsgSubmitAgencyPubKey;
+use side_proto::side::lending::{MsgSubmitLiquidationCetSignatures, MsgSubmitRepaymentAdaptorSignatures};
+use tracing::error;
 use crate::config::VaultKeypair;
 use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier, to_base64};
 use crate::helper::store::Store;
@@ -8,7 +13,8 @@ use crate::protocols::dkg::{DKGAdaptor, DKG};
 
 use crate::apps::{App, Context, FrostSignature, SubscribeMessage, Task};
 
-use super::SideEvent;
+use super::event::get_attribute_value;
+use super::{Input, SideEvent, SignMode};
 
 pub struct Agency {
     pub keygen: DKG<KeygenHander>,
@@ -42,22 +48,30 @@ impl App for Agency {
 
 pub struct KeygenHander{}
 impl DKGAdaptor for KeygenHander {
-    fn new_task(&self, event: &SideEvent) -> Option<Vec<Task>> {
+    fn new_task(&self, _ctx: &mut Context, event: &SideEvent) -> Option<Vec<Task>> {
         match event {
             SideEvent::BlockEvent(events) => {
                 if events.contains_key("create_agency.id") {
-                    let id = format!("agency-{}", events.get("create_agency.id")?.get(0)?.to_owned());
-                    let mut participants = vec![];
-                    for p in events.get("create_agency.participants")? {
-                        if let Ok(identifier) = from_base64(p) {
-                            participants.push(pubkey_to_identifier(&identifier));
-                        }
-                    };
-                    if let Ok(threshold) = events.get("create_agency.threshold")?.get(0)?.parse() {
-                        if threshold as usize * 3 >= participants.len() * 2  {
-                            return Some(vec![Task::new_dkg(id, participants, threshold)])
-                        }
-                    }
+                    println!("Events: {:?}", events);
+
+                    let mut tasks = vec![];
+                    for ((id, ps), t) in events.get("create_agency.id")?.iter()
+                        .zip(events.get("create_agency.participants")?)
+                        .zip(events.get("create_agency.threshold")?) {
+                        
+                            let mut participants = vec![];
+                            for p in ps.split(",") {
+                                if let Ok(identifier) = from_base64(p) {
+                                    participants.push(pubkey_to_identifier(&identifier));
+                                }
+                            };
+                            if let Ok(threshold) = t.parse() {
+                                if threshold as usize * 3 >= participants.len() * 2  {
+                                    tasks.push(Task::new_dkg(format!("agency-{}", id), participants, threshold));
+                                }
+                            }
+                        };
+                    return Some(tasks);
                 }
             },
             _ => {},
@@ -97,41 +111,114 @@ impl DKGAdaptor for KeygenHander {
 
 pub struct SignatureHandler {}
 impl SignAdaptor for SignatureHandler {
-    fn new_task(&self, _ctx: &mut Context, event: &SideEvent) -> Option<Vec<Task>> {
+    fn new_task(&self, ctx: &mut Context, event: &SideEvent) -> Option<Vec<Task>> {
         match event {
             SideEvent::BlockEvent(events) => {
-                if events.contains_key("create_agency.id") {
-                    // let id = format!("agency-{}", events.get("create_agency.id")?.get(0)?.to_owned());
-                    // let mut participants = vec![];
-                    // for p in events.get("create_agency.participants")? {
-                    //     if let Ok(identifier) = from_base64(p) {
-                    //         participants.push(pubkey_to_identifier(&identifier));
-                    //     }
-                    // };
-                    // if let Ok(threshold) = events.get("create_agency.threshold")?.get(0)?.parse() {
-                    //     if threshold as usize * 3 >= participants.len() * 2  {
-                    //         return Some(vec![Task::new_dkg(id, participants, threshold)])
-                    //     }
-                    // }
+                if events.contains_key("liquidate.loan_id") {
+                    println!("Liquidate:{:?}", events);
+                    let mut tasks = vec![];
+                    for ((id, agency_pubkey), sig_hashes) in events.get("liquidate.loan_id")?.iter()
+                        .zip(events.get("liquidate.agency_pub_key")?)
+                        .zip(events.get("liquidate.sig_hashes")?) {
+                            if let Some(keypair) = ctx.keystore.get(&agency_pubkey) {                            
+                                let mut sign_inputs = BTreeMap::new();
+                                let participants = keypair.pub_key.verifying_shares().keys().map(|p| p.clone()).collect::<Vec<_>>();
+                                for sig_hash in sig_hashes.split(",") {
+                                    if let Ok(message) = from_base64(sig_hash) {
+                                        sign_inputs.insert(0, Input::new_with_message_mode(agency_pubkey.to_owned(), message, participants.clone(), SignMode::Sign));
+                                    }
+                                }
+                                let task= Task::new_signing(format!("liquidate-{}", id), "" , sign_inputs);
+                                tasks.push(task);
+                            }
+                        };
+                    return Some(tasks);
                 }
+                // if events.contains_key("repay.loan_id") {
+                //     println!("Repay:{:?}", events);
+                //     let mut tasks = vec![];
+                //     for (((id, agency_pubkey), adaptor_point), sig_hashes) in events.get("repay.loan_id")?.iter()
+                //         .zip(events.get("repay.agency_pub_key")?)
+                //         .zip(events.get("repay.adaptor_point")?)
+                //         .zip(events.get("repay.sig_hashes")?) {
+                //             if let Some(keypair) = ctx.keystore.get(&agency_pubkey) {    
+                //                 let participants = keypair.pub_key.verifying_shares().keys().map(|p| p.clone()).collect::<Vec<_>>();
+                //                 let adaptor = ctx.keystore.get(adaptor_point)?;
+                //                 let mode = SignMode::SignWithAdaptorPoint(adaptor.pub_key.verifying_key().clone());                        
+                //                 let mut sign_inputs = BTreeMap::new();
+                //                 for sig_hash in sig_hashes.split(",") {
+                //                     if let Ok(message) = from_base64(sig_hash) {
+                //                         sign_inputs.insert(0, Input::new_with_message_mode(agency_pubkey.to_owned(), message, participants.clone(), mode.clone()));
+                //                     }
+                //                 }
+                //                 let task= Task::new_signing(format!("repay-{}", id), "" , sign_inputs);
+                //                 tasks.push(task);
+                //             }
+                //         };
+                //     return Some(tasks);
+                // }
             },
-            _ => {},
+            SideEvent::TxEvent(events) => {
+                let mut tasks = vec![];
+                for e in events.iter().filter(|e| e.kind == "repay") {
+                    let loan_id = get_attribute_value(&e.attributes, "loan_id")?;
+                    let agency_pubkey = get_attribute_value(&e.attributes, "agency_pub_key")?;
+                    let adaptor_point = get_attribute_value(&e.attributes, "adaptor_point")?;
+                    let sig_hashes = get_attribute_value(&e.attributes, "sig_hashes")?;
+
+                    if let Some(keypair) = ctx.keystore.get(&agency_pubkey) {
+                        let participants = keypair.pub_key.verifying_shares().keys().map(|p| p.clone()).collect::<Vec<_>>();
+                        let hex_adaptor = hex::decode(adaptor_point).ok()?;
+                        
+                        if let Ok(adaptor) = VerifyingKey::deserialize(&hex_adaptor) {
+                            let mode = SignMode::SignWithAdaptorPoint(adaptor);                        
+                            let mut sign_inputs = BTreeMap::new();
+                            for sig_hash in sig_hashes.split(",") {
+                                if let Ok(message) = from_base64(sig_hash) {
+                                    sign_inputs.insert(0, Input::new_with_message_mode(agency_pubkey.to_owned(), message, participants.clone(), mode.clone()));
+                                }
+                            }
+                            let task= Task::new_signing(format!("repay-{}", loan_id), "" , sign_inputs);
+                            tasks.push(task);
+                        } else {
+                            error!("Invalid adaptor point");
+                        }
+                    }
+
+                };
+                return Some(tasks);
+            },
         }
         None
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task)-> anyhow::Result<()> {
-        for (_, input) in task.sign_inputs.iter() {
-            if let Some(FrostSignature::Standard(sig)) = input.signature  {
-                let cosm_msg = MsgSubmitAttestation {
-                    event_id: task.id.replace("attest-", "").parse()?,
-                    sender: ctx.conf.relayer_bitcoin_address(),
-                    signature: to_base64(&sig.serialize()?),
-                };
-                let any = Any::from_msg(&cosm_msg)?;
-                if let Err(e) = ctx.tx_sender.send(any) {
-                    tracing::error!("{:?}", e)
+        let cosm_msg = if task.id.starts_with("liquidate") { 
+            let mut sigs = vec![];
+            for (_, input) in task.sign_inputs.iter() {
+                if let Some(FrostSignature::Standard(sig)) = &input.signature  {
+                    sigs.push(hex::encode(&sig.serialize()?));
                 }
             }
+            Any::from_msg(&MsgSubmitLiquidationCetSignatures {
+                loan_id: task.id.replace("liquidate-", ""),
+                sender: ctx.conf.relayer_bitcoin_address(),
+                signatures: sigs,
+            })?
+        } else {
+            let mut sigs = vec![];
+            for (_, input) in task.sign_inputs.iter() {
+                if let Some(FrostSignature::Adaptor(sig)) = &input.signature  {
+                    sigs.push(hex::encode(&sig.0.serialize()?));
+                }
+            }
+            Any::from_msg(&MsgSubmitRepaymentAdaptorSignatures {
+                loan_id: task.id.replace("repay-", ""),
+                sender: ctx.conf.relayer_bitcoin_address(),
+                adaptor_signatures: sigs,
+            })?
+        };
+        if let Err(e) = ctx.tx_sender.send(cosm_msg) {
+            tracing::error!("{:?}", e)
         }
         Ok(())
     }

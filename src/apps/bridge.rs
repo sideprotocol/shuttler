@@ -60,7 +60,7 @@ impl App for BridgeSigner {
 
 pub struct KeygenHander{}
 impl DKGAdaptor for KeygenHander {
-    fn new_task(&self, _event: &SideEvent) -> Option<Vec<Task>> {
+    fn new_task(&self, _ctx: &mut Context, _event: &SideEvent) -> Option<Vec<Task>> {
         // if has_event_value(events, "") {
         //     let id = get_event_value(events, "message", "id")?;
         //     let participants = get_event_value(events, "message", "id")?;

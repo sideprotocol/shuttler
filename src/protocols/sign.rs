@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
-use frost_adaptor_signature::{keys::Tweak, round1::{self, Nonce, SigningNonces}, round2::{self, SignatureShare}, Field, Identifier, Secp256K1ScalarField, SigningPackage};
+use bitcoin::hex::DisplayHex;
+use frost_adaptor_signature::{round1::{self, Nonce, SigningNonces}, round2::{self, SignatureShare}, Field, Identifier, Secp256K1ScalarField, SigningPackage};
 use libp2p::gossipsub::IdentTopic;
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
@@ -9,8 +10,7 @@ pub use tracing::error;
 use usize as Index;
 use crate::{apps::{Context, FrostSignature, SideEvent, SignMode, Status, SubscribeMessage, Task}, config::VaultKeypair, 
     helper::{
-        bitcoin::convert_tweak, encoding::hex_to_projective_point, 
-        gossip::publish_topic_message, 
+        bitcoin::convert_tweak, gossip::publish_topic_message, 
         store::Store
 }};
 
@@ -254,10 +254,19 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
                     );
 
                 let signer_nonces = match &input.mode {
-                    SignMode::SignWithGroupcommitment(g) => { 
-                        let nonce = match ctx.keystore.get(g) {
+                    SignMode::SignWithGroupcommitment(gc) => {
+
+                        let key_b = match gc.serialize() {
+                            Ok(b) => b,
+                            Err(_) => return,
+                        };
+                        
+                        let nonce = match ctx.keystore.get(&key_b[1..].to_lower_hex_string()) {
                             Some(t) => t,
-                            None => return,
+                            None => {
+                                error!("Group Commitment Not Found: {}", key_b.to_lower_hex_string());
+                                return;
+                            },
                         };
                 
                         let hiding = Nonce::from_scalar(nonce.priv_key.signing_share().to_scalar());
@@ -277,7 +286,10 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
 
                 let signature_shares = match sign(&input.mode, &keypair, &signing_package, signer_nonces, ) {
                     Ok(s) => s,
-                    Err(_e) => return,
+                    Err(e) => {
+                        error!("Sign error: {}", e);
+                        return;
+                    },
                 };
                 
                 let mut my_share = BTreeMap::new();
@@ -415,13 +427,12 @@ fn sign(mode: &SignMode, keypair: &VaultKeypair, signing_package: &SigningPackag
                 signing_package, signer_nonces, &keypair.priv_key, tweek
             )?)
         },
-        SignMode::SignWithGroupcommitment(group) => {
-            let group_commitment = hex_to_projective_point(group)?;
+        SignMode::SignWithGroupcommitment(group_commitment) => {
+            // let group_commitment = hex_to_projective_point(group)?;
             Ok(round2::sign_with_dkg_nonce(signing_package, signer_nonces, &keypair.priv_key, &group_commitment)?)
         },
-        SignMode::SignWithAdaptorPoint(point) => {
+        SignMode::SignWithAdaptorPoint(adaptor_point) => {
             // adatpor signature
-            let adaptor_point = hex_to_projective_point(point)?;
             Ok(round2::sign_with_adaptor_point(
                 signing_package, signer_nonces, &keypair.priv_key, &adaptor_point,
             )?)
@@ -434,31 +445,20 @@ fn aggregate(signing_package: &SigningPackage, signature_shares: &BTreeMap<Ident
     match mode {
         SignMode::SignWithTweak => {
             let tweek  = convert_tweak(&keypair.tweak);
-            let frost_signature = frost_adaptor_signature::aggregate_with_tweak(&signing_package, signature_shares, &keypair.pub_key, tweek)?;
-
-            Ok(keypair.pub_key.clone().tweak(tweek)
-                            .verifying_key()
-                            .verify(signing_package.message(), &frost_signature)
-                            .map(|_| FrostSignature::Standard(frost_signature))?)
+            let signature = frost_adaptor_signature::aggregate_with_tweak(&signing_package, signature_shares, &keypair.pub_key, tweek)?;
+            Ok(FrostSignature::Standard(signature))
         },
-        SignMode::SignWithGroupcommitment(gc) => {
-
-            let group_commitment = hex_to_projective_point(gc)?; 
+        SignMode::SignWithGroupcommitment(group_commitment) => {
             let frost_signature = frost_adaptor_signature::aggregate_with_group_commitment(&signing_package, signature_shares, &keypair.pub_key, &group_commitment)?;
-
-            Ok(keypair.pub_key.clone().verifying_key().verify(signing_package.message(), &frost_signature).map(|_| FrostSignature::Standard(frost_signature))?)
+            Ok(FrostSignature::Standard(frost_signature))
         },
-        SignMode::SignWithAdaptorPoint(..) => {
-            let frost_signature = frost_adaptor_signature::aggregate(&signing_package, signature_shares, &keypair.pub_key)?;
-            Ok(keypair.pub_key.clone().verifying_key().verify(signing_package.message(), &frost_signature)
-            .map(|_| FrostSignature::Adaptor(frost_adaptor_signature::AdaptorSignature(frost_signature)))?)
-
+        SignMode::SignWithAdaptorPoint(adaptor_point) => {
+            let frost_signature = frost_adaptor_signature::aggregate_with_adaptor_point(&signing_package, signature_shares, &keypair.pub_key, adaptor_point)?;
+            Ok(FrostSignature::Adaptor(frost_signature))
         }
         _ => {
-
             let frost_signature = frost_adaptor_signature::aggregate(&signing_package, signature_shares, &keypair.pub_key)?;
-            Ok(keypair.pub_key.clone().verifying_key().verify(signing_package.message(), &frost_signature).map(|_| FrostSignature::Standard(frost_signature))?)
-
+            Ok(FrostSignature::Standard(frost_signature))
         }
     }
 
