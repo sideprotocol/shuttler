@@ -1,11 +1,9 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use bitcoin::hashes::{Hash, sha256};
 use frost_adaptor_signature::keys::PublicKeyPackage;
-use frost_adaptor_signature::Field;
 use frost_adaptor_signature::Group;
 use frost_adaptor_signature::Identifier;
 use frost_adaptor_signature::Secp256K1Group;
-use frost_adaptor_signature::Secp256K1ScalarField;
 use k256::ProjectivePoint;
 use libp2p::PeerId;
 
@@ -40,8 +38,12 @@ pub fn identifier_to_base64(identifier: &Identifier) -> String {
     to_base64(&identifier.serialize())
 }
 pub fn pubkey_to_identifier(key_bytes: &[u8]) -> Identifier {
-    let id = Secp256K1ScalarField::deserialize(key_bytes.try_into().unwrap()).unwrap();
-    Identifier::new(id).unwrap()
+    match Identifier::deserialize(&key_bytes) {
+        Ok(i) => i,
+        Err(e) => {
+            panic!("Identifier error: {}", e);
+        },
+    }
 }
 
 pub fn pubkey_to_point(pubkey: PublicKeyPackage) -> anyhow::Result<ProjectivePoint>  {

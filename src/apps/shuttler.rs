@@ -277,19 +277,19 @@ impl<'a> Shuttler<'a> {
 
     pub async fn is_white_listed_peer(&mut self, peer_id: &PeerId) -> bool {
         
-        self.candidates.sync_from_validators().await;
-        // Allow anyone if no candidate is specified.
-        if self.candidates.peers().len() == 0 {
-            return true;
+        if self.candidates.has_bootstrap_nodes() {
+            self.candidates.sync_from_validators().await;
+            // Allow anyone if no candidate is specified.
+            if self.candidates.peers().len() == 0 {
+                return true;
+            }
+            // Candidates are active validators and bootstrap nodes
+            self.candidates.peers().contains(peer_id)
+        } else {
+            // running in local mode
+            true
         }
-        // Candidates are active validators and bootstrap nodes
-        self.candidates.peers().contains(peer_id)
     }
-
-    // Defines who is allowed to participate in the p2p network.
-    // pub async fn sync_candidates_from_validators(&mut self) {
-    //     self.candidates.sync_from_validators().await;
-    // }
 
     fn handle_block_event(&self, ctx: &mut Context, event: Event) {
         if let Some(events) = event.events {
