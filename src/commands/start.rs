@@ -1,7 +1,8 @@
 
+use tokio::spawn;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-use crate::{apps::{agency::Agency, bridge::BridgeSigner, oracle::Oracle, relayer::Relayer, Shuttler }, config::Config};
+use crate::{apps::{agency::Agency, bridge::BridgeSigner, oracle::Oracle, relayer::Relayer, App, Shuttler }, config::Config};
 
 pub async fn execute(home: &str, relayer: bool, bridge: bool, oracle: bool, agency: bool, seed: bool) {
     
@@ -18,8 +19,8 @@ pub async fn execute(home: &str, relayer: bool, bridge: bool, oracle: bool, agen
 
     let mut shuttler = Shuttler::new(home, seed);
 
-    let r = Relayer::new(conf.clone());
-    if relayer { shuttler.registry( &r); }
+    // let r = Relayer::new(conf.clone());
+    // if relayer { shuttler.registry( &r); }
     let b = BridgeSigner::new(conf.clone());
     if bridge { shuttler.registry( &b); }
     let o = Oracle::new(conf.clone());
@@ -27,6 +28,11 @@ pub async fn execute(home: &str, relayer: bool, bridge: bool, oracle: bool, agen
     let a = Agency::new();
     if agency { shuttler.registry(&a);}
 
+    // start relayer if enabled
+    if relayer {
+        let r = Relayer::new(conf.clone());
+        spawn(async move { r.start().await });
+    }
 
     shuttler.start(&conf).await;
 }

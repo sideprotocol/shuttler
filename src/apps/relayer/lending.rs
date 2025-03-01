@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use bitcoin::{Block, BlockHash, Network, Transaction, Txid};
 use bitcoincore_rpc::RpcApi;
 use futures::join;
@@ -26,7 +24,7 @@ const DB_KEY_SIDE_BLOCK_HEIGHT: &str = "side_block_height";
 const DB_KEY_BITCOIN_BLOCK_HEIGHT: &str = "bitcoin_block_height";
 const DB_KEY_VAULT_PREFIX: &str = "vault";
 
-pub async fn start_relayer_tasks(relayer: Arc<Relayer>) {
+pub async fn start_relayer_tasks(relayer: &Relayer) {
     join!(
         scan_vaults_on_side(&relayer),
         scan_deposit_txs_on_bitcoin(&relayer),
@@ -70,6 +68,21 @@ pub async fn scan_deposit_txs_on_bitcoin(relayer: &Relayer) {
     loop {
         let height = get_last_scanned_height_bitcoin(relayer) + 1;
 
+        let tip_on_bitcoin = match relayer.bitcoin_client.get_block_count() {
+            Ok(height) => height,
+            Err(e) => {
+                error!("Failed to get the block count: {}", e);
+                continue;
+            }
+        };
+
+        if height > tip_on_bitcoin {
+            debug!("No new bitcoin txs to sync, height: {}, bitcoin tip: {}, sleep for {} seconds", height, tip_on_bitcoin, interval);
+
+            sleep(Duration::from_secs(interval)).await;
+            continue;
+        }
+
         let side_tip =
             match client_side::get_bitcoin_tip_on_side(&relayer.config().side_chain.grpc).await {
                 Ok(res) => res.get_ref().height,
@@ -83,7 +96,7 @@ pub async fn scan_deposit_txs_on_bitcoin(relayer: &Relayer) {
 
         let confirmations =
             client_side::get_confirmations_on_side(&relayer.config().side_chain.grpc).await;
-        if height > side_tip - confirmations + 1 {
+        if side_tip < confirmations || height > side_tip - confirmations + 1 {
             debug!(
                 "No new bitcoin txs to sync, height: {}, side tip: {}, sleep for {} seconds...",
                 height, side_tip, interval
@@ -93,7 +106,10 @@ pub async fn scan_deposit_txs_on_bitcoin(relayer: &Relayer) {
             continue;
         }
 
-        debug!("Scanning height: {:?}, side tip: {:?}", height, side_tip);
+        debug!(
+            "Scanning bitcoin height: {:?}, side tip: {:?}",
+            height, side_tip
+        );
         scan_deposit_txs_by_height(relayer, height).await;
         save_last_scanned_height_bitcoin(relayer, height);
     }
@@ -105,6 +121,8 @@ pub async fn scan_side_blocks_by_range(relayer: &Relayer, start_height: u64, end
     let mut current_height = start_height;
 
     while current_height <= end_height {
+        debug!("Scanning side height: {}", current_height);
+
         let block_results_resp =
             match client_side::get_block_results(&relayer.config.side_chain.rpc, current_height)
                 .await
@@ -134,7 +152,10 @@ fn parse_and_save_vaults(relayer: &Relayer, txs_results: Option<Vec<abci::types:
             if event.kind == EVENT_TYPE_APPLY {
                 event.attributes.iter().for_each(|attr| {
                     if attr.key_str().unwrap() == EVENT_ATTRIBUTE_KEY_VAULT {
-                        save_vault(relayer, attr.value_str().unwrap().to_string());
+                        let vault = attr.value_str().unwrap().to_string();
+
+                        debug!("Vault found on side: {}", vault);
+                        save_vault(relayer, vault);
                     }
                 })
             };
@@ -279,7 +300,7 @@ fn is_vault(relayer: &Relayer, address: String) -> bool {
     relayer
         .db_relayer
         .get(format!("{}:{}", DB_KEY_VAULT_PREFIX, address))
-        .is_ok()
+        .map_or(false, |v| v.is_some())
 }
 
 pub(crate) fn get_last_scanned_height_bitcoin(relayer: &Relayer) -> u64 {

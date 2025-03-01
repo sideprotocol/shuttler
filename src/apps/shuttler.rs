@@ -211,9 +211,6 @@ impl<'a> Shuttler<'a> {
             run_rpc_server(price_store2, rpc).await.expect("RPC Server stopped");
         });
 
-        // call on_start for apps
-        self.apps.iter().for_each(|app| app.on_start(&mut context));
-
         // let mut context = Arc::clone(&arc_context);
         loop {
             select! {

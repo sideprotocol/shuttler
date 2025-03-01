@@ -30,7 +30,6 @@ pub trait App {
     fn subscribe_topics(&self) -> Vec<IdentTopic>;
     fn on_message(&self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()>;
     fn on_event(&self, ctx: &mut Context, event: &SideEvent);
-    fn on_start(&self, ctx: &mut Context);
     // fn on_tick(&self, ctx: &mut Context);
     // fn tick(&self) -> Duration;
 }

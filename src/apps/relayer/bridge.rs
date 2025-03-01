@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use bitcoin::{consensus::encode, Address, Block, BlockHash, OutPoint, Transaction, Txid};
 use bitcoincore_rpc::{Error, RpcApi};
 use futures::join;
@@ -28,7 +26,7 @@ const DB_KEY_VAULTS_LAST_UPDATE: &str = "bitcoin_vaults_last_update";
 // 1. Sync BTC blocks
 // 2. Scan vault txs
 // 3. Submit fee rate
-pub async fn start_relayer_tasks(relayer: Arc<Relayer>) {
+pub async fn start_relayer_tasks(relayer: &Relayer) {
     join!(
         sync_btc_blocks(&relayer),
         scan_vault_txs(&relayer),
@@ -221,7 +219,7 @@ pub async fn scan_vault_txs(relayer: &Relayer) {
         };
 
     let confirmations = client_side::get_confirmations_on_side(&relayer.config().side_chain.grpc).await;
-    if height > side_tip - confirmations + 1 {
+    if side_tip < confirmations || height > side_tip - confirmations + 1 {
         debug!("No new txs to sync, height: {}, side tip: {}, sleep for {} seconds...", height, side_tip, interval);
         return;
     }
