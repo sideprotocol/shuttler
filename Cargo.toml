@@ -49,7 +49,7 @@ cosmrs = {version = "0.21", features = ["grpc"]}
 cosmos-sdk-proto = "*"
 tendermint = "*"
 tendermint-config = "*"
-tendermint-rpc = {version="0.40.1", features=["websocket-client"]}
+tendermint-rpc = {version = "0.40.1", features = ["http-client", "websocket-client"]}
 side-proto = {git = "https://github.com/sideprotocol/side-rust", features = ["grpc"]}
 axum = "0.8.1"
 tower = "*"

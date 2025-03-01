@@ -44,6 +44,9 @@ impl App for Agency {
        self.keygen.execute(ctx, event);
        self.signer.execute(ctx, event);
     }
+    fn on_start(&self, _ctx: &mut Context) {
+        // no-op
+    }
 }
 
 pub struct KeygenHander{}

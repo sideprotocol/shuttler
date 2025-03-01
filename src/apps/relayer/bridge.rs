@@ -1,5 +1,6 @@
 use bitcoin::{consensus::encode, Address, Block, BlockHash, OutPoint, Transaction, Txid};
 use bitcoincore_rpc::{Error, RpcApi};
+use futures::join;
 use tonic::{Response, Status};
 use tracing::{debug, error, info};
 
@@ -17,21 +18,21 @@ use side_proto::side::btcbridge::{
     query_client::QueryClient as BTCBridgeClient,
 };
 
-
 const DB_KEY_BITCOIN_TIP: &str = "bitcoin_tip";
 const DB_KEY_VAULTS: &str = "bitcoin_vaults";
 const DB_KEY_VAULTS_LAST_UPDATE: &str = "bitcoin_vaults_last_update";
 
-/// Start relayer tasks
-/// 1. Sync BTC blocks
-/// 2. Scan vault txs
-// pub async fn start_relayer_tasks(relayer: &Relayer) {
-//     join!(
-//         sync_btc_blocks_loop(&relayer),
-//         scan_vault_txs_loop(&relayer),
-//         submit_fee_rate_loop(&relayer),
-//     );
-// }
+// Start relayer tasks
+// 1. Sync BTC blocks
+// 2. Scan vault txs
+// 3. Submit fee rate
+pub async fn start_relayer_tasks(relayer: &Relayer) {
+    join!(
+        sync_btc_blocks(&relayer),
+        scan_vault_txs(&relayer),
+        submit_fee_rate(&relayer),
+    );
+}
 
 pub async fn sync_btc_blocks(relayer: &Relayer) {
     let interval = relayer.config().loop_interval;
@@ -496,10 +497,10 @@ pub async fn send_deposit_tx(
 pub(crate) fn get_last_scanned_height(relayer: &Relayer ) -> u64 {
     match relayer.db_relayer.get(DB_KEY_BITCOIN_TIP) {
         Ok(Some(tip)) => {
-            serde_json::from_slice(&tip).unwrap_or(relayer.config().last_scanned_height)
+            serde_json::from_slice(&tip).unwrap_or(relayer.config().last_scanned_height_bitcoin)
         }
         _ => {
-            relayer.config().last_scanned_height
+            relayer.config().last_scanned_height_bitcoin
         }
     }
 }

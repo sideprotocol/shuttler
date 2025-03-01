@@ -53,6 +53,9 @@ impl App for Oracle {
         self.keygen.execute(ctx, event);
         self.nonce_gen.execute(ctx, event);
     }
+    fn on_start(&self, _ctx: &mut Context) {
+        // no-op
+    }
 }
 pub struct KeygenHander{}
 impl DKGAdaptor for KeygenHander {

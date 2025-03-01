@@ -6,6 +6,8 @@ use cosmos_sdk_proto::{Any, cosmos::{
 }};
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_client::ServiceClient as TendermintServiceClient;
 use reqwest::Error;
+use tendermint::block::Height;
+use tendermint_rpc::{endpoint, Client, HttpClient};
 use tokio::sync::Mutex;
 use tonic::{Response, Status};
 use side_proto::side::btcbridge::{
@@ -129,6 +131,29 @@ pub async fn get_signing_request_by_txid(host: &str, txid: String) -> Result<Res
     btc_client.query_signing_request_by_tx_hash(QuerySigningRequestByTxHashRequest {
         txid,
     }).await
+}
+
+pub async fn get_latest_block(rpc: &str) -> Result<endpoint::block::Response, tendermint_rpc::Error> {
+    let client = match HttpClient::new(rpc) {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(e);
+        }
+    };
+
+    client.latest_block().await
+}
+
+pub async fn get_block_results(rpc: &str, height: u64) -> Result<endpoint::block_results::Response, tendermint_rpc::Error> {
+    let client = match HttpClient::new(rpc) {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(e);
+        }
+    };
+
+    let block_height = Height::try_from(height).expect("Should be able to be converted safely");
+    client.block_results(block_height).await
 }
 
 pub async fn mock_signing_requests() -> Result<SigningRequestsResponse, Error> {

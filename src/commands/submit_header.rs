@@ -1,5 +1,5 @@
 
-use crate::{apps::relayer::{tick::{fetch_block_header_by_height, send_block_headers}, Relayer}, config::Config};
+use crate::{apps::relayer::{bridge::{fetch_block_header_by_height, send_block_headers}, Relayer}, config::Config};
 
 pub async fn execute(home: &str, height: u64) {
 

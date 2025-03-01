@@ -8,7 +8,8 @@ use crate::{config::Config, helper::{client_fee_provider::FeeProviderClient, cli
 
 use super::{App, Context, SideEvent, SubscribeMessage};
 
-pub mod tick;
+pub mod bridge;
+pub mod lending;
 
 #[derive(Debug)]
 pub struct Relayer {
@@ -31,6 +32,10 @@ impl App for Relayer {
     }
     fn on_event(&self, _ctx: &mut Context, _event: &SideEvent) {
         
+    }
+    fn on_start(&self, ctx: &mut Context) {
+        bridge::start_relayer_tasks(self);
+        lending::start_relayer_tasks(self);
     }
 }
 
