@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use bitcoin::{Block, BlockHash, Network, Transaction, Txid};
 use bitcoincore_rpc::RpcApi;
 use futures::join;
@@ -24,7 +26,7 @@ const DB_KEY_SIDE_BLOCK_HEIGHT: &str = "side_block_height";
 const DB_KEY_BITCOIN_BLOCK_HEIGHT: &str = "bitcoin_block_height";
 const DB_KEY_VAULT_PREFIX: &str = "vault";
 
-pub async fn start_relayer_tasks(relayer: &Relayer) {
+pub async fn start_relayer_tasks(relayer: Arc<Relayer>) {
     join!(
         scan_vaults_on_side(&relayer),
         scan_deposit_txs_on_bitcoin(&relayer),

@@ -1,9 +1,11 @@
 
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use bitcoincore_rpc::{Auth, Client};
 use libp2p::gossipsub::IdentTopic;
+use tokio::spawn;
 use crate::{config::Config, helper::{client_fee_provider::FeeProviderClient, client_ordinals::OrdinalsClient}};
 
 use super::{App, Context, SideEvent, SubscribeMessage};
@@ -33,9 +35,14 @@ impl App for Relayer {
     fn on_event(&self, _ctx: &mut Context, _event: &SideEvent) {
         
     }
-    fn on_start(&self, ctx: &mut Context) {
-        bridge::start_relayer_tasks(self);
-        lending::start_relayer_tasks(self);
+    fn on_start(&self, _ctx: &mut Context) {
+        let relayer = Arc::new(Relayer::new(self.config.clone()));
+
+        let relayer_clone1 = Arc::clone(&relayer);
+        let relayer_clone2 = Arc::clone(&relayer);
+
+        spawn(async move { bridge::start_relayer_tasks(Arc::clone(&relayer_clone1)).await });
+        spawn(async move { lending::start_relayer_tasks(Arc::clone(&relayer_clone2)).await });
     }
 }
 
