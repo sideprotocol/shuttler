@@ -1,4 +1,4 @@
-use bitcoin::{Block, BlockHash, Network, Transaction, Txid};
+use bitcoin::{consensus::Decodable, Block, BlockHash, Network, Transaction, Txid};
 use bitcoincore_rpc::RpcApi;
 use futures::join;
 use tendermint::abci;
@@ -10,28 +10,33 @@ use crate::{
     apps::relayer::Relayer,
     helper::{
         bitcoin::{self as bitcoin_utils},
-        client_side::{self, send_cosmos_transaction},
+        client_side::{self, get_loan_dlc_meta, send_cosmos_transaction},
     },
 };
 
 use cosmos_sdk_proto::{cosmos::tx::v1beta1::BroadcastTxResponse, Any};
-use side_proto::side::lending::MsgApprove;
+use side_proto::side::lending::{MsgApprove, MsgClose};
 
 const EVENT_TYPE_APPLY: &str = "apply";
 const EVENT_ATTRIBUTE_KEY_VAULT: &str = "vault";
 
+const EVENT_TYPE_GENERATE_SIGNED_LIQUIDATION_CET: &str = "generate_signed_liquidation_cet";
+const _EVENT_ATTRIBUTE_KEY_TX_HASH: &str = "tx_hash";
+
+const EVENT_TYPE_REPAY: &str = "repay";
+const EVENT_ATTRIBUTE_KEY_REPAYMENT_TX_HASH: &str = "repayment_tx_hash";
+const EVENT_ATTRIBUTE_KEY_LOAN_ID: &str = "loan_id";
+
 const DB_KEY_SIDE_BLOCK_HEIGHT: &str = "side_block_height";
 const DB_KEY_BITCOIN_BLOCK_HEIGHT: &str = "bitcoin_block_height";
 const DB_KEY_VAULT_PREFIX: &str = "vault";
+const DB_KEY_REPAYMENT_TX_PREFIX: &str = "repayment_tx";
 
 pub async fn start_relayer_tasks(relayer: &Relayer) {
-    join!(
-        scan_vaults_on_side(&relayer),
-        scan_deposit_txs_on_bitcoin(&relayer),
-    );
+    join!(scan_blocks_on_side(&relayer), scan_txs_on_bitcoin(&relayer),);
 }
 
-pub async fn scan_vaults_on_side(relayer: &Relayer) {
+pub async fn scan_blocks_on_side(relayer: &Relayer) {
     let interval = 6;
 
     loop {
@@ -62,7 +67,7 @@ pub async fn scan_vaults_on_side(relayer: &Relayer) {
     }
 }
 
-pub async fn scan_deposit_txs_on_bitcoin(relayer: &Relayer) {
+pub async fn scan_txs_on_bitcoin(relayer: &Relayer) {
     let interval = relayer.config().loop_interval;
 
     loop {
@@ -77,7 +82,10 @@ pub async fn scan_deposit_txs_on_bitcoin(relayer: &Relayer) {
         };
 
         if height > tip_on_bitcoin {
-            debug!("No new bitcoin txs to sync, height: {}, bitcoin tip: {}, sleep for {} seconds", height, tip_on_bitcoin, interval);
+            debug!(
+                "No new bitcoin txs to sync, height: {}, bitcoin tip: {}, sleep for {} seconds",
+                height, tip_on_bitcoin, interval
+            );
 
             sleep(Duration::from_secs(interval)).await;
             continue;
@@ -110,7 +118,7 @@ pub async fn scan_deposit_txs_on_bitcoin(relayer: &Relayer) {
             "Scanning bitcoin height: {:?}, side tip: {:?}",
             height, side_tip
         );
-        scan_deposit_txs_by_height(relayer, height).await;
+        scan_bitcoin_txs_by_height(relayer, height).await;
         save_last_scanned_height_bitcoin(relayer, height);
     }
 }
@@ -139,7 +147,9 @@ pub async fn scan_side_blocks_by_range(relayer: &Relayer, start_height: u64, end
                 }
             };
 
-        parse_and_save_vaults(relayer, block_results_resp.txs_results);
+        parse_and_save_vaults(relayer, block_results_resp.clone().txs_results);
+        parse_and_save_repayment_txs(relayer, block_results_resp.clone().txs_results);
+        parse_and_handle_liquidation_cets(relayer, block_results_resp.end_block_events).await;
 
         save_last_scanned_height_side(relayer, current_height);
         current_height += 1;
@@ -163,7 +173,61 @@ fn parse_and_save_vaults(relayer: &Relayer, txs_results: Option<Vec<abci::types:
     })
 }
 
-pub async fn scan_deposit_txs_by_height(relayer: &Relayer, height: u64) {
+fn parse_and_save_repayment_txs(
+    relayer: &Relayer,
+    txs_results: Option<Vec<abci::types::ExecTxResult>>,
+) {
+    txs_results.unwrap_or(vec![]).iter().for_each(|result| {
+        result.events.iter().for_each(|event| {
+            if event.kind == EVENT_TYPE_REPAY {
+                let mut loan_id = "".to_string();
+                let mut tx_hash = "".to_string();
+
+                event.attributes.iter().for_each(|attr| {
+                    if attr.key_str().unwrap() == EVENT_ATTRIBUTE_KEY_LOAN_ID {
+                        loan_id = attr.value_str().unwrap().to_string();
+                    }
+
+                    if attr.key_str().unwrap() == EVENT_ATTRIBUTE_KEY_REPAYMENT_TX_HASH {
+                        tx_hash = attr.value_str().unwrap().to_string();
+                    }
+                });
+
+                debug!(
+                    "Repayment tx found on side, loan id: {}, tx hash: {}",
+                    loan_id, tx_hash
+                );
+                save_repayment_tx(relayer, loan_id, tx_hash);
+            };
+        });
+    })
+}
+
+async fn parse_and_handle_liquidation_cets(
+    relayer: &Relayer,
+    end_block_events: Option<Vec<abci::Event>>,
+) {
+    let mut loan_ids = vec![];
+
+    end_block_events.unwrap_or(vec![]).iter().for_each(|event| {
+        if event.kind == EVENT_TYPE_GENERATE_SIGNED_LIQUIDATION_CET {
+            event.attributes.iter().for_each(|attr| {
+                if attr.key_str().unwrap() == EVENT_ATTRIBUTE_KEY_LOAN_ID {
+                    let loan_id = attr.value_str().unwrap().to_string();
+
+                    debug!("Signed liquidation cet found on side, loan id: {}", loan_id);
+                    loan_ids.push(loan_id);
+                }
+            })
+        };
+    });
+
+    for loan_id in loan_ids {
+        handle_liquidation_cet(relayer, loan_id).await;
+    }
+}
+
+pub async fn scan_bitcoin_txs_by_height(relayer: &Relayer, height: u64) {
     let block_hash = match relayer.bitcoin_client.get_block_hash(height) {
         Ok(hash) => hash,
         Err(e) => {
@@ -188,11 +252,11 @@ pub async fn scan_deposit_txs_by_height(relayer: &Relayer, height: u64) {
             i
         );
 
-        check_and_handle_deposit_tx(relayer, &block_hash, &block, tx, i).await
+        check_and_handle_bitcoin_tx(relayer, &block_hash, &block, tx, i).await
     }
 }
 
-pub async fn check_and_handle_deposit_tx(
+pub async fn check_and_handle_bitcoin_tx(
     relayer: &Relayer,
     block_hash: &BlockHash,
     block: &Block,
@@ -200,7 +264,7 @@ pub async fn check_and_handle_deposit_tx(
     index: usize,
 ) {
     if is_deposit_tx(relayer, tx, relayer.config().bitcoin.network) {
-        debug!("Deposit tx found... {:?}", &tx);
+        debug!("Deposit tx found on bitcoin: {}", tx.compute_txid());
 
         let proof = bitcoin_utils::compute_tx_proof(
             block.txdata.iter().map(|tx| tx.compute_txid()).collect(),
@@ -211,20 +275,52 @@ pub async fn check_and_handle_deposit_tx(
             Ok(resp) => {
                 let tx_response = resp.into_inner().tx_response.unwrap();
                 if tx_response.code != 0 {
-                    error!("Failed to submit deposit tx: {:?}", tx_response);
+                    error!("Failed to submit deposit tx to side: {:?}", tx_response);
                     return;
                 }
 
-                info!("Submitted deposit tx: {:?}", tx_response);
+                info!("Submitted deposit tx to side: {:?}", tx_response);
             }
             Err(e) => {
-                error!("Failed to submit deposit tx: {:?}", e);
+                error!("Failed to submit deposit tx to side: {:?}", e);
+            }
+        }
+
+        return;
+    }
+
+    if is_repayment_tx(relayer, tx) {
+        debug!("Repayment tx found on bitcoin: {}", tx.compute_txid());
+
+        let loan_id = get_repayment_loan_id(relayer, tx.compute_txid().to_string());
+        if loan_id.is_empty() {
+            error!(
+                "Failed to get loan id for repayment tx {}",
+                tx.compute_txid()
+            );
+            return;
+        }
+
+        let decrypted_signature = extract_repayment_tx_signature(tx);
+
+        match send_close_loan_tx(relayer, loan_id, decrypted_signature).await {
+            Ok(resp) => {
+                let tx_response = resp.into_inner().tx_response.unwrap();
+                if tx_response.code != 0 {
+                    error!("Failed to submit close loan tx to side: {:?}", tx_response);
+                    return;
+                }
+
+                info!("Submitted close loan tx to side: {:?}", tx_response);
+            }
+            Err(e) => {
+                error!("Failed to submit close loan tx to side: {:?}", e);
             }
         }
     }
 }
 
-pub async fn check_and_handle_deposit_tx_by_hash(relayer: &Relayer, hash: &Txid) {
+pub async fn check_and_handle_bitcoin_tx_by_hash(relayer: &Relayer, hash: &Txid) {
     let tx_info = match relayer.bitcoin_client.get_raw_transaction_info(&hash, None) {
         Ok(tx_info) => tx_info,
         Err(e) => {
@@ -265,7 +361,7 @@ pub async fn check_and_handle_deposit_tx_by_hash(relayer: &Relayer, hash: &Txid)
         .position(|tx_in_block| tx_in_block == &tx)
         .expect("the tx should be included in the block");
 
-    check_and_handle_deposit_tx(relayer, &block_hash, &block, &tx, tx_index).await
+    check_and_handle_bitcoin_tx(relayer, &block_hash, &block, &tx, tx_index).await
 }
 
 pub async fn send_deposit_tx(
@@ -281,13 +377,67 @@ pub async fn send_deposit_tx(
         proof,
     };
 
-    info!("submit deposit tx to approve loan: {:?}", msg);
+    info!("submit deposit tx to side: {:?}", msg);
 
     let any_msg = Any::from_msg(&msg).unwrap();
     send_cosmos_transaction(&relayer.config(), any_msg).await
 }
 
-fn is_deposit_tx(relayer: &Relayer, tx: &Transaction, network: Network) -> bool {
+pub async fn send_close_loan_tx(
+    relayer: &Relayer,
+    loan_id: String,
+    signature: String,
+) -> Result<Response<BroadcastTxResponse>, Status> {
+    let msg = MsgClose {
+        relayer: relayer.config().relayer_bitcoin_address(),
+        loan_id,
+        signature,
+    };
+
+    info!("submit close loan tx to side: {:?}", msg);
+
+    let any_msg = Any::from_msg(&msg).unwrap();
+    send_cosmos_transaction(&relayer.config(), any_msg).await
+}
+
+pub async fn handle_liquidation_cet(relayer: &Relayer, loan_id: String) {
+    let dlc_meta = match get_loan_dlc_meta(&relayer.config.side_chain.grpc, loan_id.clone()).await {
+        Ok(resp) => match resp.into_inner().dlc_meta {
+            Some(dlc_meta) => dlc_meta,
+            None => {
+                error!("No dlc meta exists on side, loan id: {}", loan_id);
+                return;
+            }
+        },
+        Err(e) => {
+            error!("Failed to query dlc meta, loan id: {}, err: {}", loan_id, e);
+            return;
+        }
+    };
+
+    if dlc_meta.signed_liquidation_cet_hex.is_empty() {
+        error!("Liquidation cet not signed yet, loan id: {}", loan_id);
+        return;
+    }
+
+    let signed_tx = Transaction::consensus_decode(
+        &mut hex::decode(dlc_meta.signed_liquidation_cet_hex)
+            .unwrap()
+            .as_slice(),
+    )
+    .unwrap();
+
+    match relayer.bitcoin_client.send_raw_transaction(&signed_tx) {
+        Ok(txid) => {
+            debug!("Liquidation cet sent to bitcoin: {}", txid);
+        }
+        Err(e) => {
+            error!("Failed to send liquidation cet to bitcoin: {}", e);
+        }
+    }
+}
+
+pub fn is_deposit_tx(relayer: &Relayer, tx: &Transaction, network: Network) -> bool {
     tx.output.iter().any(|out| {
         is_vault(
             relayer,
@@ -296,11 +446,26 @@ fn is_deposit_tx(relayer: &Relayer, tx: &Transaction, network: Network) -> bool 
     })
 }
 
-fn is_vault(relayer: &Relayer, address: String) -> bool {
+pub fn is_vault(relayer: &Relayer, address: String) -> bool {
     relayer
         .db_relayer
         .get(format!("{}:{}", DB_KEY_VAULT_PREFIX, address))
         .map_or(false, |v| v.is_some())
+}
+
+pub fn is_repayment_tx(relayer: &Relayer, tx: &Transaction) -> bool {
+    relayer
+        .db_relayer
+        .get(format!(
+            "{}:{}",
+            DB_KEY_REPAYMENT_TX_PREFIX,
+            tx.compute_txid().to_string()
+        ))
+        .map_or(false, |v| v.is_some())
+}
+
+pub fn extract_repayment_tx_signature(tx: &Transaction) -> String {
+    hex::encode(tx.input[0].witness.nth(0).unwrap())
 }
 
 pub(crate) fn get_last_scanned_height_bitcoin(relayer: &Relayer) -> u64 {
@@ -336,8 +501,23 @@ fn save_last_scanned_height_side(relayer: &Relayer, height: u64) {
 }
 
 fn save_vault(relayer: &Relayer, vault: String) {
+    let _ = relayer
+        .db_relayer
+        .insert(format!("{}:{}", DB_KEY_VAULT_PREFIX, vault), vec![]);
+}
+
+fn save_repayment_tx(relayer: &Relayer, loan_id: String, txid: String) {
     let _ = relayer.db_relayer.insert(
-        format!("{}:{}", DB_KEY_VAULT_PREFIX, vault),
-        serde_json::to_vec(&vault).unwrap(),
+        format!("{}:{}", DB_KEY_REPAYMENT_TX_PREFIX, txid),
+        loan_id.as_str(),
     );
+}
+
+fn get_repayment_loan_id(relayer: &Relayer, txid: String) -> String {
+    relayer
+        .db_relayer
+        .get(format!("{}:{}", DB_KEY_REPAYMENT_TX_PREFIX, txid))
+        .map_or("".to_string(), |v| {
+            v.map_or("".to_string(), |v| String::from_utf8_lossy(&v).into_owned())
+        })
 }
