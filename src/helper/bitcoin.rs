@@ -74,6 +74,16 @@ pub fn new_task_from_psbt(ctx: &Context, psbt_base64: &String, sign_mode: SignMo
     Ok(Task::new_signing(task_id.to_owned(), psbt_base64.clone(), inputs))
 }
 
+pub fn get_signed_tx_from_psbt(psbt_base64: &String) -> anyhow::Result<Transaction> {
+    let psbt_bytes = from_base64(&psbt_base64)?;
+
+    let psbt = Psbt::deserialize(psbt_bytes.as_slice())?;
+
+    let signed_tx = psbt.extract_tx()?;
+
+    Ok(signed_tx)
+}
+
 pub fn schnorr_signature_from_frost(frost_signature: frost_adaptor_signature::Signature) -> bitcoin::secp256k1::schnorr::Signature {
     let sig_bytes = frost_signature.serialize().unwrap();
     bitcoin::secp256k1::schnorr::Signature::from_slice(&sig_bytes).unwrap()

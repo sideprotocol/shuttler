@@ -3141,15 +3141,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "itertools"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
-dependencies = [
- "either",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3244,7 +3235,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -4649,7 +4640,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn",
@@ -5938,7 +5929,7 @@ dependencies = [
 [[package]]
 name = "side-proto"
 version = "0.1.0-dev12"
-source = "git+https://github.com/sideprotocol/side-rust#fbc4272e934ca4567171fae0cd735ae218fcba6c"
+source = "git+https://github.com/sideprotocol/side-rust#369b2964342709c5b1a5bfc69a7073af687623c3"
 dependencies = [
  "cosmos-sdk-proto",
  "cosmrs",

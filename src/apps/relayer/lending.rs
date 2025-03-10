@@ -9,23 +9,29 @@ use tracing::{debug, error, info};
 use crate::{
     apps::relayer::Relayer,
     helper::{
-        bitcoin::{self as bitcoin_utils},
-        client_side::{self, get_loan_dlc_meta, send_cosmos_transaction},
+        bitcoin::{self as bitcoin_utils, get_signed_tx_from_psbt},
+        client_side::{self, get_auction, get_loan_dlc_meta, send_cosmos_transaction},
     },
 };
 
 use cosmos_sdk_proto::{cosmos::tx::v1beta1::BroadcastTxResponse, Any};
-use side_proto::side::lending::{MsgApprove, MsgClose};
+use side_proto::side::{
+    auction::AuctionStatus,
+    lending::{MsgApprove, MsgClose},
+};
 
 const EVENT_TYPE_APPLY: &str = "apply";
 const EVENT_ATTRIBUTE_KEY_VAULT: &str = "vault";
 
-const EVENT_TYPE_GENERATE_SIGNED_LIQUIDATION_CET: &str = "generate_signed_liquidation_cet";
-const _EVENT_ATTRIBUTE_KEY_TX_HASH: &str = "tx_hash";
-
 const EVENT_TYPE_REPAY: &str = "repay";
 const EVENT_ATTRIBUTE_KEY_REPAYMENT_TX_HASH: &str = "repayment_tx_hash";
 const EVENT_ATTRIBUTE_KEY_LOAN_ID: &str = "loan_id";
+
+const EVENT_TYPE_GENERATE_SIGNED_LIQUIDATION_CET: &str = "generate_signed_liquidation_cet";
+const _EVENT_ATTRIBUTE_KEY_TX_HASH: &str = "tx_hash";
+
+const EVENT_TYPE_GENERATE_SIGNED_PAYMENT_TRANSACTION: &str = "generate_signed_payment_transaction";
+const EVENT_ATTRIBUTE_KEY_AUCTION_ID: &str = "auction_id";
 
 const DB_KEY_SIDE_BLOCK_HEIGHT: &str = "side_block_height";
 const DB_KEY_BITCOIN_BLOCK_HEIGHT: &str = "bitcoin_block_height";
@@ -149,7 +155,9 @@ pub async fn scan_side_blocks_by_range(relayer: &Relayer, start_height: u64, end
 
         parse_and_save_vaults(relayer, block_results_resp.clone().txs_results);
         parse_and_save_repayment_txs(relayer, block_results_resp.clone().txs_results);
-        parse_and_handle_liquidation_cets(relayer, block_results_resp.end_block_events).await;
+        parse_and_handle_liquidation_cets(relayer, block_results_resp.clone().end_block_events)
+            .await;
+        parse_and_handle_auction_payment_txs(relayer, block_results_resp.clone().txs_results).await;
 
         save_last_scanned_height_side(relayer, current_height);
         current_height += 1;
@@ -224,6 +232,35 @@ async fn parse_and_handle_liquidation_cets(
 
     for loan_id in loan_ids {
         handle_liquidation_cet(relayer, loan_id).await;
+    }
+}
+
+async fn parse_and_handle_auction_payment_txs(
+    relayer: &Relayer,
+    txs_results: Option<Vec<abci::types::ExecTxResult>>,
+) {
+    let mut auction_ids = vec![];
+
+    txs_results.unwrap_or(vec![]).iter().for_each(|result| {
+        result.events.iter().for_each(|event| {
+            if event.kind == EVENT_TYPE_GENERATE_SIGNED_PAYMENT_TRANSACTION {
+                event.attributes.iter().for_each(|attr| {
+                    if attr.key_str().unwrap() == EVENT_ATTRIBUTE_KEY_AUCTION_ID {
+                        let auction_id = attr.value_str().unwrap().parse().unwrap();
+
+                        debug!(
+                            "Signed auction payment tx found on side, auction id: {}",
+                            auction_id,
+                        );
+                        auction_ids.push(auction_id);
+                    }
+                });
+            };
+        });
+    });
+
+    for auction_id in auction_ids {
+        handle_auction_payment_tx(relayer, auction_id).await;
     }
 }
 
@@ -433,6 +470,53 @@ pub async fn handle_liquidation_cet(relayer: &Relayer, loan_id: String) {
         }
         Err(e) => {
             error!("Failed to send liquidation cet to bitcoin: {}", e);
+        }
+    }
+}
+
+pub async fn handle_auction_payment_tx(relayer: &Relayer, auction_id: u64) {
+    let auction = match get_auction(&relayer.config.side_chain.grpc, auction_id).await {
+        Ok(resp) => match resp.into_inner().auction {
+            Some(auction) => auction,
+            None => {
+                error!("No auction exists on side, auction id: {}", auction_id);
+                return;
+            }
+        },
+        Err(e) => {
+            error!(
+                "Failed to query auction, auction id: {}, err: {}",
+                auction_id, e
+            );
+            return;
+        }
+    };
+
+    if auction.status != AuctionStatus::Settled as i32 {
+        error!("Auction not settled yet, auction id: {}", auction_id);
+        return;
+    }
+
+    let signed_payment_tx = match get_signed_tx_from_psbt(&auction.payment_tx) {
+        Ok(signed_tx) => signed_tx,
+        Err(e) => {
+            error!(
+                "Failed to extract signed payment tx, auction id: {}, err: {}",
+                auction_id, e
+            );
+            return;
+        }
+    };
+
+    match relayer
+        .bitcoin_client
+        .send_raw_transaction(&signed_payment_tx)
+    {
+        Ok(txid) => {
+            debug!("Auction payment tx sent to bitcoin: {}", txid);
+        }
+        Err(e) => {
+            error!("Failed to send auction payment tx to bitcoin: {}", e);
         }
     }
 }
