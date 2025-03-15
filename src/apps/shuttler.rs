@@ -1,5 +1,5 @@
 use std::{
-    hash::{DefaultHasher, Hash, Hasher}, io::{self}, ops::Deref, str::FromStr, sync::Arc, time::Duration
+    hash::{DefaultHasher, Hash, Hasher}, io, str::FromStr, time::Duration
 };
 
 use cosmrs::Any;
@@ -8,7 +8,7 @@ use futures::stream::StreamExt;
 use libp2p::{
     gossipsub, identify, identity::Keypair, kad::{self, store::MemoryStore}, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, Multiaddr, PeerId, Swarm
 };
-use tendermint_rpc::{event::Event, query::EventType, SubscriptionClient, WebSocketClient};
+use tendermint_rpc::{event::v0_38::DeEvent, response::Wrapper};
 use tokio::{select, signal, spawn};
 use tracing::{debug, info, warn, error};
 
@@ -18,8 +18,8 @@ use crate::{
     },
     config::{candidate::Candidate, Config},
     helper::{
-        client_side::send_cosmos_transaction, encoding::pubkey_to_identifier, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store
-    }, providers::{PriceStore, PriceSubscriber, PRICE_PROVIDERS}, rpc::run_rpc_server,
+        client_side::{connect_ws_client, send_cosmos_transaction}, encoding::pubkey_to_identifier, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store
+    }, rpc::run_rpc_server,
 };
 
 pub struct Shuttler<'a> {
@@ -177,45 +177,27 @@ impl<'a> Shuttler<'a> {
         });
 
         // Connect to the Tendermint WebSocket endpoint
-        let (client, driver) = WebSocketClient::new(conf.websocket_endpoint().as_str())
-        .await
-        .expect("Failed to connect to WebSocket");
-
-        // Spawn the WebSocket driver in a separate task
-        tokio::spawn(async move {
-            if let Err(e) = driver.run().await {
-                eprintln!("WebSocket driver error: {}", e);
-            }
-        });
-
-        // Subscribe to NewBlock events
-        let query = EventType::NewBlock.into();
-        // let query = Query::from_str("/cosmos.bank.v1beta1.MsgSend").unwrap();
-        let mut subscription = client.subscribe(query).await.expect("Subscription failed");
-
+        let mut sidechain_event_stream = connect_ws_client(&conf.side_chain.rpc).await;
         // Common Setting: Context and Heart Beat
         let mut context = Context::new(swarm, tx_sender, identifier, node_key, conf.clone()); 
 
-        let price_store = Arc::new(PriceStore::new(conf.get_database_with_name("prices")));
-        for provider in PRICE_PROVIDERS.deref() {
-            let price_store2 = Arc::clone(&price_store);
-            tokio::spawn(async move {
-                let ps = PriceSubscriber::new(provider.to_owned());
-                ps.start(price_store2.as_ref()).await;
-            });
-        }
-
-        let price_store2 = Arc::clone(&price_store);
-        let rpc = conf.rpc_address.clone();
-        tokio::spawn(async move{
-            run_rpc_server(price_store2, rpc).await.expect("RPC Server stopped");
-        });
+        // let rpc = conf.rpc_address.clone();
+        // tokio::spawn(async move{
+        //     run_rpc_server(rpc).await.expect("RPC Server stopped");
+        // });
 
         // let mut context = Arc::clone(&arc_context);
         loop {
             select! {
-                Some(Ok(event)) = subscription.next() => {
-                    self.handle_block_event(&mut context, event);
+                recv = sidechain_event_stream.next() => {
+                    match recv {
+                        Some(Ok(msg)) => {
+                            self.handle_block_event(&mut context, msg);
+                        },
+                        _ => {
+                            sidechain_event_stream = connect_ws_client(&conf.side_chain.rpc).await;
+                        }
+                    }
                 }
                 swarm_event = context.swarm.select_next_some() => match swarm_event {
                     SwarmEvent::Behaviour(ShuttlerBehaviourEvent::Gossip(gossipsub::Event::Message{ message, .. })) => {
@@ -291,29 +273,47 @@ impl<'a> Shuttler<'a> {
         }
     }
 
-    fn handle_block_event(&self, ctx: &mut Context, event: Event) {
+    fn handle_block_event(&self, ctx: &mut Context,  message: tokio_tungstenite::tungstenite::Message) {
+
+        let event = if let tokio_tungstenite::tungstenite::Message::Text(msg_bytes) = message {
+            match serde_json::from_slice::<Wrapper<DeEvent>>(msg_bytes.as_bytes()) {
+                Ok(wrap) => match wrap.into_result() {
+                    Ok(e) => e,
+                    Err(_) => return,
+                },
+                Err(_) => return,
+            }
+        } else {
+            return;
+        };
+
+        tracing::debug!("event: {:?}", event);        
+
         if let Some(events) = event.events {
             let e = crate::apps::SideEvent::BlockEvent(events);
             self.apps.iter().for_each(|a| a.on_event(ctx, &e));
         }
         match event.data {
-            tendermint_rpc::event::EventData::NewBlock { block, result_finalize_block , ..} => {
+            tendermint_rpc::event::v0_38::DeEventData::NewBlock { block, result_finalize_block , ..} => {
                 if let Some(b) = block { 
                     sending_heart_beat(ctx, b.header.height.value());
                 }
                 if let Some(finalize_block) = result_finalize_block {
                     // debug!("tx_result: {:?}", finalize_block.tx_results);
-                    for tx in finalize_block.tx_results {
-                        if tx.code.is_err() {continue;}
-                        let e = crate::apps::SideEvent::TxEvent(tx.events);
-                        self.apps.iter().for_each(|a| a.on_event(ctx, &e ));
-                    }
+                    // for tx in finalize_block.tx_results {
+                    //     if tx.code.is_err() {continue;}
+                    //     let e = crate::apps::SideEvent::TxEvent(tx.events);
+                    //     self.apps.iter().for_each(|a| a.on_event(ctx, &e ));
+                    // }
+
+                    let e = crate::apps::SideEvent::TxEvent(finalize_block.events);
+                    self.apps.iter().for_each(|a| a.on_event(ctx, &e ));
                 }
             },
-            tendermint_rpc::event::EventData::Tx { tx_result } => {
+            tendermint_rpc::event::v0_38::DeEventData::Tx { tx_result } => {
                 debug!("tx_info: {:?}", tx_result);
             }
-            _ => debug!("Dose not support {}", event.query),
+            _ => debug!("Does not support {}", event.query),
         }
     }
 

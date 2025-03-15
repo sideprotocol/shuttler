@@ -168,6 +168,10 @@ pub struct Task {
 
 impl Task {
     pub fn new_dkg(id: String, participants: Vec<Identifier>, threshold: u16) -> Self {
+       Task::new_dkg_with_tweak(id, participants, threshold, vec![])
+    }
+
+    pub fn new_dkg_with_tweak(id: String, participants: Vec<Identifier>, threshold: u16, tweaks: Vec<i32>) -> Self {
         Self {
             id,
             status: Status::DkgRound1,
@@ -175,7 +179,7 @@ impl Task {
             dkg_input: DkgInput {
                 participants,
                 threshold,
-                tweaks: vec![],
+                tweaks,
             },
             sign_inputs: BTreeMap::new(),
             psbt: "".to_owned(),

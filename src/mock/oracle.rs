@@ -1,65 +1,47 @@
-use std::{fs, path::{Path, PathBuf}};
+use std::{collections::BTreeMap, fs};
 
 use cosmrs::Any;
 use side_proto::{prost::Message, 
-    side::dlc::{query_server::Query as OracleQuery, Agency, AgencyStatus, DlcAttestation, DlcNonce, DlcOracle, 
+    side::dlc::{query_server::Query as OracleQuery, Agency, DlcAttestation, DlcNonce, DlcOracle, 
         DlcOracleStatus, DlcPriceEvent, MsgSubmitNonce, MsgSubmitOraclePubKey, Params, PriceInterval, 
         QueryAgenciesResponse, QueryAttestationsResponse, QueryCountNoncesResponse, QueryEventResponse, 
         QueryOraclesResponse, QueryParamsResponse}, tendermint::google::protobuf::Duration,
     };
 
-use super::{fullpath,  MockQuery};
+use crate::apps::SideEvent;
 
-const ORACLE_DKG_FILE_NAME: &str = "oracle.json";
-const AGENCY_DKG_FILE_NAME: &str = "agency.json";
-const NONCE_DKG_FILE_NAME: &str = "nonces.json";
+use super::{fullpath, EventQueue, MockEnv, MockQuery};
+
+const ORACLE_DKG_FILE_NAME: &str = "oracle.data";
+const AGENCY_DKG_FILE_NAME: &str = "agency.data";
+const NONCE_DKG_FILE_NAME: &str = "nonces.data";
 const EVENT_FILE_NAME: &str = "event.prost";
- 
-pub fn generate_oracle_file(testdir: &Path, participants: Vec<String>) {
-    let mut oracle = DlcOracle::default(); 
-    oracle.id = 1;
-    oracle.threshold = (participants.len() * 2 / 3 ) as u32;
-    oracle.participants = participants;
-    oracle.status = DlcOracleStatus::OracleStatusPending as i32;
-    
-    let mut path = PathBuf::new();
-    path.push(testdir);
-    path.push("mock");
-    let _ = fs::create_dir_all(&path);
-    path.push(ORACLE_DKG_FILE_NAME);
 
-    fs::write(path, oracle.encode_to_vec()).unwrap();
-}
-
-pub fn generate_agency_file(testdir: &Path, participants: Vec<String>) {
-    let mut agency = Agency::default(); 
-    agency.id = 1;
-    agency.threshold = (participants.len() * 2 / 3 ) as u32;
-    agency.participants = participants;
-    agency.status = AgencyStatus::Pending as i32;
-    
-    let mut path = PathBuf::new();
-    path.push(testdir);
-    path.push("mock");
-    let _ = fs::create_dir_all(&path);
-    path.push(AGENCY_DKG_FILE_NAME);
-
-    fs::write(path, agency.encode_to_vec()).unwrap();
+pub fn oracle_task_queue() -> EventQueue {
+    // height, event
+    let mut queue: EventQueue = EventQueue::new();
+    queue.insert(3, create_oracle_event);
+    queue.insert(5, create_nonces_event);
+    queue.insert(6, create_nonces_event);
+    queue.insert(7, create_nonces_event);
+    queue
 }
 
 pub fn handle_oracle_dkg_submission(home: &str, m: &Any) {
     if let Ok(msg) = m.to_msg::<MsgSubmitOraclePubKey>() {
-        let key = fullpath(home, &msg.pub_key);
-        println!("Received: {:?} from {}", msg.pub_key, msg.sender);
+        let key = fullpath(home, &msg.oracle_pubkey);
+        println!("Received: {:?} from {}", msg.oracle_pubkey, msg.sender);
         
         if fs::exists(&key).unwrap_or(false) {
             return
         }
         fs::create_dir_all(fullpath(home, key)).unwrap();
 
-        let bytes = fs::read(fullpath(home, ORACLE_DKG_FILE_NAME)).unwrap();
-        let mut o = DlcOracle::decode(bytes.as_slice()).unwrap();
-        o.pubkey = msg.pub_key;
+        // let bytes = fs::read(fullpath(home, ORACLE_DKG_FILE_NAME)).unwrap();
+        // let mut o = DlcOracle::decode(bytes.as_slice()).unwrap();
+        let mut o = DlcOracle::default();
+        o.id = 1;
+        o.pubkey = msg.oracle_pubkey;
         o.status = DlcOracleStatus::OracleStatusEnable as i32;
 
         fs::write(fullpath(home, ORACLE_DKG_FILE_NAME ), o.encode_to_vec()).unwrap();
@@ -112,6 +94,25 @@ pub fn handle_nonce_submission(home: &str, m: &Any) {
         fs::write(fullpath(home, EVENT_FILE_NAME), event.encode_to_vec()).unwrap()
 
     }
+}
+
+pub fn create_oracle_event(env: MockEnv) -> SideEvent {
+    let mut creation = BTreeMap::new();
+    creation.insert("create_oracle.id".to_owned(), vec!["1".to_owned()]);
+    creation.insert("create_oracle.participants".to_owned(), vec![env.participants.join(",")]);
+    creation.insert("create_oracle.threshold".to_owned(), vec![(env.participants.len() * 2 / 3).to_string()]);
+    SideEvent::BlockEvent(creation)
+}
+
+pub fn create_nonces_event(env: MockEnv) -> SideEvent {
+    let mut creation = BTreeMap::new();
+    if let Ok(bytes) = fs::read(fullpath(&env.home, ORACLE_DKG_FILE_NAME)) {
+        if let Ok(o) = DlcOracle::decode(bytes.as_slice()) {
+            creation.insert("generate_nonce.id".to_owned(), vec![o.nonce_index.to_string()]);
+            creation.insert("generate_nonce.oracle_pub_key".to_owned(), vec![o.pubkey]);
+        };
+    }
+    SideEvent::BlockEvent(creation)
 }
 
 impl MockQuery {

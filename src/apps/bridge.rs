@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 
+use bitcoin::hashes::Hash;
+use bitcoin::sighash::{Prevouts, SighashCache};
 use cosmrs::Any;
 use libp2p::gossipsub::IdentTopic;
 use tracing::{error, info};
-use bitcoin::{Network, Psbt, TapNodeHash, TapSighashType, Witness, XOnlyPublicKey};
+use bitcoin::{Address, Network, Psbt, TapNodeHash, TapSighashType, Witness, XOnlyPublicKey};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 
@@ -12,8 +14,10 @@ use side_proto::side::btcbridge::{MsgCompleteDkg, MsgSubmitSignatures};
 use crate::apps::{App, Context, Status, SubscribeMessage, Task };
 use crate::config::{Config, VaultKeypair};
 use crate::helper::bitcoin::get_group_address_by_tweak;
-use crate::helper::encoding::{from_base64, to_base64};
+use crate::helper::encoding::{from_base64, pubkey_to_identifier, to_base64};
+use crate::helper::mem_store;
 use crate::helper::store::Store;
+use crate::mock::extact_value;
 use crate::protocols::dkg::{DKGAdaptor, DKG};
 use crate::protocols::sign::{SignAdaptor, StandardSigner};
 
@@ -60,24 +64,40 @@ impl App for BridgeSigner {
 
 pub struct KeygenHander{}
 impl DKGAdaptor for KeygenHander {
-    fn new_task(&self, _ctx: &mut Context, _event: &SideEvent) -> Option<Vec<Task>> {
-        // if has_event_value(events, "") {
-        //     let id = get_event_value(events, "message", "id")?;
-        //     let participants = get_event_value(events, "message", "id")?;
-        //     let threshold = get_event_value(events, "message", "id")?.parse().unwrap_or(0);
-        //     if threshold < 2 {return None;}
-        //     Some(Task::new_dkg(id, vec![], threshold))
-        // } else {
-        //     None
-        // }
+    fn new_task(&self, _ctx: &mut Context, event: &SideEvent) -> Option<Vec<Task>> {
+        match event {
+            SideEvent::BlockEvent(events) => {
+                if events.contains_key("create_bridge_vault.id") {
+                    // println!("Events: {:?}", events);
+                    let mut tasks = vec![];
+                    for (((id, ps), tweaks ), t)in events.get("create_bridge_vault.id")?.iter()
+                        .zip(events.get("create_bridge_vault.participants")?)
+                        .zip(events.get("create_bridge_vault.tweaks")?)
+                        .zip(events.get("create_bridge_vault.threshold")?) {
+                        
+                            let mut participants = vec![];
+                            for p in ps.split(",") {
+                                if let Ok(identifier) = from_base64(p) {
+                                    participants.push(pubkey_to_identifier(&identifier));
+                                }
+                            };
+                            if let Ok(threshold) = t.parse() {
+                                if threshold as usize * 3 >= participants.len() * 2  {
+                                    tasks.push(Task::new_dkg_with_tweak(format!("create-vault-{}", id), participants, threshold, tweaks.split(",").map(|t| t.parse::<i32>().unwrap()).collect()));
+                                }
+                            }
+                        };
+                    return Some(tasks);
+                }
+            },
+            _ => {},
+        }
         None
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task, priv_key: &frost_adaptor_signature::keys::KeyPackage, pub_key: &frost_adaptor_signature::keys::PublicKeyPackage) {
 
         let vaults = generate_vault_addresses(ctx, pub_key.clone(), priv_key.clone(), &task.dkg_input.tweaks, ctx.conf.bitcoin.network);
-
-        let id: u64 = task.id.replace("dkg-", "").parse().unwrap();
-
+        let id: u64 = task.id.replace("create-vault-", "").parse().unwrap();
         let mut sig_msg = id.to_be_bytes().to_vec();
 
         for v in &vaults {
@@ -85,7 +105,6 @@ impl DKGAdaptor for KeygenHander {
         }
 
         let signature = hex::encode(ctx.node_key.sign(&sig_msg, None));
-
         let cosm_msg = MsgCompleteDkg {
             id,
             sender: ctx.conf.relayer_bitcoin_address(),
@@ -141,7 +160,96 @@ pub fn generate_vault_addresses(
 
 pub struct SignatureHandler{}
 impl SignAdaptor for SignatureHandler {
-    fn new_task(&self, _ctx: &mut Context,  _events: &SideEvent) -> Option<Vec<Task>> {
+    fn new_task(&self, ctx: &mut Context, event: &SideEvent) -> Option<Vec<Task>> {
+        match event {
+            SideEvent::TxEvent(events) => {
+
+
+                println!("SignAdaptor: {:?}", events);
+
+                let mut tasks = vec![];
+                events.iter().filter(|e| e.kind == "bridge_transaction").for_each(|e| {
+
+                    println!("evt: {:?}", e);
+                    let id = extact_value(&e.attributes, "txid");
+                    if id.is_none() {
+                        return
+                    }
+                    let psbt_raw = extact_value(&e.attributes, "psbt");
+                    if psbt_raw.is_none() {
+                        return
+                    }
+
+                    let psbt_text = psbt_raw.unwrap();
+                    println!("received psbt: {} ", psbt_text);
+
+                    if let Ok(psbt_bytes ) = from_base64(&psbt_text) {
+                        if let Ok(psbt) = Psbt::deserialize(psbt_bytes.as_slice()) {
+
+                            let mut inputs = BTreeMap::new();    
+                            let preouts = psbt.inputs.iter()
+                                .map(|input| input.witness_utxo.clone().unwrap())
+                                .collect::<Vec<_>>();
+
+                            psbt.inputs.iter().enumerate().for_each(|(index, input)| {
+                                let script = input.witness_utxo.clone().unwrap().script_pubkey;
+                                let address = Address::from_script(&script, ctx.conf.bitcoin.network).unwrap();
+                        
+                                // get the message to sign
+                                let hash_ty = input
+                                    .sighash_type
+                                    .and_then(|psbt_sighash_type| psbt_sighash_type.taproot_hash_ty().ok())
+                                    .unwrap_or(bitcoin::TapSighashType::Default);
+                                let hash = match SighashCache::new(&psbt.unsigned_tx).taproot_key_spend_signature_hash(
+                                    index,
+                                    &Prevouts::All(&preouts),
+                                    hash_ty,
+                                ) {
+                                    Ok(hash) => hash,
+                                    Err(e) => {
+                                        error!("failed to compute sighash: {}", e);
+                                        return;
+                                    }
+                                };
+                                
+                                inputs.insert(index, super::Input::new_with_message(
+                                    address.to_string(), 
+                                    hash.to_raw_hash().to_byte_array().to_vec(), 
+                                    mem_store::count_task_participants(ctx, &address.to_string())));
+                            });
+                            tasks.push(Task::new_signing(id.unwrap(), psbt_text, inputs));
+                        };
+                    }
+
+                });
+
+                if tasks.len() > 0 {
+                    return Some(tasks);
+                }
+                // if events.events[0].kind("create_bridge_vault.id") {
+                //     // println!("Events: {:?}", events);
+                //     let mut tasks = vec![];
+                //     for ((id, ps), t) in events.get("create_bridge_vault.id")?.iter()
+                //         .zip(events.get("create_bridge_vault.participants")?)
+                //         .zip(events.get("create_bridge_vault.threshold")?) {
+                        
+                //             let mut participants = vec![];
+                //             for p in ps.split(",") {
+                //                 if let Ok(identifier) = from_base64(p) {
+                //                     participants.push(pubkey_to_identifier(&identifier));
+                //                 }
+                //             };
+                //             if let Ok(threshold) = t.parse() {
+                //                 if threshold as usize * 3 >= participants.len() * 2  {
+                //                     tasks.push(Task::new_dkg(format!("create-vault-{}", id), participants, threshold));
+                //                 }
+                //             }
+                //         };
+                //     return Some(tasks);
+                // }
+            },
+            _ => {},
+        }
         None
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task) -> anyhow::Result<()> {

@@ -1,12 +1,13 @@
-use std::{fs, path::{Path, PathBuf}};
+use std::{collections::BTreeMap, fs, path::{Path, PathBuf}};
 
 use cosmrs::Any;
 use serde::{Deserialize, Serialize};
 use side_proto::{side::btcbridge::{DkgParticipant, DkgRequest, DkgRequestStatus, MsgCompleteDkg, QueryDkgRequestsResponse, QuerySigningRequestsResponse, SigningRequest}, Timestamp};
+use tendermint::abci::{Event, EventAttribute};
 
-use crate::{helper::now, mock::{fullpath, generate_mock_psbt}};
+use crate::{apps::SideEvent, helper::now, mock::{fullpath, generate_mock_psbt}};
 
-use super::{BRIDGE_DKG_FILE_NAME, SINGING_FILE_NAME, VAULT_FILE_NAME};
+use super::{EventQueue, MockEnv, BRIDGE_DKG_FILE_NAME, SINGING_FILE_NAME, VAULT_FILE_NAME};
 
 #[derive(Serialize, Deserialize)]
 pub struct KeygenParameter {
@@ -22,6 +23,42 @@ pub struct BridgeSigningRequest {
     pub txid: String, 
     pub psbt: String, 
     pub status: i32, 
+}
+pub fn bridge_task_queue() -> EventQueue {
+    // height, event
+    let mut queue: EventQueue = EventQueue::new();
+    queue.insert(3, create_vault_event);
+    queue.insert(5, create_transaction_event);
+    queue.insert(7, create_transaction_event);
+    queue
+}
+
+pub fn create_vault_event(env: MockEnv) -> SideEvent {
+    let mut creation = BTreeMap::new();
+    creation.insert("create_bridge_vault.id".to_owned(), vec!["1".to_owned()]);
+    creation.insert("create_bridge_vault.participants".to_owned(), vec![env.participants.join(",")]);
+    creation.insert("create_bridge_vault.tweaks".to_owned(), vec!["1,2".to_owned()]);
+    creation.insert("create_bridge_vault.threshold".to_owned(), vec![(env.participants.len() * 2 / 3).to_string()]);
+    SideEvent::BlockEvent(creation)
+}
+
+pub fn create_transaction_event(env: MockEnv) -> SideEvent {
+
+    let path_2 = fullpath(&env.home, VAULT_FILE_NAME);
+
+    let mut events = vec![];
+    if let Ok(addresses) = fs::read_to_string(path_2) {
+        // generate psbt
+        for addr in addresses.split(",") {
+            let (txid, psbt) = generate_mock_psbt(&addr, Some(2));
+            events.push( Event::new("bridge_transaction".to_owned(), vec![
+                EventAttribute::from(("txid", txid, false)),
+                EventAttribute::from(("psbt", psbt, false)),
+            ]));
+        }
+    }
+    
+    SideEvent::TxEvent(events)
 }
 
 pub fn generate_bridge_file(testdir: &Path, participants: Vec<String>) {
@@ -119,65 +156,73 @@ pub async fn loading_dkg_request(home: &str) -> Result<tonic::Response<QueryDkgR
     Ok(tonic::Response::new(res))
 }
 
-pub fn handle_bridge_dkg_submission(home: &str, tx_num: u32, m : &Any) {
+pub fn handle_bridge_dkg_submission(home: &str, _tx_num: u32, m : &Any) {
     if let Ok(msg) = m.to_msg::<MsgCompleteDkg>() {
-        let key = fullpath(home, msg.vaults.join("").as_str());
-        println!("Received: {:?} from {}", key, msg.sender);
-        
-        if fs::exists(&key).unwrap_or(false) {
-            return
-        }
-        fs::create_dir_all(fullpath(home, key)).unwrap();
 
-        let num = rand::random::<u32>() % 5 + 1;
-        // num = 1;
-        let mut srs = vec![];
-        msg.vaults.iter().for_each(|addr| {
-            
-            // check duplication
-            let mut path = PathBuf::new();
-            path.push(home);
-            path.push("mock");
-            path.push("addresses");
-            path.push(addr);
-            
-            if path.is_dir() {
+        println!("received vault: {:?}", msg.vaults);
+        // let num = rand::random::<u32>() % 5 + 1;
+        let path_2 = fullpath(home, VAULT_FILE_NAME);
+
+        if let Ok(addresses) = fs::read_to_string(&path_2) {
+            if msg.vaults.iter().any(|v| addresses.contains(v)) {
                 return
             }
-            let _ = fs::create_dir_all(path.as_path());
-
-            // clear dkg request.
-            let mut path_dkg = PathBuf::new();
-            path_dkg.push(home);
-            path_dkg.push("mock");
-            path_dkg.push(BRIDGE_DKG_FILE_NAME);
-            let _ = fs::write(path_dkg, "");
-
-            // generate psbt
-            for _i in 0..tx_num {
-                let (txid, psbt) = generate_mock_psbt(addr, Some(num));
-                srs.push(BridgeSigningRequest {
-                    address: addr.clone(),
-                    sequence: num as u64,
-                    txid,
-                    psbt,
-                    status: 1,
-                })
-            }
-        });
-
-        if srs.len() == 0 {
-            return
         }
-        if let Ok(contents) = serde_json::to_string_pretty(&srs) {
 
-            let mut path = PathBuf::new();
-            path.push(home);
-            path.push("mock");
-            path.push(SINGING_FILE_NAME);
-
-            println!("txs: {}", contents);
-            let _ = fs::write(path, &contents);
+        if fs::write(path_2, msg.vaults.join(",").as_bytes()).is_ok() {
+            println!("saved vault: {:?}", msg.vaults)
         }
+
+        // if let Ok(addresses) = fs::read_to_string(path_2) {
+
+        // num = 1;
+        // let mut srs = vec![];
+        // msg.vaults.iter().for_each(|addr| {
+            
+        //     // check duplication
+        //     let mut path = PathBuf::new();
+        //     path.push(home);
+        //     path.push("mock");
+        //     path.push("addresses");
+        //     path.push(addr);
+            
+        //     if path.is_dir() {
+        //         return
+        //     }
+        //     let _ = fs::create_dir_all(path.as_path());
+
+        //     // clear dkg request.
+        //     let mut path_dkg = PathBuf::new();
+        //     path_dkg.push(home);
+        //     path_dkg.push("mock");
+        //     path_dkg.push(BRIDGE_DKG_FILE_NAME);
+        //     let _ = fs::write(path_dkg, "");
+
+        //     // generate psbt
+        //     for _i in 0..tx_num {
+        //         let (txid, psbt) = generate_mock_psbt(addr, Some(num));
+        //         srs.push(BridgeSigningRequest {
+        //             address: addr.clone(),
+        //             sequence: num as u64,
+        //             txid,
+        //             psbt,
+        //             status: 1,
+        //         })
+        //     }
+        // });
+
+        // if srs.len() == 0 {
+        //     return
+        // }
+        // if let Ok(contents) = serde_json::to_string_pretty(&srs) {
+
+        //     let mut path = PathBuf::new();
+        //     path.push(home);
+        //     path.push("mock");
+        //     path.push(SINGING_FILE_NAME);
+
+        //     println!("txs: {}", contents);
+        //     let _ = fs::write(path, &contents);
+        // }
     }
 }
