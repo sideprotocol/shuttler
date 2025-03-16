@@ -136,7 +136,10 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
                     return;
                 }
             }
-            Err(_) => return
+            Err(e) => {
+                debug!("Received invalid message: {}", e);
+                return
+            }
         }
 
         // Ensure the message is from the participants
@@ -217,6 +220,7 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
         if stored_nonces.len() == 0 {
             return;
         }
+
         let stored_remote_commitments = ctx.commitment_store.get(&task.id).unwrap_or_default();
 
         let mut broadcast_packages = BTreeMap::new();
@@ -243,7 +247,7 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
                 
                     debug!("Commitments {} {}/{}", &task.id[..6], received, participants.len());
 
-                    if received != participants.len() {
+                    if received != keypair.pub_key.verifying_shares().len() && received != participants.len() {
                         return
                     }
                 }

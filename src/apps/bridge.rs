@@ -212,12 +212,16 @@ impl SignAdaptor for SignatureHandler {
                                     }
                                 };
                                 
-                                inputs.insert(index, super::Input::new_with_message(
+                                inputs.insert(index, super::Input::new_with_message_mode(
                                     address.to_string(), 
                                     hash.to_raw_hash().to_byte_array().to_vec(), 
-                                    mem_store::count_task_participants(ctx, &address.to_string())));
+                                    mem_store::count_task_participants(ctx, &address.to_string()),
+                                    crate::apps::SignMode::SignWithTweak,
+                                ));
                             });
-                            tasks.push(Task::new_signing(id.unwrap(), psbt_text, inputs));
+                            if inputs.len() > 0 {
+                                tasks.push(Task::new_signing(id.unwrap(), psbt_text, inputs));
+                            }
                         };
                     }
 

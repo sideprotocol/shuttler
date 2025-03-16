@@ -48,6 +48,12 @@ pub fn generate_event_queue(module: &String) -> EventQueue {
     }
 }
 
+// pub fn exit_queue(_: MockEnv) -> SideEvent {
+//     // exit(0);
+//     // panic!("completed queue.");
+
+// }
+
 fn handle_tx_submissions(home: &str, tx_num: u32, tx_bytes: &Vec<u8>) {
     if let Ok(tx) = Tx::from_bytes(tx_bytes) {
         tx.body.messages.iter().for_each(|m| {
