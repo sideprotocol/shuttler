@@ -1,7 +1,5 @@
 use std::{fs::{self, File}, path::PathBuf, thread, time::Duration};
 
-use side_proto::side::btcbridge::query_server::QueryServer as BridgeQueryServer;
-use side_proto::side::dlc::query_server::QueryServer as OracleQueryServer;
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::Validator;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_server::QueryServer as AuthServer;
 use cosmos_sdk_proto::cosmos::tx::v1beta1::service_server::ServiceServer as TxServer;
@@ -82,8 +80,8 @@ pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32, module: Str
     let s = MockQuery::new(home.clone());
         
     Server::builder()
-        .add_service(OracleQueryServer::new(s.clone()))
-        .add_service(BridgeQueryServer::new(s.clone()))
+        // .add_service(OracleQueryServer::new(s.clone()))
+        // .add_service(BridgeQueryServer::new(s.clone()))
         .add_service(AuthServer::new(s))
         .add_service(TxServer::new(MockTxService{home: home.clone(), tx}))
         .add_service(BlockServer::new(MockBlockService::new(participants.iter().map(|p| { Validator{
