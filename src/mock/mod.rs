@@ -1,10 +1,12 @@
+use std::collections::BTreeMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountResponse};
 use cosmos_sdk_proto::cosmos::base::abci::v1beta1::TxResponse;
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::{GetLatestValidatorSetResponse, Validator};
-use oracle::{generate_agency_file, generate_oracle_file, handle_nonce_submission, handle_oracle_dkg_submission};
+use oracle::{handle_nonce_submission, handle_oracle_dkg_submission, oracle_task_queue};
 use side_proto::side::btcbridge::query_server::Query;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_server::Query as AuthService;
 use cosmos_sdk_proto::cosmos::tx::v1beta1::service_server::Service as TxService;
@@ -17,7 +19,9 @@ use bitcoin::{hashes::{sha256d, Hash},
     opcodes, psbt::PsbtSighashType, transaction::Version, Amount, OutPoint, Psbt, Sequence, TxIn,
     TxOut, Address, ScriptBuf, Transaction, Txid
 };
+use tendermint::abci::EventAttribute;
 
+use crate::apps::SideEvent;
 use crate::helper::cipher::random_bytes;
 use crate::helper::encoding::to_base64;
 
@@ -25,23 +29,30 @@ use crate::helper::now;
 
 mod bridge;
 mod oracle;
-mod agency;
-
+pub mod websocket;
 pub use bridge::*;
+
+type EventQueue = BTreeMap<u64, fn(MockEnv) -> SideEvent>;
 
 pub const SINGING_FILE_NAME: &str = "signing-requests.json";
 pub const BRIDGE_DKG_FILE_NAME: &str = "dkg-request.json";
 pub const VAULT_FILE_NAME: &str = "address.txt";
 
-pub fn generate_task(testdir: &Path, module: &str, participants:Vec<String> ) {
+pub fn generate_event_queue(module: &String) -> EventQueue {
     if module == "bridge" {
-        generate_bridge_file(testdir, participants);
+        bridge_task_queue()
     } else if module == "oracle" {
-        generate_oracle_file(testdir, participants);
-    } else if module == "agency" {
-        generate_agency_file(testdir, participants);
+        oracle_task_queue()
+    } else {
+        oracle_task_queue()
     }
 }
+
+// pub fn exit_queue(_: MockEnv) -> SideEvent {
+//     // exit(0);
+//     // panic!("completed queue.");
+
+// }
 
 fn handle_tx_submissions(home: &str, tx_num: u32, tx_bytes: &Vec<u8>) {
     if let Ok(tx) = Tx::from_bytes(tx_bytes) {
@@ -56,6 +67,36 @@ fn handle_tx_submissions(home: &str, tx_num: u32, tx_bytes: &Vec<u8>) {
                 println!("Received msg: {}", m.type_url);
             }
         })
+    }
+}
+
+pub fn extact_value(attr: &Vec<EventAttribute>, key: &str) -> Option<String> {
+    for i in attr {
+        if let Ok(k) = i.key_str() {
+            if k == key {
+                if let Ok(s) = i.value_str() {
+                    return Some(s.to_string())
+                }
+            }
+        }
+    }
+    None
+}
+
+#[derive(Clone)]
+pub struct MockEnv {
+    home: String,
+    module: String, 
+    participants: Vec<String>
+}
+
+impl MockEnv {
+    pub fn new(home: String, module: String, participants: Vec<String>) -> Self {
+        Self {
+            home,
+            module,
+            participants,
+        }
     }
 }
 
@@ -98,10 +139,12 @@ impl MockQuery {
         fullpath(&self.home, file)
     }
 }
+
 fn fullpath(home: &str, file: impl AsRef<Path>) -> PathBuf {
     let mut path = PathBuf::new();
     path.push(home);
     path.push("mock");
+    let _ = fs::create_dir_all(&path);
     path.push(file);
     path
 }

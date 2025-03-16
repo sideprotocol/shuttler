@@ -1,16 +1,16 @@
 use std::collections::BTreeMap;
 
-use frost_adaptor_signature::{keys::Tweak, round1::{self, Nonce, SigningNonces}, round2::{self, SignatureShare}, Field, Identifier, Secp256K1ScalarField, SigningPackage};
+use bitcoin::hex::DisplayHex;
+use frost_adaptor_signature::{round1::{self, Nonce, SigningNonces}, round2::{self, SignatureShare}, Field, Identifier, Secp256K1ScalarField, SigningPackage};
 use libp2p::gossipsub::IdentTopic;
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 pub use tracing::error;
 use usize as Index;
-use crate::{apps::{Context, FrostSignature, SignMode, Status, SubscribeMessage, Task}, config::VaultKeypair, 
+use crate::{apps::{Context, FrostSignature, SideEvent, SignMode, Status, SubscribeMessage, Task}, config::VaultKeypair, 
     helper::{
-        bitcoin::convert_tweak, encoding::{self, hex_to_projective_point}, 
-        gossip::publish_topic_message, 
+        bitcoin::convert_tweak, gossip::publish_topic_message, 
         store::Store
 }};
 
@@ -29,19 +29,19 @@ pub enum SignPackage {
     Round1(BTreeMap<Index,BTreeMap<Identifier,round1::SigningCommitments>>),
     Round2(BTreeMap<Index,BTreeMap<Identifier,round2::SignatureShare>>),
 }
-pub type SigningHandleFn = dyn Fn(&mut Context, &mut Task) -> anyhow::Result<()> + Send + Sync;
 
-pub trait SigningHandle {
+pub trait SignAdaptor {
+    fn new_task(&self, ctx: &mut Context, events: &SideEvent) -> Option<Vec<Task>>;
     fn on_complete(&self, ctx: &mut Context, task: &mut Task) -> anyhow::Result<()>;
 }
 
 #[derive(Clone)]
-pub struct StandardSigner<H: SigningHandle> {
+pub struct StandardSigner<H: SignAdaptor> {
     name: String,
     handler: H,
 }
 
-impl<H> StandardSigner<H> where H: SigningHandle{
+impl<H> StandardSigner<H> where H: SignAdaptor{
 
     pub fn new(name: impl Into<String>, handler: H) -> Self {
         Self {name: name.into(), handler}
@@ -50,6 +50,20 @@ impl<H> StandardSigner<H> where H: SigningHandle{
     pub fn topic(&self) -> IdentTopic {
         IdentTopic::new(&self.name)
     }
+
+    // pub fn hander(&self) -> &H {
+    //     &self.handler
+    // }
+
+    pub fn execute(&self, ctx: &mut Context, event: &SideEvent) {
+        if let Some(tasks) = self.handler.new_task(ctx, event) {
+            tasks.iter().for_each(|task| {
+                if ctx.task_store.exists(&task.id) { return }
+                ctx.task_store.save(&task.id, &task);
+                self.generate_commitments(ctx, &task);
+            });
+        }
+    }
     
     pub fn generate_commitments(&self, ctx: &mut Context, task: &Task) {
 
@@ -57,7 +71,7 @@ impl<H> StandardSigner<H> where H: SigningHandle{
             return
         }
 
-        debug!("Start a new signing task: {}", task.id);
+        debug!("Start a new signing task: {}, {}", task.id, task.sign_inputs.len());
 
         let mut nonces = BTreeMap::new();
         let mut commitments = BTreeMap::new();
@@ -67,7 +81,10 @@ impl<H> StandardSigner<H> where H: SigningHandle{
             let mut rng = thread_rng();
             let key = match ctx.keystore.get(&input.key) {
                 Some(k) => k,
-                None => return,
+                None => {
+                    debug!("Signing key [{:?}] not found:", input.key);
+                    return
+                },
             };
 
             let (nonce, commitment) = round1::commit(key.priv_key.signing_share(), &mut rng);
@@ -119,7 +136,10 @@ impl<H> StandardSigner<H> where H: SigningHandle{
                     return;
                 }
             }
-            Err(_) => return
+            Err(e) => {
+                debug!("Received invalid message: {}", e);
+                return
+            }
         }
 
         // Ensure the message is from the participants
@@ -200,6 +220,7 @@ impl<H> StandardSigner<H> where H: SigningHandle{
         if stored_nonces.len() == 0 {
             return;
         }
+
         let stored_remote_commitments = ctx.commitment_store.get(&task.id).unwrap_or_default();
 
         let mut broadcast_packages = BTreeMap::new();
@@ -226,7 +247,7 @@ impl<H> StandardSigner<H> where H: SigningHandle{
                 
                     debug!("Commitments {} {}/{}", &task.id[..6], received, participants.len());
 
-                    if received != participants.len() {
+                    if received != keypair.pub_key.verifying_shares().len() && received != participants.len() {
                         return
                     }
                 }
@@ -237,10 +258,19 @@ impl<H> StandardSigner<H> where H: SigningHandle{
                     );
 
                 let signer_nonces = match &input.mode {
-                    SignMode::SignWithGroupcommitment(g) => { 
-                        let nonce = match ctx.keystore.get(g) {
+                    SignMode::SignWithGroupcommitment(gc) => {
+
+                        let key_b = match gc.serialize() {
+                            Ok(b) => b,
+                            Err(_) => return,
+                        };
+                        
+                        let nonce = match ctx.keystore.get(&key_b[1..].to_lower_hex_string()) {
                             Some(t) => t,
-                            None => return,
+                            None => {
+                                error!("Group Commitment Not Found: {}", key_b.to_lower_hex_string());
+                                return;
+                            },
                         };
                 
                         let hiding = Nonce::from_scalar(nonce.priv_key.signing_share().to_scalar());
@@ -260,7 +290,10 @@ impl<H> StandardSigner<H> where H: SigningHandle{
 
                 let signature_shares = match sign(&input.mode, &keypair, &signing_package, signer_nonces, ) {
                     Ok(s) => s,
-                    Err(_e) => return,
+                    Err(e) => {
+                        error!("Sign error: {}", e);
+                        return;
+                    },
                 };
                 
                 let mut my_share = BTreeMap::new();
@@ -398,13 +431,12 @@ fn sign(mode: &SignMode, keypair: &VaultKeypair, signing_package: &SigningPackag
                 signing_package, signer_nonces, &keypair.priv_key, tweek
             )?)
         },
-        SignMode::SignWithGroupcommitment(group) => {
-            let group_commitment = hex_to_projective_point(group)?;
+        SignMode::SignWithGroupcommitment(group_commitment) => {
+            // let group_commitment = hex_to_projective_point(group)?;
             Ok(round2::sign_with_dkg_nonce(signing_package, signer_nonces, &keypair.priv_key, &group_commitment)?)
         },
-        SignMode::SignWithAdaptorPoint(point) => {
+        SignMode::SignWithAdaptorPoint(adaptor_point) => {
             // adatpor signature
-            let adaptor_point = hex_to_projective_point(point)?;
             Ok(round2::sign_with_adaptor_point(
                 signing_package, signer_nonces, &keypair.priv_key, &adaptor_point,
             )?)
@@ -417,31 +449,20 @@ fn aggregate(signing_package: &SigningPackage, signature_shares: &BTreeMap<Ident
     match mode {
         SignMode::SignWithTweak => {
             let tweek  = convert_tweak(&keypair.tweak);
-            let frost_signature = frost_adaptor_signature::aggregate_with_tweak(&signing_package, signature_shares, &keypair.pub_key, tweek)?;
-
-            Ok(keypair.pub_key.clone().tweak(tweek)
-                            .verifying_key()
-                            .verify(signing_package.message(), &frost_signature)
-                            .map(|_| FrostSignature::Standard(frost_signature))?)
+            let signature = frost_adaptor_signature::aggregate_with_tweak(&signing_package, signature_shares, &keypair.pub_key, tweek)?;
+            Ok(FrostSignature::Standard(signature))
         },
-        SignMode::SignWithGroupcommitment(gc) => {
-
-            let group_commitment = hex_to_projective_point(gc)?; 
+        SignMode::SignWithGroupcommitment(group_commitment) => {
             let frost_signature = frost_adaptor_signature::aggregate_with_group_commitment(&signing_package, signature_shares, &keypair.pub_key, &group_commitment)?;
-
-            Ok(keypair.pub_key.clone().verifying_key().verify(signing_package.message(), &frost_signature).map(|_| FrostSignature::Standard(frost_signature))?)
+            Ok(FrostSignature::Standard(frost_signature))
         },
-        SignMode::SignWithAdaptorPoint(..) => {
-            let frost_signature = frost_adaptor_signature::aggregate(&signing_package, signature_shares, &keypair.pub_key)?;
-            Ok(keypair.pub_key.clone().verifying_key().verify(signing_package.message(), &frost_signature)
-            .map(|_| FrostSignature::Adaptor(frost_adaptor_signature::AdaptorSignature(frost_signature)))?)
-
+        SignMode::SignWithAdaptorPoint(adaptor_point) => {
+            let frost_signature = frost_adaptor_signature::aggregate_with_adaptor_point(&signing_package, signature_shares, &keypair.pub_key, adaptor_point)?;
+            Ok(FrostSignature::Adaptor(frost_signature))
         }
         _ => {
-
             let frost_signature = frost_adaptor_signature::aggregate(&signing_package, signature_shares, &keypair.pub_key)?;
-            Ok(keypair.pub_key.clone().verifying_key().verify(signing_package.message(), &frost_signature).map(|_| FrostSignature::Standard(frost_signature))?)
-
+            Ok(FrostSignature::Standard(frost_signature))
         }
     }
 

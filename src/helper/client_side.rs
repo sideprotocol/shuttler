@@ -1,3 +1,5 @@
+use std::{thread, time::Duration};
+
 use bitcoin::{hashes::{Hash, sha256d, HashEngine}, consensus::Encodable, key::Secp256k1, secp256k1::Message, sign_message::BITCOIN_SIGNED_MSG_PREFIX, PrivateKey};
 use cosmrs::{ crypto::secp256k1::SigningKey, tx::{self, Fee, ModeInfo, Raw, SignDoc, SignerInfo, SignerPublicKey}, Coin};
 use cosmos_sdk_proto::{Any, cosmos::{
@@ -5,8 +7,10 @@ use cosmos_sdk_proto::{Any, cosmos::{
     tx::v1beta1::{service_client::ServiceClient as TxServiceClient, BroadcastMode, BroadcastTxRequest, BroadcastTxResponse}
 }};
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_client::ServiceClient as TendermintServiceClient;
+use futures::SinkExt;
 use reqwest::Error;
 use tokio::sync::Mutex;
+use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tonic::{Response, Status};
 use side_proto::side::btcbridge::{
     query_client::QueryClient as BtcQueryClient, QueryParamsRequest,
@@ -15,6 +19,7 @@ use side_proto::side::btcbridge::{
     QuerySigningRequestsRequest, QuerySigningRequestsResponse, 
     QuerySigningRequestByTxHashRequest, QuerySigningRequestByTxHashResponse
 };
+use tokio_tungstenite::tungstenite::protocol::Message as WebSocketMessage;
 
 use lazy_static::lazy_static;
 
@@ -51,6 +56,39 @@ impl SigningRequestsResponse {
     pub fn pagination(&self) -> Option<&Pagination> {
         self.pagination.as_ref()
     }
+}
+
+pub async fn connect_ws_client(endpoint: &str) -> WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>> {
+    let host= format!("{}/websocket", endpoint.replace("http", "ws"));
+    let sub_msg = r#"{"jsonrpc":"2.0","method":"subscribe","id":0,"params":{"query":"tm.event='NewBlock'"}}"#;
+    loop {
+        if let Ok((mut ws_stream , _)) = connect_async(&host).await {
+            if ws_stream.send(WebSocketMessage::Text(sub_msg.into())).await.is_ok() {
+                return ws_stream;
+            }
+        }
+        tracing::error!("sidechain websocket client disconnected: {}", host);
+        thread::sleep(Duration::from_secs(5));
+    }
+
+    // Wrapper<DeEvent>
+    // let empty = r#"{"jsonrpc":"2.0","id":0,"result":{}}"#;
+    // loop {
+    //     select! {
+    //         Some(recv) = ws_stream.next() => {
+    //             // assert!(recv.is_ok(), "received");
+    //             if let Ok(Message::Text(utf8_bytes)) = recv {
+    //                 let text = utf8_bytes.to_string();
+    //                 if text == empty {
+    //                     continue;
+    //                 }
+    //                 let event = serde_json::from_str::<Wrapper<DeEvent>>(&text).unwrap();
+    //                 println!("{:?}", event)
+    //             }
+                
+    //         }   
+    //     }
+    // }
 }
 
 pub async fn get_bitcoin_tip_on_side(host: &str) -> Result<Response<QueryChainTipResponse>, Status> {

@@ -22,7 +22,7 @@ pub async fn execute(home: &str, relayer: bool, bridge: bool, oracle: bool, agen
     if relayer { shuttler.registry( &r); }
     let b = BridgeSigner::new(conf.clone());
     if bridge { shuttler.registry( &b); }
-    let o = Oracle::new();
+    let o = Oracle::new(conf.clone());
     if oracle { shuttler.registry(&o); }
     let a = Agency::new();
     if agency { shuttler.registry(&a);}

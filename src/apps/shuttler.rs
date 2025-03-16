@@ -4,11 +4,12 @@ use std::{
 
 use cosmrs::Any;
 use ed25519_compact::{PublicKey, SecretKey, Signature};
-use futures::stream::{self, StreamExt};
+use futures::stream::StreamExt;
 use libp2p::{
     gossipsub, identify, identity::Keypair, kad::{self, store::MemoryStore}, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, Multiaddr, PeerId, Swarm
 };
-use tokio::{select, spawn, time::interval};
+use tendermint_rpc::{event::v0_38::DeEvent, response::Wrapper};
+use tokio::{select, signal, spawn};
 use tracing::{debug, info, warn, error};
 
 use crate::{
@@ -17,10 +18,9 @@ use crate::{
     },
     config::{candidate::Candidate, Config},
     helper::{
-        client_side::send_cosmos_transaction, encoding::pubkey_to_identifier, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store
-    },
+        client_side::{connect_ws_client, send_cosmos_transaction}, encoding::pubkey_to_identifier, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store
+    }, rpc::run_rpc_server,
 };
-use tokio_stream::wrappers::IntervalStream;
 
 pub struct Shuttler<'a> {
     pub apps: Vec<&'a dyn App>,
@@ -176,29 +176,32 @@ impl<'a> Shuttler<'a> {
             }
         });
 
+        // Connect to the Tendermint WebSocket endpoint
+        let mut sidechain_event_stream = connect_ws_client(&conf.side_chain.rpc).await;
         // Common Setting: Context and Heart Beat
         let mut context = Context::new(swarm, tx_sender, identifier, node_key, conf.clone()); 
-        let mut heart_beat = tokio::time::interval(Duration::from_secs(mem_store::HEART_BEAT_WINDOW));
 
-        // App Tickers for schedule tasks
-        let mut tickers = stream::select_all(self.apps.iter().enumerate().map(|(index, app)| {
-            IntervalStream::new(interval(app.tick())).map(move |_| index)
-        }));
+        // let rpc = conf.rpc_address.clone();
+        // tokio::spawn(async move{
+        //     run_rpc_server(rpc).await.expect("RPC Server stopped");
+        // });
 
+        // let mut context = Arc::clone(&arc_context);
         loop {
             select! {
-                Some(index) = tickers.next() => {   
-                    if context.swarm.connected_peers().count() < 2 { continue; }
-                    if let Some(app) = self.get_app(index) {
-                        app.on_tick(&mut context);
-                    };
-                }
-                _ = heart_beat.tick() => {
-                    sending_heart_beat(&mut context).await;
+                recv = sidechain_event_stream.next() => {
+                    match recv {
+                        Some(Ok(msg)) => {
+                            self.handle_block_event(&mut context, msg);
+                        },
+                        _ => {
+                            sidechain_event_stream = connect_ws_client(&conf.side_chain.rpc).await;
+                        }
+                    }
                 }
                 swarm_event = context.swarm.select_next_some() => match swarm_event {
-                    SwarmEvent::Behaviour(ShuttlerBehaviourEvent::Gossip(gossipsub::Event::Message { message, .. })) => {
-                        update_heartbeat(&context, &message);
+                    SwarmEvent::Behaviour(ShuttlerBehaviourEvent::Gossip(gossipsub::Event::Message{ message, .. })) => {
+                        update_received_heartbeat(&context, &message);
                         for app in &self.apps {
                             dispatch_messages(app, &mut context, &message);
                         }
@@ -247,25 +250,72 @@ impl<'a> Shuttler<'a> {
                         // debug!("Swarm event: {:?}", swarm_event);
                     },
                 },
+                _ = signal::ctrl_c() => {
+                    break;
+                }
             }
         }
     }
 
     pub async fn is_white_listed_peer(&mut self, peer_id: &PeerId) -> bool {
         
-        self.candidates.sync_from_validators().await;
-        // Allow anyone if no candidate is specified.
-        if self.candidates.peers().len() == 0 {
-            return true;
+        if self.candidates.has_bootstrap_nodes() {
+            self.candidates.sync_from_validators().await;
+            // Allow anyone if no candidate is specified.
+            if self.candidates.peers().len() == 0 {
+                return true;
+            }
+            // Candidates are active validators and bootstrap nodes
+            self.candidates.peers().contains(peer_id)
+        } else {
+            // running in local mode
+            true
         }
-        // Candidates are active validators and bootstrap nodes
-        self.candidates.peers().contains(peer_id)
     }
 
-    // Defines who is allowed to participate in the p2p network.
-    // pub async fn sync_candidates_from_validators(&mut self) {
-    //     self.candidates.sync_from_validators().await;
-    // }
+    fn handle_block_event(&self, ctx: &mut Context,  message: tokio_tungstenite::tungstenite::Message) {
+
+        let event = if let tokio_tungstenite::tungstenite::Message::Text(msg_bytes) = message {
+            match serde_json::from_slice::<Wrapper<DeEvent>>(msg_bytes.as_bytes()) {
+                Ok(wrap) => match wrap.into_result() {
+                    Ok(e) => e,
+                    Err(_) => return,
+                },
+                Err(_) => return,
+            }
+        } else {
+            return;
+        };
+
+        tracing::debug!("event: {:?}", event);        
+
+        if let Some(events) = event.events {
+            let e = crate::apps::SideEvent::BlockEvent(events);
+            self.apps.iter().for_each(|a| a.on_event(ctx, &e));
+        }
+        match event.data {
+            tendermint_rpc::event::v0_38::DeEventData::NewBlock { block, result_finalize_block , ..} => {
+                if let Some(b) = block { 
+                    sending_heart_beat(ctx, b.header.height.value());
+                }
+                if let Some(finalize_block) = result_finalize_block {
+                    // debug!("tx_result: {:?}", finalize_block.tx_results);
+                    // for tx in finalize_block.tx_results {
+                    //     if tx.code.is_err() {continue;}
+                    //     let e = crate::apps::SideEvent::TxEvent(tx.events);
+                    //     self.apps.iter().for_each(|a| a.on_event(ctx, &e ));
+                    // }
+
+                    let e = crate::apps::SideEvent::TxEvent(finalize_block.events);
+                    self.apps.iter().for_each(|a| a.on_event(ctx, &e ));
+                }
+            },
+            tendermint_rpc::event::v0_38::DeEventData::Tx { tx_result } => {
+                debug!("tx_info: {:?}", tx_result);
+            }
+            _ => debug!("Does not support {}", event.query),
+        }
+    }
 
 }
 
@@ -275,7 +325,7 @@ fn dispatch_messages(app: &&dyn App, context: &mut Context,  message: &Subscribe
     }
 }
 
-fn update_heartbeat(ctx: &Context, message: &SubscribeMessage) {
+fn update_received_heartbeat(ctx: &Context, message: &SubscribeMessage) {
     if message.topic == SubscribeTopic::HEARTBEAT.topic().hash() {
         if let Ok(alive) = serde_json::from_slice::<HeartBeatMessage>(&message.data) {
             // Ensure the message is not forged.

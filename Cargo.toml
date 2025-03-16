@@ -19,7 +19,7 @@ chrono = "0.4"
 clap = {version = "4.0", features = ["derive"]}
 dirs = "5.0.1"
 ed25519-compact = "2"
-frost-adaptor-signature = {git = "https://github.com/sideprotocol/frost-adaptor-signature.git", branch = "master", features = ["serde", "serialization"]}
+
 futures = "0.3"
 hex = "0.4.3"
 k256 = {version = "0.13.0", features = ["arithmetic", "expose-field", "hash2curve"]}
@@ -34,12 +34,13 @@ reqwest = {version = "0.12.12", features = ["json"]}
 rust-crypto = "0.2.36"
 serde = {version = "1.0.*", features = ["derive"]}
 serde_json = "1.0.*"
+serde_with = "2.0"
 sha2 = "0.10.8"
 sha256 = "1.5.0"
 sled = "0.34.7"
 tokio = {version = "1.39.3", features = ["full"]}
 tokio-stream = "*"
-tokio-tungstenite = "0.26.1"
+tokio-tungstenite = {version = "0.26.1", features = ["native-tls"] }
 toml = "0.8.14"
 tracing = "0.1.37"
 tracing-subscriber = {version = "0.3.18", features = ["env-filter"]}
@@ -48,11 +49,18 @@ cosmrs = {version = "0.21", features = ["grpc"]}
 cosmos-sdk-proto = "*"
 tendermint = "*"
 tendermint-config = "*"
+tendermint-rpc = {version="0.40.1", features=["websocket-client"]}
+# frost-adaptor-signature = {git = "https://github.com/sideprotocol/frost-adaptor-signature.git", branch = "master", features = ["serde", "serialization"]}
+frost-adaptor-signature = { version="0.1.1-dev9", features = ["serde", "serialization"]}
 side-proto = {git = "https://github.com/sideprotocol/side-rust", features = ["grpc"]}
+# side-proto = {version="0.1.0-dev9", features = ["grpc"]}
+axum = "0.8.1"
+tower = "*"
+
 # Optional dependencies
 ed25519-consensus = "2.1.0"
 ord = "0.22.1"
-ordinals = "0.0.14"
+ordinals = "0.0.15"
 tempfile = "3.13.0"
 tonic = {version = "0.12.1", features = ["codegen", "prost"]}
 void = "1.0"

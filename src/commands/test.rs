@@ -13,7 +13,7 @@ use tendermint_config::PrivValidatorKey;
 use tonic::transport::Server;
 use std::process::Command;
 
-use crate::{config, helper::encoding::to_base64, mock::{generate_task, MockBlockService, MockQuery, MockTxService}};
+use crate::{config, helper::encoding::to_base64, mock::{websocket, MockBlockService, MockEnv, MockQuery, MockTxService}};
 
 pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32, module: String) {
     // parameters
@@ -27,32 +27,13 @@ pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32, module: Str
 
     // prepare 
     let home = String::from(testdir.path().to_str().unwrap());    
-    let mut participants = vec![];
-    
-    let mut validators = vec![];
+    let mut participants: Vec<PrivValidatorKey> = vec![];
     for i in 1..=n {
-
-        let mut home_i = PathBuf::new();
-        home_i.push(testdir.path());
-        home_i.push(format!("home{}", i));
-        
-        fs::create_dir_all(home_i.clone()).expect("initial home i");
-        config::Config::default(home_i.to_str().unwrap(), port+i, network).save().unwrap();
 
         let rng = rand::thread_rng();
         let sk = ed25519_consensus::SigningKey::new(rng);
         let priv_key = PrivateKey::from_ed25519_consensus(sk);
         println!("{i}.{}", priv_key.public_key().to_hex().to_ascii_lowercase());
-
-        validators.push(Validator{
-            pub_key: Some(Any {
-                type_url: "tendermint/PubKeyEd25519".to_string(),
-                value: priv_key.public_key().to_bytes(),
-            }),
-            address: Id::from(priv_key.public_key()).to_string(),
-            voting_power: 1,
-            proposer_priority: 1,
-        });
         
         let priv_validator_key = PrivValidatorKey {
             address: Id::from(priv_key.public_key()),
@@ -60,14 +41,30 @@ pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32, module: Str
             priv_key,
         };
 
-        participants.push(to_base64(&priv_validator_key.pub_key.to_bytes()));
+        participants.push(priv_validator_key);
+    }
 
-        let text= serde_json::to_string_pretty(&priv_validator_key).unwrap();
+    let mock_env = MockEnv::new(home.clone(), module.clone(), participants.iter().map(|p| to_base64(&p.pub_key.to_bytes())).collect::<Vec<_>>());
+    tokio::spawn(async move{
+        websocket::start(mock_env).await;
+    });
+
+    thread::sleep(Duration::from_secs(2));
+
+    // start tss node for each validator
+    participants.iter().enumerate().for_each(|(i, v)| {
+        let mut home_i = PathBuf::new();
+        home_i.push(testdir.path());
+        home_i.push(format!("home{}", i));
+        
+        fs::create_dir_all(home_i.clone()).expect("initial home i");
+        config::Config::default(home_i.to_str().unwrap(), port+(i as u32) , network).save().unwrap();
+
+        let text= serde_json::to_string_pretty(&v).unwrap();
         fs::write(home_i.join("priv_validator_key.json"), text).unwrap();
 
         let module2 = module.clone();
         thread::spawn(move || {
-
             let log = File::create(home_i.join("log.txt")).expect("failed to open log");
             std::thread::sleep(Duration::from_secs(delay as u64));
             Command::new(executor)
@@ -79,9 +76,7 @@ pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32, module: Str
                 .spawn()
                 .expect("failed to start echo");
         });
-    }
-
-    generate_task(testdir.path(), &module, participants);
+    });
 
     let addr = "[::1]:9090".parse().expect("msg");
     let s = MockQuery::new(home.clone());
@@ -91,10 +86,19 @@ pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32, module: Str
         .add_service(BridgeQueryServer::new(s.clone()))
         .add_service(AuthServer::new(s))
         .add_service(TxServer::new(MockTxService{home: home.clone(), tx}))
-        .add_service(BlockServer::new(MockBlockService::new(validators)))
+        .add_service(BlockServer::new(MockBlockService::new(participants.iter().map(|p| { Validator{
+            pub_key: Some(Any {
+                type_url: "tendermint/PubKeyEd25519".to_string(),
+                value: p.priv_key.public_key().to_bytes(),
+            }),
+            address: Id::from(p.priv_key.public_key()).to_string(),
+            voting_power: 1,
+            proposer_priority: 1,
+        }}).collect())))
 
         .serve(addr)
         .await.unwrap();
 
     println!("Quited");
 }
+
