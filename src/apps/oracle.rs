@@ -138,7 +138,7 @@ impl SignAdaptor for AttestationHandler {
                                 if let Ok(price_int) = &price.parse::<u64>() {
                                     let message = hash_byte(&price_int.to_be_bytes());
                                     println!("Trigger Price Event Message: {:?}", message.to_lower_hex_string());
-                                    sign_inputs.insert(0, Input::new_with_message_mode(oracle_key.to_owned(), price_int.to_be_bytes().to_vec(), participants, mode));
+                                    sign_inputs.insert(0, Input::new_with_message_mode(oracle_key.to_owned(), message, participants, mode));
                                     let task= Task::new_signing(format!("attest-{}", id), "" , sign_inputs);
                                     tasks.push(task);
                                 }
