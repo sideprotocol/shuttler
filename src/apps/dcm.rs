@@ -16,21 +16,22 @@ use crate::apps::{App, Context, FrostSignature, SubscribeMessage, Task};
 use super::event::get_attribute_value;
 use super::{Input, SideEvent, SignMode};
 
-pub struct Agency {
+/// DCM stands for Distributed Collateral Manager
+pub struct DCM {
     pub keygen: DKG<KeygenHander>,
     pub signer: StandardSigner<SignatureHandler>,
 }
 
-impl Agency {
+impl DCM {
     pub fn new() -> Self {
         Self {
-            keygen: DKG::new("agency_dkg", KeygenHander{}),
+            keygen: DKG::new("dcm_dkg", KeygenHander{}),
             signer: StandardSigner::new("attestation2", SignatureHandler {  }),
         }
     }
 }
 
-impl App for Agency {
+impl App for DCM {
 
     fn on_message(&self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()>{
         self.keygen.on_message(ctx, message)?;
