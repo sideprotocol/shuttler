@@ -2,9 +2,9 @@ use std::{fs, path::{Path, PathBuf}};
 
 use cosmrs::Any;
 use side_proto::{prost::Message, 
-    side::dlc::{query_server::Query as OracleQuery, Agency, AgencyStatus, DlcAttestation, DlcNonce, DlcOracle, 
-        DlcOracleStatus, DlcPriceEvent, MsgSubmitNonce, MsgSubmitOraclePubKey, Params, PriceInterval, 
-        QueryAgenciesResponse, QueryAttestationsResponse, QueryCountNoncesResponse, QueryEventResponse, 
+    side::dlc::{query_server::Query as OracleQuery, Dcm, DcmStatus, DlcAttestation, DlcNonce, DlcOracle, 
+        DlcOracleStatus, DlcEvent, MsgSubmitNonce, MsgSubmitOraclePubKey, Params, PriceInterval, 
+        QueryDcMsResponse, QueryAttestationsResponse, QueryCountNoncesResponse, QueryEventResponse, 
         QueryOraclesResponse, QueryParamsResponse}, tendermint::google::protobuf::Duration,
     };
 
@@ -32,11 +32,11 @@ pub fn generate_oracle_file(testdir: &Path, participants: Vec<String>) {
 }
 
 pub fn generate_agency_file(testdir: &Path, participants: Vec<String>) {
-    let mut agency = Agency::default(); 
+    let mut agency = Dcm::default(); 
     agency.id = 1;
     agency.threshold = (participants.len() * 2 / 3 ) as u32;
     agency.participants = participants;
-    agency.status = AgencyStatus::Pending as i32;
+    agency.status = DcmStatus::Pending as i32;
     
     let mut path = PathBuf::new();
     path.push(testdir);
@@ -98,14 +98,15 @@ pub fn handle_nonce_submission(home: &str, m: &Any) {
         fs::write(fullpath(home, NONCE_DKG_FILE_NAME), contents).unwrap();
 
         // create a mock event
-        let event = DlcPriceEvent {
+        let event = DlcEvent {
             id: nonces.len() as u64,
-            trigger_price: "10000".to_owned(),
-            price_decimal: "2".to_owned(),
+            r#type: 0 as i32,
             nonce: msg.nonce,
             pubkey: o.pubkey.clone(),
             description: "test event".to_owned(),
             has_triggered: true,
+            outcomes: vec!["10000".to_string()],
+            outcome_index: 0,
             publish_at: None,
         };
 
@@ -128,14 +129,14 @@ impl MockQuery {
         Ok(tonic::Response::new(res))
     }
 
-    async fn loading_agency(&self, status: i32) -> Result<tonic::Response<QueryAgenciesResponse>, tonic::Status> {
+    async fn loading_agency(&self, status: i32) -> Result<tonic::Response<QueryDcMsResponse>, tonic::Status> {
         let bytes = fs::read(self.fullpath(AGENCY_DKG_FILE_NAME)).unwrap();
-        let o = Agency::decode(bytes.as_slice()).unwrap();
-        let mut agencies = vec![];
+        let o = Dcm::decode(bytes.as_slice()).unwrap();
+        let mut dcms = vec![];
         if o.status == status {
-            agencies.push(o);
+            dcms.push(o);
         }
-        let res = QueryAgenciesResponse { agencies, pagination: None };
+        let res = QueryDcMsResponse { dcms, pagination: None };
         Ok(tonic::Response::new(res))
     }
 
@@ -159,8 +160,11 @@ impl MockQuery {
     async fn load_param(&self) -> Result<tonic::Response<QueryParamsResponse>, tonic::Status> {
 
         let res = QueryParamsResponse { params: Some(Params {
-            nonce_queue_size: 1,
+            price_event_nonce_queue_size: 1,
             price_intervals: vec![PriceInterval { price_pair: "BTC/USDT".to_string(), interval: 100 }],
+            date_event_nonce_queue_size: 100,
+            date_interval:Some(Duration::default()),
+            lending_event_nonce_queue_size: 10,
             dkg_timeout_period: Some(Duration::default()),
         }) };
         Ok(tonic::Response::new(res))
@@ -168,7 +172,7 @@ impl MockQuery {
 
     async fn load_event(&self, _id: u64) -> Result<tonic::Response<QueryEventResponse>, tonic::Status> {
         let bytes = fs::read(self.fullpath(EVENT_FILE_NAME)).unwrap();
-        let o = DlcPriceEvent::decode(bytes.as_slice()).unwrap();
+        let o = DlcEvent::decode(bytes.as_slice()).unwrap();
         let res = QueryEventResponse { event: Some(o) };
         Ok(tonic::Response::new(res))
     }
@@ -176,7 +180,7 @@ impl MockQuery {
     async fn load_atestations(&self) -> Result<tonic::Response<QueryAttestationsResponse>, tonic::Status> {
         let mut attestations = vec![];
         if let Ok(bytes) = fs::read(self.fullpath(EVENT_FILE_NAME)) {
-            let o = DlcPriceEvent::decode(bytes.as_slice()).unwrap();
+            let o = DlcEvent::decode(bytes.as_slice()).unwrap();
             if o.has_triggered {
                 attestations.push(DlcAttestation {
                     event_id: o.id,
@@ -265,7 +269,7 @@ fn oracles<'life0,'async_trait>(&'life0 self,request:tonic::Request<side_proto::
 
     #[must_use]
 #[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn agencies<'life0,'async_trait>(&'life0 self,request:tonic::Request<side_proto::side::dlc::QueryAgenciesRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<side_proto::side::dlc::QueryAgenciesResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+fn dc_ms<'life0,'async_trait>(&'life0 self,request:tonic::Request<side_proto::side::dlc::QueryDcMsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<side_proto::side::dlc::QueryDcMsResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         let status = request.get_ref().status;
         let x = self.loading_agency(status);
         Box::pin(x)

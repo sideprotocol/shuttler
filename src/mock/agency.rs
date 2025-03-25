@@ -1,4 +1,4 @@
-use side_proto::side::lending::{query_server::Query as LendingQuery, QueryCollateralAddressRequest, QueryCollateralAddressResponse, QueryLiquidationCetRequest, QueryLiquidationCetResponse, QueryLiquidationEventRequest, QueryLiquidationEventResponse, QueryLoanDlcMetaRequest, QueryLoanDlcMetaResponse, QueryLoanRequest, QueryLoanResponse, QueryLoansByAddressRequest, QueryLoansByAddressResponse, QueryLoansRequest, QueryLoansResponse, QueryParamsRequest, QueryParamsResponse, QueryPoolRequest, QueryPoolResponse, QueryPoolsRequest, QueryPoolsResponse, QueryRepaymentRequest, QueryRepaymentResponse};
+use side_proto::side::lending::{query_server::Query as LendingQuery, QueryCollateralAddressRequest, QueryCollateralAddressResponse, QueryCurrentInterestRequest, QueryCurrentInterestResponse, QueryLiquidationEventRequest, QueryLiquidationEventResponse, QueryLoanCancellationRequest, QueryLoanCancellationResponse, QueryLoanCetInfosRequest, QueryLoanCetInfosResponse, QueryLoanDlcMetaRequest, QueryLoanDlcMetaResponse, QueryLoanRequest, QueryLoanResponse, QueryLoansByAddressRequest, QueryLoansByAddressResponse, QueryLoansRequest, QueryLoansResponse, QueryParamsRequest, QueryParamsResponse, QueryPoolExchangeRateRequest, QueryPoolExchangeRateResponse, QueryPoolRequest, QueryPoolResponse, QueryPoolsRequest, QueryPoolsResponse, QueryRepaymentRequest, QueryRepaymentResponse};
 
 use super::MockQuery;
 
@@ -18,12 +18,6 @@ fn collateral_address<'life0,'async_trait>(&'life0 self,_request:tonic::Request<
     #[must_use]
 #[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
 fn liquidation_event<'life0,'async_trait>(&'life0 self,_request:tonic::Request<QueryLiquidationEventRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<QueryLiquidationEventResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
-        todo!()
-    }
-    
-    #[must_use]
-    #[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
-    fn liquidation_cet<'life0,'async_trait>(&'life0 self,_request:tonic::Request<QueryLiquidationCetRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<QueryLiquidationCetResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
     
@@ -66,6 +60,30 @@ fn liquidation_event<'life0,'async_trait>(&'life0 self,_request:tonic::Request<Q
     #[must_use]
     #[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
     fn pools<'life0,'async_trait>(&'life0 self,_request:tonic::Request<QueryPoolsRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<QueryPoolsResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+        todo!()
+    }
+    
+    #[must_use]
+    #[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
+    fn pool_exchange_rate<'life0,'async_trait>(&'life0 self,request:tonic::Request<QueryPoolExchangeRateRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<QueryPoolExchangeRateResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+        todo!()
+    }
+    
+    #[must_use]
+    #[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
+    fn loan_cet_infos<'life0,'async_trait>(&'life0 self,request:tonic::Request<QueryLoanCetInfosRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<QueryLoanCetInfosResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+        todo!()
+    }
+    
+    #[must_use]
+    #[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
+    fn loan_cancellation<'life0,'async_trait>(&'life0 self,request:tonic::Request<QueryLoanCancellationRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<QueryLoanCancellationResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+        todo!()
+    }
+    
+    #[must_use]
+    #[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
+    fn current_interest<'life0,'async_trait>(&'life0 self,request:tonic::Request<QueryCurrentInterestRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<QueryCurrentInterestResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 
