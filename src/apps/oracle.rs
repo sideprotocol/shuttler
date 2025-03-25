@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 
 use bitcoin::hex::DisplayHex;
 use cosmrs::Any;
-use side_proto::side::dlc::{MsgSubmitAttestation, MsgSubmitNonce, MsgSubmitOraclePubKey};
+use ord::base64_decode;
+use side_proto::side::dlc::{DlcEventType, MsgSubmitAttestation, MsgSubmitNonce, MsgSubmitOraclePubKey};
 use tracing::debug;
 
 use crate::config::{Config, VaultKeypair};
@@ -122,22 +123,21 @@ pub struct AttestationHandler{}
 impl SignAdaptor for AttestationHandler {
     fn new_task(&self, ctx: &mut Context, event: &SideEvent) -> Option<Vec<Task>> {
         if let SideEvent::BlockEvent(events) = event {
-            if events.contains_key("trigger_price_event.event_id") {
-                println!("Trigger Price Event: {:?}", events);
+            if events.contains_key("trigger_dlc_event.event_id") {
+                println!("Trigger DLC Event: {:?}", events);
                 let mut tasks = vec![];
-                for (((id, nonce), price), oracle_key) in events.get("trigger_price_event.event_id")?.iter()
-                    .zip(events.get("trigger_price_event.nonce")?)
-                    .zip(events.get("trigger_price_event.price")?)
-                    .zip(events.get("trigger_price_event.pub_key")?) {
+                for (((id, nonce), sig_hash), oracle_key) in events.get("trigger_price_event.event_id")?.iter()
+                    .zip(events.get("trigger_dlc_event.nonce")?)
+                    .zip(events.get("trigger_dlc_event.outcome_hash")?)
+                    .zip(events.get("trigger_dlc_event.pub_key")?) {
                         if let Some(keypair) = ctx.keystore.get(&oracle_key) {
                             if let Some(nonce_keypair) = ctx.keystore.get(&nonce) {                          
                                 let mut sign_inputs = BTreeMap::new();
                                 let participants = keypair.pub_key.verifying_shares().keys().map(|p| p.clone()).collect::<Vec<_>>();
                                 
                                 let mode = SignMode::SignWithGroupcommitment(nonce_keypair.pub_key.verifying_key().clone());
-                                if let Ok(price_int) = &price.parse::<u64>() {
-                                    let message = hash_byte(&price_int.to_be_bytes());
-                                    println!("Trigger Price Event Message: {:?}", message.to_lower_hex_string());
+                                if let Ok(message) = from_base64(&sig_hash) {
+                                    println!("Trigger DLC Event Message: {:?}", message.to_lower_hex_string());
                                     sign_inputs.insert(0, Input::new_with_message_mode(oracle_key.to_owned(), message, participants, mode));
                                     let task= Task::new_signing(format!("attest-{}", id), "" , sign_inputs);
                                     tasks.push(task);
@@ -224,6 +224,7 @@ impl SignAdaptor for NonceSigningHandler{
             if let Some(FrostSignature::Standard(signature)) = input.signature  {
                 let cosm_msg = MsgSubmitNonce {
                     sender: ctx.conf.relayer_bitcoin_address(),
+                    event_type: task.id.rsplit('-').next().unwrap().parse().unwrap(),
                     nonce: task.psbt.clone(),
                     signature: hex::encode(&signature.serialize()?),
                     oracle_pubkey: input.key.clone(),

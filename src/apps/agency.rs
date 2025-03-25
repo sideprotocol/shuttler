@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use cosmrs::Any;
 use frost_adaptor_signature::VerifyingKey;
-use side_proto::side::dlc::MsgSubmitAgencyPubKey;
-use side_proto::side::lending::{MsgSubmitLiquidationCetSignatures, MsgSubmitRepaymentAdaptorSignatures};
+use side_proto::side::dlc::MsgSubmitDcmPubKey;
+use side_proto::side::lending::{MsgSubmitLiquidationSignatures, MsgSubmitRepaymentAdaptorSignatures};
 use tracing::error;
 use crate::config::VaultKeypair;
 use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier, to_base64};
@@ -51,13 +51,13 @@ impl DKGAdaptor for KeygenHander {
     fn new_task(&self, _ctx: &mut Context, event: &SideEvent) -> Option<Vec<Task>> {
         match event {
             SideEvent::BlockEvent(events) => {
-                if events.contains_key("create_agency.id") {
+                if events.contains_key("create_dcm.id") {
                     println!("Events: {:?}", events);
 
                     let mut tasks = vec![];
-                    for ((id, ps), t) in events.get("create_agency.id")?.iter()
-                        .zip(events.get("create_agency.participants")?)
-                        .zip(events.get("create_agency.threshold")?) {
+                    for ((id, ps), t) in events.get("create_dcm.id")?.iter()
+                        .zip(events.get("create_dcm.participants")?)
+                        .zip(events.get("create_dcm.threshold")?) {
                         
                             let mut participants = vec![];
                             for p in ps.split(",") {
@@ -93,12 +93,12 @@ impl DKGAdaptor for KeygenHander {
         let message = hash(&[&id.to_be_bytes()[..], &rawkey[1..]].concat());
         let signature = hex::encode(ctx.node_key.sign(&hex::decode(message).unwrap(), None));
 
-        let cosm_msg = MsgSubmitAgencyPubKey {
+        let cosm_msg = MsgSubmitDcmPubKey {
             sender: ctx.conf.relayer_bitcoin_address(),
             pub_key: to_base64(ctx.node_key.public_key().as_slice()),
             signature,
-            agency_id: id,
-            agency_pubkey: pubkey,
+            dcm_id: id,
+            dcm_pubkey: pubkey,
         };
         let any = Any::from_msg(&cosm_msg).unwrap();
         if let Err(e) = ctx.tx_sender.send(any) {
@@ -118,7 +118,7 @@ impl SignAdaptor for SignatureHandler {
                     println!("Liquidate:{:?}", events);
                     let mut tasks = vec![];
                     for ((id, agency_pubkey), sig_hashes) in events.get("liquidate.loan_id")?.iter()
-                        .zip(events.get("liquidate.agency_pub_key")?)
+                        .zip(events.get("liquidate.dcm_pub_key")?)
                         .zip(events.get("liquidate.sig_hashes")?) {
                             if let Some(keypair) = ctx.keystore.get(&agency_pubkey) {                            
                                 let mut sign_inputs = BTreeMap::new();
@@ -160,9 +160,9 @@ impl SignAdaptor for SignatureHandler {
             },
             SideEvent::TxEvent(events) => {
                 let mut tasks = vec![];
-                for e in events.iter().filter(|e| e.kind == "repay") {
+                for e in events.iter().filter(|e| e.kind == "sign_repayment_cet") {
                     let loan_id = get_attribute_value(&e.attributes, "loan_id")?;
-                    let agency_pubkey = get_attribute_value(&e.attributes, "agency_pub_key")?;
+                    let agency_pubkey = get_attribute_value(&e.attributes, "dcm_pub_key")?;
                     let adaptor_point = get_attribute_value(&e.attributes, "adaptor_point")?;
                     let sig_hashes = get_attribute_value(&e.attributes, "sig_hashes")?;
 
@@ -199,7 +199,7 @@ impl SignAdaptor for SignatureHandler {
                     sigs.push(hex::encode(&sig.serialize()?));
                 }
             }
-            Any::from_msg(&MsgSubmitLiquidationCetSignatures {
+            Any::from_msg(&MsgSubmitLiquidationSignatures {
                 loan_id: task.id.replace("liquidate-", ""),
                 sender: ctx.conf.relayer_bitcoin_address(),
                 signatures: sigs,
