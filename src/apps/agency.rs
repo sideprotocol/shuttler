@@ -208,7 +208,7 @@ impl SignAdaptor for SignatureHandler {
             let mut sigs = vec![];
             for (_, input) in task.sign_inputs.iter() {
                 if let Some(FrostSignature::Adaptor(sig)) = &input.signature  {
-                    sigs.push(hex::encode(&sig.0.serialize()?));
+                    sigs.push(hex::encode(&sig.0.default_serialize()?));
                 }
             }
             Any::from_msg(&MsgSubmitRepaymentAdaptorSignatures {
