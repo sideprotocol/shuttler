@@ -10,14 +10,14 @@ use crate::{
     apps::relayer::Relayer,
     helper::{
         bitcoin::{self as bitcoin_utils, get_signed_tx_from_psbt},
-        client_side::{self, get_auction, get_loan_dlc_meta, send_cosmos_transaction},
+        client_side::{self, get_liquidation, get_loan_dlc_meta, send_cosmos_transaction},
     },
 };
 
 use cosmos_sdk_proto::{cosmos::tx::v1beta1::BroadcastTxResponse, Any};
 use side_proto::side::{
-    auction::AuctionStatus,
-    lending::{MsgApprove, MsgClose},
+    liquidation::LiquidationStatus,
+    lending::{MsgApprove},
 };
 
 const EVENT_TYPE_APPLY: &str = "apply";
@@ -198,32 +198,32 @@ async fn parse_and_handle_cets(relayer: &Relayer, end_block_events: Option<Vec<a
     }
 }
 
-async fn parse_and_handle_auction_payment_txs(
+async fn parse_and_handle_settlement_txs(
     relayer: &Relayer,
     txs_results: Option<Vec<abci::types::ExecTxResult>>,
 ) {
-    let mut auction_ids = vec![];
+    let mut liquidation_ids = vec![];
 
     txs_results.unwrap_or(vec![]).iter().for_each(|result| {
         result.events.iter().for_each(|event| {
-            if event.kind == EVENT_TYPE_GENERATE_SIGNED_PAYMENT_TRANSACTION {
+            if event.kind == EVENT_TYPE_GENERATE_SIGNED_SETTLEMENT_TRANSACTION {
                 event.attributes.iter().for_each(|attr| {
-                    if attr.key_str().unwrap() == EVENT_ATTRIBUTE_KEY_AUCTION_ID {
-                        let auction_id = attr.value_str().unwrap().parse().unwrap();
+                    if attr.key_str().unwrap() == EVENT_ATTRIBUTE_KEY_LIQUIDATION_ID {
+                        let liquidation_id = attr.value_str().unwrap().parse().unwrap();
 
                         debug!(
-                            "Signed auction payment tx found on side, auction id: {}",
-                            auction_id,
+                            "Signed liquidation settlement tx found on side, liquidation id: {}",
+                            liquidation_id,
                         );
-                        auction_ids.push(auction_id);
+                        liquidation_ids.push(liquidation_id);
                     }
                 });
             };
         });
     });
 
-    for auction_id in auction_ids {
-        handle_auction_payment_tx(relayer, auction_id).await;
+    for liquidation_id in liquidation_ids {
+        handle_liquidation_settlement_tx(relayer, liquidation_id).await;
     }
 }
 
@@ -390,35 +390,35 @@ pub async fn handle_liquidation_cet(relayer: &Relayer, loan_id: String) {
     }
 }
 
-pub async fn handle_auction_payment_tx(relayer: &Relayer, auction_id: u64) {
-    let auction = match get_auction(&relayer.config.side_chain.grpc, auction_id).await {
-        Ok(resp) => match resp.into_inner().auction {
-            Some(auction) => auction,
+pub async fn handle_liquidation_settlement_tx(relayer: &Relayer, liquidation_id: u64) {
+    let liquidation = match get_liquidation(&relayer.config.side_chain.grpc, liquidation_id).await {
+        Ok(resp) => match resp.into_inner().liquidation {
+            Some(liquidation) => liquidation,
             None => {
-                error!("No auction exists on side, auction id: {}", auction_id);
+                error!("No liquidation exists on side, liquidation id: {}", liquidation_id);
                 return;
             }
         },
         Err(e) => {
             error!(
-                "Failed to query auction, auction id: {}, err: {}",
-                auction_id, e
+                "Failed to query liquidation, liquidation id: {}, err: {}",
+                liquidation_id, e
             );
             return;
         }
     };
 
-    if auction.status != AuctionStatus::Settled as i32 {
-        error!("Auction not settled yet, auction id: {}", auction_id);
+    if liquidation.status != LiquidationStatus::Settled as i32 {
+        error!("Liquidation not settled yet, liquidation id: {}", liquidation_id);
         return;
     }
 
-    let signed_payment_tx = match get_signed_tx_from_psbt(&auction.payment_tx) {
+    let signed_settlement_tx = match get_signed_tx_from_psbt(&liquidation.settlement_tx) {
         Ok(signed_tx) => signed_tx,
         Err(e) => {
             error!(
-                "Failed to extract signed payment tx, auction id: {}, err: {}",
-                auction_id, e
+                "Failed to extract signed settlement tx, liquidation id: {}, err: {}",
+                liquidation_id, e
             );
             return;
         }
@@ -426,13 +426,13 @@ pub async fn handle_auction_payment_tx(relayer: &Relayer, auction_id: u64) {
 
     match relayer
         .bitcoin_client
-        .send_raw_transaction(&signed_payment_tx)
+        .send_raw_transaction(&signed_settlement_tx)
     {
         Ok(txid) => {
-            debug!("Auction payment tx sent to bitcoin: {}", txid);
+            debug!("Liquidation settlement tx sent to bitcoin: {}", txid);
         }
         Err(e) => {
-            error!("Failed to send auction payment tx to bitcoin: {}", e);
+            error!("Failed to send settlement tx to bitcoin: {}", e);
         }
     }
 }

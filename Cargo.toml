@@ -19,7 +19,7 @@ chrono = "0.4"
 clap = {version = "4.0", features = ["derive"]}
 dirs = "5.0.1"
 ed25519-compact = "2"
-frost-adaptor-signature = {git = "https://github.com/sideprotocol/frost-adaptor-signature.git", branch = "master", features = ["serde", "serialization"]}
+frost-adaptor-signature = {git = "https://github.com/sideprotocol/frost-adaptor-signature.git", branch = "unbumped-upstream", features = ["serde", "serialization"]}
 futures = "0.3"
 hex = "0.4.3"
 k256 = {version = "0.13.0", features = ["arithmetic", "expose-field", "hash2curve"]}

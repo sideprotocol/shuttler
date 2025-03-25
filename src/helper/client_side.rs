@@ -20,8 +20,8 @@ use side_proto::side::btcbridge::{
 use side_proto::side::lending::{
     query_client::QueryClient as LendingQueryClient, QueryLoanDlcMetaRequest, QueryLoanDlcMetaResponse
 };
-use side_proto::side::auction::{
-    query_client::QueryClient as AuctionQueryClient, QueryAuctionRequest, QueryAuctionResponse
+use side_proto::side::liquidation::{
+    query_client::QueryClient as LiquidationQueryClient, QueryLiquidationRequest, QueryLiquidationResponse
 };
 
 use lazy_static::lazy_static;
@@ -152,15 +152,15 @@ pub async fn get_loan_dlc_meta(host: &str, loan_id: String) -> Result<Response<Q
     }).await
 }
 
-pub async fn get_auction(host: &str, id: u64) -> Result<Response<QueryAuctionResponse>, Status> {
-    let mut client = match AuctionQueryClient::connect(host.to_string()).await {
+pub async fn get_liquidation(host: &str, id: u64) -> Result<Response<QueryLiquidationResponse>, Status> {
+    let mut client = match LiquidationQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
         Err(e) => {
-            return Err(Status::cancelled(format!("Failed to create lending query client: {}", e)));
+            return Err(Status::cancelled(format!("Failed to create liquidation query client: {}", e)));
         }
     };
 
-    client.auction(QueryAuctionRequest {
+    client.liquidation(QueryLiquidationRequest {
         id,
     }).await
 }
