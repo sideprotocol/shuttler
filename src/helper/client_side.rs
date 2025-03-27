@@ -11,14 +11,10 @@ use tendermint_rpc::{endpoint, Client, HttpClient};
 use tokio::sync::Mutex;
 use tonic::{Response, Status};
 use side_proto::side::btcbridge::{
-    query_client::QueryClient as BtcQueryClient, QueryParamsRequest,
-    QueryBlockHeaderByHeightRequest, QueryBlockHeaderByHeightResponse,
-    QueryChainTipRequest, QueryChainTipResponse, 
-    QuerySigningRequestsRequest, QuerySigningRequestsResponse, 
-    QuerySigningRequestByTxHashRequest, QuerySigningRequestByTxHashResponse
+    query_client::QueryClient as BtcQueryClient, QueryBlockHeaderByHeightRequest, QueryBlockHeaderByHeightResponse, QueryChainTipRequest, QueryChainTipResponse, QueryParamsRequest, QuerySigningRequestByTxHashRequest, QuerySigningRequestByTxHashResponse, QuerySigningRequestsRequest, QuerySigningRequestsResponse
 };
 use side_proto::side::lending::{
-    query_client::QueryClient as LendingQueryClient, QueryLoanDlcMetaRequest, QueryLoanDlcMetaResponse
+    query_client::QueryClient as LendingQueryClient, QueryLoanCancellationRequest, QueryLoanCancellationResponse, QueryLoanDlcMetaRequest, QueryLoanDlcMetaResponse
 };
 use side_proto::side::liquidation::{
     query_client::QueryClient as LiquidationQueryClient, QueryLiquidationRequest, QueryLiquidationResponse
@@ -148,6 +144,19 @@ pub async fn get_loan_dlc_meta(host: &str, loan_id: String) -> Result<Response<Q
     };
 
     client.loan_dlc_meta(QueryLoanDlcMetaRequest {
+        loan_id,
+    }).await
+}
+
+pub async fn get_loan_cancellation(host: &str, loan_id: String) -> Result<Response<QueryLoanCancellationResponse>, Status> {
+    let mut client = match LendingQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(Status::cancelled(format!("Failed to create lending query client: {}", e)));
+        }
+    };
+
+    client.loan_cancellation(QueryLoanCancellationRequest {
         loan_id,
     }).await
 }

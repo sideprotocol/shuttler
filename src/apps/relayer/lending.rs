@@ -2,6 +2,7 @@ use bitcoin::{consensus::Decodable, Block, BlockHash, Network, Transaction, Txid
 use bitcoincore_rpc::RpcApi;
 use futures::join;
 use tendermint::abci;
+use tendermint_rpc::endpoint;
 use tokio::time::{sleep, Duration};
 use tonic::{Response, Status};
 use tracing::{debug, error, info};
@@ -10,7 +11,10 @@ use crate::{
     apps::relayer::Relayer,
     helper::{
         bitcoin::{self as bitcoin_utils, get_signed_tx_from_psbt},
-        client_side::{self, get_liquidation, get_loan_dlc_meta, send_cosmos_transaction},
+        client_side::{
+            self, get_liquidation, get_loan_cancellation, get_loan_dlc_meta,
+            send_cosmos_transaction,
+        },
     },
 };
 
@@ -24,6 +28,9 @@ const EVENT_TYPE_GENERATE_SIGNED_CET: &str = "generate_signed_cet";
 const EVENT_ATTRIBUTE_KEY_LOAN_ID: &str = "loan_id";
 const EVENT_ATTRIBUTE_KEY_CET_TYPE: &str = "cet_type";
 const _EVENT_ATTRIBUTE_KEY_TX_HASH: &str = "tx_hash";
+
+const EVENT_TYPE_GENERATE_SIGNED_CANCELLATION_TRANSACTION: &str =
+    "generate_signed_cancellation_transaction";
 
 const EVENT_TYPE_GENERATE_SIGNED_SETTLEMENT_TRANSACTION: &str =
     "generate_signed_settlement_transaction";
@@ -148,13 +155,18 @@ pub async fn scan_side_blocks_by_range(relayer: &Relayer, start_height: u64, end
                 }
             };
 
-        parse_and_save_vaults(relayer, block_results_resp.clone().txs_results);
-        parse_and_handle_cets(relayer, block_results_resp.clone().end_block_events).await;
-        parse_and_handle_settlement_txs(relayer, block_results_resp.clone().txs_results).await;
+        on_side_block(relayer, block_results_resp).await;
 
         save_last_scanned_height_side(relayer, current_height);
         current_height += 1;
     }
+}
+
+async fn on_side_block(relayer: &Relayer, block_results_resp: endpoint::block_results::Response) {
+    parse_and_save_vaults(relayer, block_results_resp.clone().txs_results);
+    parse_and_handle_cets(relayer, block_results_resp.clone().end_block_events).await;
+    parse_and_handle_cancellation_txs(relayer, block_results_resp.clone().txs_results).await;
+    parse_and_handle_settlement_txs(relayer, block_results_resp.clone().txs_results).await;
 }
 
 fn parse_and_save_vaults(relayer: &Relayer, txs_results: Option<Vec<abci::types::ExecTxResult>>) {
@@ -200,6 +212,35 @@ async fn parse_and_handle_cets(relayer: &Relayer, end_block_events: Option<Vec<a
 
     for (i, loan_id) in loan_ids.iter().enumerate() {
         handle_cet(relayer, loan_id.to_string(), cet_types[i].clone()).await;
+    }
+}
+
+async fn parse_and_handle_cancellation_txs(
+    relayer: &Relayer,
+    txs_results: Option<Vec<abci::types::ExecTxResult>>,
+) {
+    let mut loan_ids = vec![];
+
+    txs_results.unwrap_or(vec![]).iter().for_each(|result| {
+        result.events.iter().for_each(|event| {
+            if event.kind == EVENT_TYPE_GENERATE_SIGNED_CANCELLATION_TRANSACTION {
+                event.attributes.iter().for_each(|attr| {
+                    if attr.key_str().unwrap() == EVENT_ATTRIBUTE_KEY_LOAN_ID {
+                        let loan_id = attr.value_str().unwrap().to_string();
+
+                        debug!(
+                            "Signed loan cancellation tx found on side, loan id: {}",
+                            loan_id,
+                        );
+                        loan_ids.push(loan_id);
+                    }
+                });
+            };
+        });
+    });
+
+    for loan_id in loan_ids {
+        handle_cancellation_tx(relayer, loan_id).await;
     }
 }
 
@@ -402,6 +443,46 @@ pub async fn handle_cet(relayer: &Relayer, loan_id: String, cet_type: String) {
         }
         Err(e) => {
             error!("Failed to send cet to bitcoin: {}", e);
+        }
+    }
+}
+
+pub async fn handle_cancellation_tx(relayer: &Relayer, loan_id: String) {
+    let cancellation =
+        match get_loan_cancellation(&relayer.config.side_chain.grpc, loan_id.clone()).await {
+            Ok(resp) => match resp.into_inner().cancellation {
+                Some(cancellation) => cancellation,
+                None => {
+                    error!("No loan cancellation exists on side, loan id: {}", loan_id);
+                    return;
+                }
+            },
+            Err(e) => {
+                error!(
+                    "Failed to query loan cancellation, loan id: {}, err: {}",
+                    loan_id, e
+                );
+                return;
+            }
+        };
+
+    let signed_tx = match get_signed_tx_from_psbt(&cancellation.tx) {
+        Ok(signed_tx) => signed_tx,
+        Err(e) => {
+            error!(
+                "Failed to extract signed cancellation tx, loan id: {}, err: {}",
+                loan_id, e
+            );
+            return;
+        }
+    };
+
+    match relayer.bitcoin_client.send_raw_transaction(&signed_tx) {
+        Ok(txid) => {
+            debug!("Cancellation tx sent to bitcoin: {}", txid);
+        }
+        Err(e) => {
+            error!("Failed to send cancellation tx to bitcoin: {}", e);
         }
     }
 }
