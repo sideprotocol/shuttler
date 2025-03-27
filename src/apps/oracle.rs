@@ -126,7 +126,7 @@ impl SignAdaptor for AttestationHandler {
             if events.contains_key("trigger_dlc_event.event_id") {
                 println!("Trigger DLC Event: {:?}", events);
                 let mut tasks = vec![];
-                for (((id, nonce), sig_hash), oracle_key) in events.get("trigger_price_event.event_id")?.iter()
+                for (((id, nonce), sig_hash), oracle_key) in events.get("trigger_dlc_event.event_id")?.iter()
                     .zip(events.get("trigger_dlc_event.nonce")?)
                     .zip(events.get("trigger_dlc_event.outcome_hash")?)
                     .zip(events.get("trigger_dlc_event.pub_key")?) {
