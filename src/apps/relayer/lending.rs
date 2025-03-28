@@ -165,7 +165,7 @@ pub async fn scan_side_blocks_by_range(relayer: &Relayer, start_height: u64, end
 
 async fn on_side_block(relayer: &Relayer, block_results_resp: endpoint::block_results::Response) {
     parse_and_save_vaults(relayer, block_results_resp.clone().txs_results);
-    parse_and_handle_cets(relayer, block_results_resp.clone().end_block_events).await;
+    parse_and_handle_cets(relayer, block_results_resp.clone().finalize_block_events).await;
     parse_and_handle_cancellation_txs(relayer, block_results_resp.clone().txs_results).await;
     parse_and_handle_settlement_txs(relayer, block_results_resp.clone().txs_results).await;
 }
@@ -187,11 +187,11 @@ fn parse_and_save_vaults(relayer: &Relayer, txs_results: Option<Vec<abci::types:
     })
 }
 
-async fn parse_and_handle_cets(relayer: &Relayer, end_block_events: Option<Vec<abci::Event>>) {
+async fn parse_and_handle_cets(relayer: &Relayer, finalize_block_events: Vec<abci::Event>) {
     let mut loan_ids = vec![];
     let mut cet_types = vec![];
 
-    end_block_events.unwrap_or(vec![]).iter().for_each(|event| {
+    finalize_block_events.iter().for_each(|event| {
         if event.kind == EVENT_TYPE_GENERATE_SIGNED_CET {
             event.attributes.iter().for_each(|attr| {
                 if attr.key_str().unwrap() == EVENT_ATTRIBUTE_KEY_LOAN_ID {
