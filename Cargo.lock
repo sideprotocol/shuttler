@@ -4631,7 +4631,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn",
@@ -5919,8 +5919,8 @@ dependencies = [
 
 [[package]]
 name = "side-proto"
-version = "2.0.0-alpha.2"
-source = "git+https://github.com/sideprotocol/side-rust#2a6ebd85b252ac154bcae76743d28eb849c15f7d"
+version = "2.0.0-alpha.3"
+source = "git+https://github.com/sideprotocol/side-rust#808b922d53a9cdbcc60f72dd8163cd0821312cff"
 dependencies = [
  "cosmos-sdk-proto",
  "cosmrs",

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use anyhow::anyhow;
 use bitcoin::sighash::{Prevouts, SighashCache};
-use bitcoin::Psbt;
+use bitcoin::{witness, Psbt};
 use bitcoin::{hashes::Hash,
     consensus::encode::serialize, key::Secp256k1, opcodes, Address, Network, PublicKey, ScriptBuf, TapNodeHash, TapSighashType, Transaction, Txid, XOnlyPublicKey
 };
@@ -16,6 +16,7 @@ use crate::helper::encoding::from_base64;
 use crate::helper::mem_store;
 use crate::helper::store::Store;
 
+use super::encoding::to_base64;
 use super::merkle_proof;
 
 // Magic txin sequence for withdrawal txs
@@ -82,6 +83,15 @@ pub fn get_signed_tx_from_psbt(psbt_base64: &String) -> anyhow::Result<Transacti
     let signed_tx = psbt.extract_tx()?;
 
     Ok(signed_tx)
+}
+
+pub fn build_psbt_from_signed_tx(tx: &Transaction) -> String {
+    let mut unsigned_tx = tx.clone();
+    unsigned_tx.input.iter_mut().for_each(|ti| {ti.script_sig = ScriptBuf::new(); ti.witness = witness::Witness::new()});
+    
+    let packet = Psbt::from_unsigned_tx(unsigned_tx).unwrap().serialize();
+
+    to_base64(packet.as_slice())
 }
 
 pub fn schnorr_signature_from_frost(frost_signature: frost_adaptor_signature::Signature) -> bitcoin::secp256k1::schnorr::Signature {

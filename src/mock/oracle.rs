@@ -2,10 +2,7 @@ use std::{fs, path::{Path, PathBuf}};
 
 use cosmrs::Any;
 use side_proto::{prost::Message, 
-    side::dlc::{query_server::Query as OracleQuery, Dcm, DcmStatus, DlcAttestation, DlcNonce, DlcOracle, 
-        DlcOracleStatus, DlcEvent, MsgSubmitNonce, MsgSubmitOraclePubKey, Params, PriceInterval, 
-        QueryDcMsResponse, QueryAttestationsResponse, QueryCountNoncesResponse, QueryEventResponse, 
-        QueryOraclesResponse, QueryParamsResponse}, tendermint::google::protobuf::Duration,
+    side::dlc::{query_server::Query as OracleQuery, Dcm, DcmStatus, DlcAttestation, DlcEvent, DlcNonce, DlcOracle, DlcOracleStatus, MsgSubmitNonce, MsgSubmitOraclePubKey, Params, PriceInterval, QueryAttestationByEventRequest, QueryAttestationByEventResponse, QueryAttestationsResponse, QueryCountNoncesResponse, QueryDcMsResponse, QueryEventResponse, QueryOraclesResponse, QueryParamsResponse}, tendermint::google::protobuf::Duration,
     };
 
 use super::{fullpath,  MockQuery};
@@ -273,5 +270,11 @@ fn dc_ms<'life0,'async_trait>(&'life0 self,request:tonic::Request<side_proto::si
         let status = request.get_ref().status;
         let x = self.loading_agency(status);
         Box::pin(x)
+    }
+    
+    #[must_use]
+    #[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
+    fn attestation_by_event<'life0,'async_trait>(&'life0 self,request:tonic::Request<QueryAttestationByEventRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<QueryAttestationByEventResponse> ,tonic::Status, > > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+        todo!()
     }
 }

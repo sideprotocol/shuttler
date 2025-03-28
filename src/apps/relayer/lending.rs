@@ -1,4 +1,4 @@
-use bitcoin::{consensus::Decodable, Block, BlockHash, Network, Transaction, Txid};
+use bitcoin::{consensus::Decodable, Block, BlockHash, Network, Psbt, Transaction, Txid};
 use bitcoincore_rpc::RpcApi;
 use futures::join;
 use tendermint::abci;
@@ -10,16 +10,17 @@ use tracing::{debug, error, info};
 use crate::{
     apps::relayer::Relayer,
     helper::{
-        bitcoin::{self as bitcoin_utils, get_signed_tx_from_psbt},
+        bitcoin::{self as bitcoin_utils, build_psbt_from_signed_tx, get_signed_tx_from_psbt},
         client_side::{
             self, get_liquidation, get_loan_cancellation, get_loan_dlc_meta,
             send_cosmos_transaction,
         },
+        encoding::to_base64,
     },
 };
 
 use cosmos_sdk_proto::{cosmos::tx::v1beta1::BroadcastTxResponse, Any};
-use side_proto::side::{dlc, lending::MsgApprove, liquidation::LiquidationStatus};
+use side_proto::side::{lending::MsgApprove, liquidation::LiquidationStatus};
 
 const EVENT_TYPE_APPLY: &str = "apply";
 const EVENT_ATTRIBUTE_KEY_VAULT: &str = "vault";
@@ -310,14 +311,19 @@ pub async fn check_and_handle_bitcoin_tx(
     index: usize,
 ) {
     if is_deposit_tx(relayer, tx, relayer.config().bitcoin.network) {
-        debug!("Deposit tx found on bitcoin: {}", tx.compute_txid());
+        let vault = get_vault(relayer, tx, relayer.config().bitcoin.network);
+        debug!(
+            "Deposit tx found on bitcoin: {}, vault: {}",
+            tx.compute_txid(),
+            vault
+        );
 
         let proof = bitcoin_utils::compute_tx_proof(
             block.txdata.iter().map(|tx| tx.compute_txid()).collect(),
             index,
         );
 
-        match send_deposit_tx(relayer, &block_hash, &tx.compute_txid(), proof).await {
+        match send_deposit_tx(relayer, vault, tx, block_hash, proof).await {
             Ok(resp) => {
                 let tx_response = resp.into_inner().tx_response.unwrap();
                 if tx_response.code != 0 {
@@ -382,13 +388,15 @@ pub async fn check_and_handle_bitcoin_tx_by_hash(relayer: &Relayer, hash: &Txid)
 
 pub async fn send_deposit_tx(
     relayer: &Relayer,
+    vault: String,
+    tx: &Transaction,
     block_hash: &BlockHash,
-    tx_id: &Txid,
     proof: Vec<String>,
 ) -> Result<Response<BroadcastTxResponse>, Status> {
     let msg = MsgApprove {
         relayer: relayer.config().relayer_bitcoin_address(),
-        deposit_tx_id: tx_id.to_string(),
+        vault,
+        deposit_tx: build_psbt_from_signed_tx(tx),
         block_hash: block_hash.to_string(),
         proof,
     };
@@ -554,6 +562,17 @@ pub fn is_vault(relayer: &Relayer, address: String) -> bool {
         .db_relayer
         .get(format!("{}:{}", DB_KEY_VAULT_PREFIX, address))
         .map_or(false, |v| v.is_some())
+}
+
+pub fn get_vault(relayer: &Relayer, tx: &Transaction, network: Network) -> String {
+    for out in tx.output.iter() {
+        let address = bitcoin_utils::get_address_from_pk_script(out.script_pubkey.clone(), network);
+        if is_vault(relayer, address.clone()) {
+            return address;
+        }
+    }
+
+    return "".to_string();
 }
 
 pub(crate) fn get_last_scanned_height_bitcoin(relayer: &Relayer) -> u64 {
