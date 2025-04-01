@@ -232,12 +232,6 @@ fn attestations<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_p
 
     #[must_use]
 #[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
-fn price<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::dlc::QueryPriceRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<side_proto::side::dlc::QueryPriceResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
-        todo!()
-    }
-
-    #[must_use]
-#[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
 fn nonce<'life0,'async_trait>(&'life0 self,_request:tonic::Request<side_proto::side::dlc::QueryNonceRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<side_proto::side::dlc::QueryNonceResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }

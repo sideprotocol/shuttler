@@ -1,4 +1,4 @@
-use side_proto::side::lending::{query_server::Query as LendingQuery, QueryCollateralAddressRequest, QueryCollateralAddressResponse, QueryCurrentInterestRequest, QueryCurrentInterestResponse, QueryLiquidationEventRequest, QueryLiquidationEventResponse, QueryLoanCancellationRequest, QueryLoanCancellationResponse, QueryLoanCetInfosRequest, QueryLoanCetInfosResponse, QueryLoanDlcMetaRequest, QueryLoanDlcMetaResponse, QueryLoanRequest, QueryLoanResponse, QueryLoansByAddressRequest, QueryLoansByAddressResponse, QueryLoansRequest, QueryLoansResponse, QueryParamsRequest, QueryParamsResponse, QueryPoolExchangeRateRequest, QueryPoolExchangeRateResponse, QueryPoolRequest, QueryPoolResponse, QueryPoolsRequest, QueryPoolsResponse, QueryRepaymentRequest, QueryRepaymentResponse};
+use side_proto::side::lending::{query_server::Query as LendingQuery, QueryCollateralAddressRequest, QueryCollateralAddressResponse, QueryCurrentInterestRequest, QueryCurrentInterestResponse, QueryLiquidationEventRequest, QueryLiquidationEventResponse, QueryLoanCancellationRequest, QueryLoanCancellationResponse, QueryLoanCetInfosRequest, QueryLoanCetInfosResponse, QueryLoanDlcMetaRequest, QueryLoanDlcMetaResponse, QueryLoanRequest, QueryLoanResponse, QueryLoansByAddressRequest, QueryLoansByAddressResponse, QueryLoansRequest, QueryLoansResponse, QueryParamsRequest, QueryParamsResponse, QueryPoolExchangeRateRequest, QueryPoolExchangeRateResponse, QueryPoolRequest, QueryPoolResponse, QueryPoolsRequest, QueryPoolsResponse, QueryPriceRequest, QueryPriceResponse, QueryRepaymentRequest, QueryRepaymentResponse};
 
 use super::MockQuery;
 
@@ -84,6 +84,12 @@ fn liquidation_event<'life0,'async_trait>(&'life0 self,_request:tonic::Request<Q
     #[must_use]
     #[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
     fn current_interest<'life0,'async_trait>(&'life0 self,request:tonic::Request<QueryCurrentInterestRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<QueryCurrentInterestResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
+        todo!()
+    }
+    
+    #[must_use]
+    #[allow(elided_named_lifetimes,clippy::type_complexity,clippy::type_repetition_in_bounds)]
+    fn price<'life0,'async_trait>(&'life0 self,request:tonic::Request<QueryPriceRequest> ,) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = core::result::Result<tonic::Response<QueryPriceResponse> ,tonic::Status> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
         todo!()
     }
 
