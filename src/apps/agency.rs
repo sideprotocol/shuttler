@@ -4,6 +4,7 @@ use cosmrs::Any;
 use frost_adaptor_signature::VerifyingKey;
 use side_proto::side::dlc::MsgSubmitDcmPubKey;
 use side_proto::side::lending::{MsgSubmitLiquidationSignatures, MsgSubmitRepaymentAdaptorSignatures};
+use side_proto::side::liquidation::MsgSubmitSettlementSignatures;
 use tracing::error;
 use crate::config::VaultKeypair;
 use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier, to_base64};
@@ -114,9 +115,9 @@ impl SignAdaptor for SignatureHandler {
     fn new_task(&self, ctx: &mut Context, event: &SideEvent) -> Option<Vec<Task>> {
         match event {
             SideEvent::BlockEvent(events) => {
+                let mut tasks = vec![];
                 if events.contains_key("liquidate.loan_id") {
                     println!("Liquidate:{:?}", events);
-                    let mut tasks = vec![];
                     for ((id, agency_pubkey), sig_hashes) in events.get("liquidate.loan_id")?.iter()
                         .zip(events.get("liquidate.dcm_pub_key")?)
                         .zip(events.get("liquidate.sig_hashes")?) {
@@ -132,7 +133,42 @@ impl SignAdaptor for SignatureHandler {
                                 tasks.push(task);
                             }
                         };
-                    return Some(tasks);
+                }
+                if events.contains_key("default.loan_id") {
+                    println!("Default:{:?}", events);
+                    for ((id, agency_pubkey), sig_hashes) in events.get("default.loan_id")?.iter()
+                        .zip(events.get("default.dcm_pub_key")?)
+                        .zip(events.get("default.sig_hashes")?) {
+                            if let Some(keypair) = ctx.keystore.get(&agency_pubkey) {                            
+                                let mut sign_inputs = BTreeMap::new();
+                                let participants = keypair.pub_key.verifying_shares().keys().map(|p| p.clone()).collect::<Vec<_>>();
+                                for sig_hash in sig_hashes.split(",") {
+                                    if let Ok(message) = from_base64(sig_hash) {
+                                        sign_inputs.insert(0, Input::new_with_message_mode(agency_pubkey.to_owned(), message, participants.clone(), SignMode::Sign));
+                                    }
+                                }
+                                let task= Task::new_signing(format!("default-{}", id), "" , sign_inputs);
+                                tasks.push(task);
+                            }
+                        };
+                }
+                if events.contains_key("sign_settlement_transaction.liquidation_id") {
+                    println!("Settle:{:?}", events);
+                    for ((id, agency_pubkey), sig_hashes) in events.get("sign_settlement_transaction.liquidation_id")?.iter()
+                        .zip(events.get("sign_settlement_transaction.dcm_pub_key")?)
+                        .zip(events.get("sign_settlement_transaction.sig_hashes")?) {
+                            if let Some(keypair) = ctx.keystore.get(&agency_pubkey) {                            
+                                let mut sign_inputs = BTreeMap::new();
+                                let participants = keypair.pub_key.verifying_shares().keys().map(|p| p.clone()).collect::<Vec<_>>();
+                                for sig_hash in sig_hashes.split(",") {
+                                    if let Ok(message) = from_base64(sig_hash) {
+                                        sign_inputs.insert(0, Input::new_with_message_mode(agency_pubkey.to_owned(), message, participants.clone(), SignMode::Sign));
+                                    }
+                                }
+                                let task= Task::new_signing(format!("settle-{}", id), "" , sign_inputs);
+                                tasks.push(task);
+                            }
+                        };
                 }
                 // if events.contains_key("repay.loan_id") {
                 //     println!("Repay:{:?}", events);
@@ -157,6 +193,7 @@ impl SignAdaptor for SignatureHandler {
                 //         };
                 //     return Some(tasks);
                 // }
+                return Some(tasks);
             },
             SideEvent::TxEvent(events) => {
                 let mut tasks = vec![];
@@ -192,7 +229,7 @@ impl SignAdaptor for SignatureHandler {
         None
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task)-> anyhow::Result<()> {
-        let cosm_msg = if task.id.starts_with("liquidate") { 
+        let cosm_msg = if task.id.starts_with("liquidate") || task.id.starts_with("default")  { 
             let mut sigs = vec![];
             for (_, input) in task.sign_inputs.iter() {
                 if let Some(FrostSignature::Standard(sig)) = &input.signature  {
@@ -200,7 +237,19 @@ impl SignAdaptor for SignatureHandler {
                 }
             }
             Any::from_msg(&MsgSubmitLiquidationSignatures {
-                loan_id: task.id.replace("liquidate-", ""),
+                loan_id: task.id.split("-").last().unwrap().to_string(),
+                sender: ctx.conf.relayer_bitcoin_address(),
+                signatures: sigs,
+            })?
+        } else if task.id.starts_with("settle") {
+            let mut sigs = vec![];
+            for (_, input) in task.sign_inputs.iter() {
+                if let Some(FrostSignature::Standard(sig)) = &input.signature  {
+                    sigs.push(hex::encode(&sig.serialize()?));
+                }
+            }
+            Any::from_msg(&MsgSubmitSettlementSignatures {
+                liquidation_id: task.id.split("-").last().unwrap().parse().unwrap(),
                 sender: ctx.conf.relayer_bitcoin_address(),
                 signatures: sigs,
             })?
