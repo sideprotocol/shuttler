@@ -50,7 +50,7 @@ cosmos-sdk-proto = "*"
 tendermint = "*"
 tendermint-config = "*"
 tendermint-rpc = {version = "0.40.1", features = ["http-client", "websocket-client"]}
-side-proto = {git = "https://github.com/sideprotocol/side-rust", features = ["grpc"]}
+side-proto = {git = "https://github.com/sideprotocol/side-rust", branch = "lending-without-tss", features = ["grpc"]}
 axum = "0.8.1"
 tower = "*"
 

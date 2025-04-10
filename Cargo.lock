@@ -5919,8 +5919,8 @@ dependencies = [
 
 [[package]]
 name = "side-proto"
-version = "2.0.0-alpha.3"
-source = "git+https://github.com/sideprotocol/side-rust#69a29f2fc1d7c9e26aeeda63945a80a33a68c3d1"
+version = "2.0.0-alpha.4"
+source = "git+https://github.com/sideprotocol/side-rust?branch=lending-without-tss#7c57fd4f4596692c8e10b29b2b296e69b1438f32"
 dependencies = [
  "cosmos-sdk-proto",
  "cosmrs",
