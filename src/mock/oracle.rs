@@ -105,6 +105,7 @@ pub fn handle_nonce_submission(home: &str, m: &Any) {
             outcomes: vec!["10000".to_string()],
             outcome_index: 0,
             publish_at: None,
+            trigger_at: None,
         };
 
         fs::write(fullpath(home, EVENT_FILE_NAME), event.encode_to_vec()).unwrap()
