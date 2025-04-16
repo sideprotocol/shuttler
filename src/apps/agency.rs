@@ -124,9 +124,9 @@ impl SignAdaptor for SignatureHandler {
                             if let Some(keypair) = ctx.keystore.get(&agency_pubkey) {                            
                                 let mut sign_inputs = BTreeMap::new();
                                 let participants = keypair.pub_key.verifying_shares().keys().map(|p| p.clone()).collect::<Vec<_>>();
-                                for sig_hash in sig_hashes.split(",") {
+                                for (i, sig_hash) in sig_hashes.split(",").enumerate() {
                                     if let Ok(message) = from_base64(sig_hash) {
-                                        sign_inputs.insert(0, Input::new_with_message_mode(agency_pubkey.to_owned(), message, participants.clone(), SignMode::Sign));
+                                        sign_inputs.insert(i, Input::new_with_message_mode(agency_pubkey.to_owned(), message, participants.clone(), SignMode::Sign));
                                     }
                                 }
                                 let task= Task::new_signing(format!("liquidate-{}", id), "" , sign_inputs);
@@ -142,9 +142,9 @@ impl SignAdaptor for SignatureHandler {
                             if let Some(keypair) = ctx.keystore.get(&agency_pubkey) {                            
                                 let mut sign_inputs = BTreeMap::new();
                                 let participants = keypair.pub_key.verifying_shares().keys().map(|p| p.clone()).collect::<Vec<_>>();
-                                for sig_hash in sig_hashes.split(",") {
+                                for (i, sig_hash) in sig_hashes.split(",").enumerate() {
                                     if let Ok(message) = from_base64(sig_hash) {
-                                        sign_inputs.insert(0, Input::new_with_message_mode(agency_pubkey.to_owned(), message, participants.clone(), SignMode::Sign));
+                                        sign_inputs.insert(i, Input::new_with_message_mode(agency_pubkey.to_owned(), message, participants.clone(), SignMode::Sign));
                                     }
                                 }
                                 let task= Task::new_signing(format!("default-{}", id), "" , sign_inputs);
@@ -160,9 +160,9 @@ impl SignAdaptor for SignatureHandler {
                             if let Some(keypair) = ctx.keystore.get(&agency_pubkey) {                            
                                 let mut sign_inputs = BTreeMap::new();
                                 let participants = keypair.pub_key.verifying_shares().keys().map(|p| p.clone()).collect::<Vec<_>>();
-                                for sig_hash in sig_hashes.split(",") {
+                                for (i, sig_hash) in sig_hashes.split(",").enumerate() {
                                     if let Ok(message) = from_base64(sig_hash) {
-                                        sign_inputs.insert(0, Input::new_with_message_mode(agency_pubkey.to_owned(), message, participants.clone(), SignMode::Sign));
+                                        sign_inputs.insert(i, Input::new_with_message_mode(agency_pubkey.to_owned(), message, participants.clone(), SignMode::Sign));
                                     }
                                 }
                                 let task= Task::new_signing(format!("settle-{}", id), "" , sign_inputs);
@@ -210,9 +210,9 @@ impl SignAdaptor for SignatureHandler {
                         if let Ok(adaptor) = VerifyingKey::deserialize(&hex_adaptor) {
                             let mode = SignMode::SignWithAdaptorPoint(adaptor);                        
                             let mut sign_inputs = BTreeMap::new();
-                            for sig_hash in sig_hashes.split(",") {
+                            for (i, sig_hash) in sig_hashes.split(",").enumerate() {
                                 if let Ok(message) = from_base64(sig_hash) {
-                                    sign_inputs.insert(0, Input::new_with_message_mode(agency_pubkey.to_owned(), message, participants.clone(), mode.clone()));
+                                    sign_inputs.insert(i, Input::new_with_message_mode(agency_pubkey.to_owned(), message, participants.clone(), mode.clone()));
                                 }
                             }
                             let task= Task::new_signing(format!("repay-{}", loan_id), "" , sign_inputs);
