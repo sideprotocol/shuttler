@@ -1,6 +1,6 @@
 # Shuttler
 
-Shuttler is a client that synchronizes Bitcoin blocks and signs threshold signatures for Bitcoin transactions
+Shuttler is a client that synchronizes Bitcoin transactions and signs threshold signatures for Bitcoin transactions
 
 The *`TSS`*(**Threshold Signature Scheme**) network is a key building block intended to perform Bitcoin signing in the distributed manner to facilitate the Bitcoin bridge on the [Side Chain](https://github.com/sideprotocol/side)
 
@@ -12,7 +12,7 @@ TSS nodes are mainly responsible for several tasks: *`DKG`*(**Distributed Key Ge
 
 The DKG procedure is as follows:
 
-1. Initiate: The DKG initiation is proposed as a governance proposal on the Side chain. The proposal contains the DKG participant set and required  threshold for later signing.
+1. Initiate: The DKG initiation is proposed as a governance proposal on the Side chain. The proposal contains the DKG participant set and required threshold for later signing.
 
 2. Vote: Community members and validators can vote for the proposal.
 
@@ -32,9 +32,9 @@ Signing is the regular task for TSS nodes.
 
 ## Relaying
 
-As the security guard, TSS nodes can contribute to the security of the bitcoin bridge by relaying the bitcoin block headers.
+With Bitcoin block headers synchronized to the Side Chain via the CometBFT Vote Extension by its validators, the relaying process becomes trustless and permissionless, enabling any participant to operate a relayer.
 
-At the same time, the bridge related transactions including deposit and withdrawal can be relayed to the Side chain by TSS nodes as well.
+Transactions related to bridge and lending operations—such as deposits and withdrawals—can be submitted to the Side Chain by TSS nodes or other authorized participants.
 
 ## Get started
 
