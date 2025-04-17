@@ -16,7 +16,6 @@ use side_proto::side::btcbridge::{
     query_client::QueryClient as BtcQueryClient, QueryParamsRequest,
     QueryBlockHeaderByHeightRequest, QueryBlockHeaderByHeightResponse,
     QueryChainTipRequest, QueryChainTipResponse, 
-    QuerySigningRequestsRequest, QuerySigningRequestsResponse, 
     QuerySigningRequestByTxHashRequest, QuerySigningRequestByTxHashResponse
 };
 use tokio_tungstenite::tungstenite::protocol::Message as WebSocketMessage;
@@ -124,25 +123,25 @@ pub async fn get_confirmations_on_side(host: &str) -> u64 {
     x.params.unwrap().confirmations as u64
 }
 
-pub async fn get_signing_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {
-    let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
-        Ok(client) => client,
-        Err(e) => {
-            return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
-        }
-    };
+// pub async fn get_signing_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {
+//     let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
+//         Ok(client) => client,
+//         Err(e) => {
+//             return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
+//         }
+//     };
 
-    btc_client.query_signing_requests(QuerySigningRequestsRequest {
-        pagination: Some(PageRequest {
-            key: vec![],
-            offset: 0,
-            limit: 50,
-            count_total: false,
-            reverse: false,
-        }),
-        status: 1i32
-    }).await
-}
+//     btc_client.query_signing_requests(QuerySigningRequestsRequest {
+//         pagination: Some(PageRequest {
+//             key: vec![],
+//             offset: 0,
+//             limit: 50,
+//             count_total: false,
+//             reverse: false,
+//         }),
+//         status: 1i32
+//     }).await
+// }
 
 pub async fn get_latest_validators(host: &str) -> Result<Response<GetLatestValidatorSetResponse>, Status> {
     let mut client = match TendermintServiceClient::connect(host.to_string()).await {

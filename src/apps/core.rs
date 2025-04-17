@@ -185,7 +185,7 @@ impl Task {
                 participants,
                 threshold,
                 tweaks,
-                batch_size: 1,
+                batch_size,
             },
             sign_inputs: BTreeMap::new(),
             psbt: "".to_owned(),

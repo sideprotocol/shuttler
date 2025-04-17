@@ -7,7 +7,7 @@ use side_proto::side::tss::{MsgCompleteDkg, MsgSubmitSignatures};
 use tracing::debug;
 
 use crate::config::VaultKeypair;
-use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier};
+use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier, to_base64};
 use crate::helper::store::Store;
 use crate::protocols::sign::{SignAdaptor, StandardSigner};
 use crate::protocols::dkg::{DKGAdaptor, DKG};
@@ -117,7 +117,7 @@ impl DKGAdaptor for KeygenHander {
             sender: ctx.conf.relayer_bitcoin_address(),
             pub_keys: pub_keys,
             signature,
-            consensus_pubkey: ctx.conf.load_validator_key().consensus_pubkey().public_key().to_hex(),
+            consensus_pubkey: to_base64(&ctx.conf.load_validator_key().consensus_pubkey().public_key().to_bytes()),
         };
 
         let any = Any::from_msg(&cosm_msg).unwrap();
@@ -134,15 +134,15 @@ impl SignAdaptor for SignerHandler {
             if events.contains_key("initiate_signing.id") {
                 println!("Trigger Price Event: {:?}", events);
                 let mut tasks = vec![];
-                for ((((id, pub_key), sig_hashes), mode), nonce ) in events.get("initiate_signing.id")?.iter()
+                for ((((id, pub_key), sig_hashes), mode), option ) in events.get("initiate_signing.id")?.iter()
                 .zip(events.get("initiate_signing.pub_key")?)
                     .zip(events.get("initiate_signing.sig_hashes")?)
                     .zip(events.get("initiate_signing.type")?)
-                    .zip(events.get("initiate_signing.nonce")?)
-                     {
+                    .zip(events.get("initiate_signing.option")?) {
+
                         if let Some(keypair) = ctx.keystore.get(&pub_key) {
                             let mut sign_mode = SignMode::Sign;
-                            if let Some(nonce_keypair) = ctx.keystore.get(&nonce) {                          
+                            if let Some(nonce_keypair) = ctx.keystore.get(&option) {                          
                                 if mode.eq("1") {
                                     sign_mode = SignMode::SignWithGroupcommitment(nonce_keypair.pub_key.verifying_key().clone())
                                 } else if mode.eq("2") {
@@ -155,7 +155,7 @@ impl SignAdaptor for SignerHandler {
                             
                             if let Ok(message) = hex::decode(sig_hashes) {
                                 println!("Trigger Price Event Message: {:?}", message.to_lower_hex_string());
-                                sign_inputs.insert(0, Input::new_with_message_mode(pub_key.to_owned(), message, participants, sign_mode));
+                                sign_inputs.insert(sign_inputs.len(), Input::new_with_message_mode(pub_key.to_owned(), message, participants, sign_mode));
                                 let task= Task::new_signing(format!("lending-{}", id), "" , sign_inputs);
                                 tasks.push(task);
                             }   

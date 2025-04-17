@@ -6,7 +6,7 @@ use std::str::FromStr;
 use cosmos_sdk_proto::cosmos::auth::v1beta1::{BaseAccount, QueryAccountResponse};
 use cosmos_sdk_proto::cosmos::base::abci::v1beta1::TxResponse;
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::{GetLatestValidatorSetResponse, Validator};
-use oracle::{handle_nonce_submission, handle_oracle_dkg_submission, oracle_task_queue};
+use lending::{handle_signature_submission, handle_lending_dkg_submission, lending_task_queue};
 use cosmos_sdk_proto::cosmos::auth::v1beta1::query_server::Query as AuthService;
 use cosmos_sdk_proto::cosmos::tx::v1beta1::service_server::Service as TxService;
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_server::Service as BlockService;
@@ -27,7 +27,7 @@ use crate::helper::encoding::to_base64;
 use crate::helper::now;
 
 mod bridge;
-mod oracle;
+mod lending;
 pub mod websocket;
 pub use bridge::*;
 
@@ -41,9 +41,9 @@ pub fn generate_event_queue(module: &String) -> EventQueue {
     if module == "bridge" {
         bridge_task_queue()
     } else if module == "oracle" {
-        oracle_task_queue()
+        lending_task_queue()
     } else {
-        oracle_task_queue()
+        lending_task_queue()
     }
 }
 
@@ -59,9 +59,9 @@ fn handle_tx_submissions(home: &str, tx_num: u32, tx_bytes: &Vec<u8>) {
             if m.type_url == "/side.btcbridge.MsgCompleteDKG" {
                 handle_bridge_dkg_submission(home, tx_num, m);
             } else if m.type_url == "/side.dlc.MsgSubmitOraclePubKey" {
-                handle_oracle_dkg_submission(home, m);
+                handle_lending_dkg_submission(home, m);
             } else if m.type_url == "/side.dlc.MsgSubmitNonce" {
-                handle_nonce_submission(home, m);
+                handle_signature_submission(home, m);
             } else {
                 println!("Received msg: {}", m.type_url);
             }
