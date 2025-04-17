@@ -3,10 +3,7 @@
 use std::time::Duration;
 
 use bitcoincore_rpc::{Auth, Client};
-use libp2p::gossipsub::IdentTopic;
 use crate::{config::Config, helper::{client_fee_provider::FeeProviderClient, client_ordinals::OrdinalsClient}};
-
-use super::{App, Context, SideEvent, SubscribeMessage};
 
 pub mod tick;
 
@@ -19,19 +16,6 @@ pub struct Relayer {
     pub fee_provider_client: FeeProviderClient,
     pub db_relayer: sled::Db,
     pub ticker: tokio::time::Interval,
-}
-
-impl App for Relayer {
-    fn on_message(&self, _ctx: &mut Context, _message: &SubscribeMessage) -> anyhow::Result<()> {
-        Ok(())
-    }
-    
-    fn subscribe_topics(&self) -> Vec<IdentTopic> {
-        vec![]
-    }
-    fn on_event(&self, _ctx: &mut Context, _event: &SideEvent) {
-        
-    }
 }
 
 impl Relayer {
