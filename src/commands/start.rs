@@ -1,9 +1,10 @@
 
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-use crate::{apps::{dcm::DCM, bridge::BridgeSigner, oracle::Oracle, relayer::{tick::start_relayer_tasks, Relayer}, Shuttler }, config::Config};
+use crate::{apps::{bridge::BridgeSigner, lending::Lending, relayer::{tick::start_relayer_tasks, Relayer}, Shuttler }, config::Config};
 
-pub async fn execute(home: &str, relayer: bool, bridge: bool, oracle: bool, dcm: bool, seed: bool) {
+pub async fn execute(home: &str, relayer: bool, bridge: bool, lending: bool, seed: bool) {
+
     
     let conf = Config::from_file(home).unwrap();
 
@@ -25,11 +26,9 @@ pub async fn execute(home: &str, relayer: bool, bridge: bool, oracle: bool, dcm:
     }
     let b = BridgeSigner::new(conf.clone());
     if bridge { shuttler.registry( &b); }
-    let o = Oracle::new(conf.clone());
-    if oracle { shuttler.registry(&o); }
-    let a = DCM::new();
-    if dcm { shuttler.registry(&a);}
-
+    let o = Lending::new();
+    if lending { shuttler.registry(&o); }
 
     shuttler.start(&conf).await;
+
 }

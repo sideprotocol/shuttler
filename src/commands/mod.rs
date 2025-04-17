@@ -28,9 +28,7 @@ pub enum Commands {
         #[clap(long, default_value = "false")]
         bridge: bool,
         #[clap(long, default_value = "false")]
-        dcm: bool,
-        #[clap(long, default_value = "false")]
-        oracle: bool,
+        lending: bool,
         #[clap(long, default_value = "false")]
         seed: bool,
     },

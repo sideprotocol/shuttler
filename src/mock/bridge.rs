@@ -40,6 +40,9 @@ pub fn create_vault_event(env: MockEnv) -> SideEvent {
     creation.insert("create_bridge_vault.participants".to_owned(), vec![env.participants.join(",")]);
     creation.insert("create_bridge_vault.tweaks".to_owned(), vec!["1".to_owned()]);
     creation.insert("create_bridge_vault.threshold".to_owned(), vec![(env.participants.len() * 2 / 3).to_string()]);
+
+    println!("send vault event: {:?}", creation);
+
     SideEvent::BlockEvent(creation)
 }
 
@@ -59,6 +62,8 @@ pub fn create_transaction_event(env: MockEnv) -> SideEvent {
         });
     }
     
+    println!("send event: {:?}", events);
+
     SideEvent::TxEvent(events)
 }
 

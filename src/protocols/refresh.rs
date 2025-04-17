@@ -109,10 +109,10 @@ impl<H> Refresh<H> where H: RefreshAdaptor {
             task.dkg_input.threshold,
         ) {
             debug!("round1_secret_package: {:?}", task.id );
-            mem_store::set_dkg_round1_secret_packet(task.id.to_string().as_str(), secret_packet);
+            mem_store::set_dkg_round1_secret_packet(task.id.to_string().as_str(), vec![secret_packet]);
 
             let mut round1_packages = BTreeMap::new();
-            round1_packages.insert(ctx.identifier.clone(), round1_package.clone());
+            round1_packages.insert(ctx.identifier.clone(), vec![round1_package.clone()]);
 
             ctx.db_round1.save(&task.id, &round1_packages);
 
@@ -143,9 +143,9 @@ impl<H> Refresh<H> where H: RefreshAdaptor {
         let mut cloned = round1_packages.clone();
         cloned.remove(&ctx.identifier);
 
-        match frost::keys::refresh::refresh_dkg_part2(secret_package, &cloned) {
+        match frost::keys::refresh::refresh_dkg_part2(secret_package[0].clone(), &cloned) {
             Ok((round2_secret_package, round2_packages)) => {
-                mem_store::set_dkg_round2_secret_packet(&task_id, round2_secret_package);
+                mem_store::set_dkg_round2_secret_packet(&task_id, vec![round2_secret_package]);
 
                 // convert it to <receiver, Vec<u8>>, then only the receiver can decrypt it.
                 let mut output_packages = BTreeMap::new();
@@ -215,7 +215,7 @@ impl<H> Refresh<H> where H: RefreshAdaptor {
         let mut local = ctx.db_round1.get(task_id).map_or(BTreeMap::new(), |v|v);
         
         // merge packets with local
-        local.insert(packets.sender, packets.data);
+        local.insert(packets.sender, vec![packets.data]);
         ctx.db_round1.save(&task_id, &local);
 
         // let k = local.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
@@ -231,7 +231,8 @@ impl<H> Refresh<H> where H: RefreshAdaptor {
         if task.dkg_input.participants.len() == local.len() {
             
             info!("Received round1 packets from all participants: {}", task_id);
-            match self.generate_round2_packages(ctx,  &task, local) {
+            let round1_packages = local.clone().iter().map(|(k, v)| (k.clone(), v[0].clone())).collect::<BTreeMap<_,_>>();
+            match self.generate_round2_packages(ctx,  &task, round1_packages) {
                 Ok(_) => {
                     task.status = Status::DkgRound2;
                     ctx.task_store.save(&task.id, &task);
@@ -256,7 +257,7 @@ impl<H> Refresh<H> where H: RefreshAdaptor {
             None => return,
         };
         let mut local = ctx.db_round2.get(task_id).unwrap_or(BTreeMap::new()); 
-        local.insert(packets.sender, data);
+        local.insert(packets.sender, vec![data]);
         ctx.db_round2.save(&task_id, &local);
 
         debug!("Received round2 packets: {} {:?}", task_id, local.keys());
@@ -278,7 +279,7 @@ impl<H> Refresh<H> where H: RefreshAdaptor {
                 let source = x25519::PublicKey::from_ed25519(&ed25519_compact::PublicKey::from_slice(bz.as_slice()).unwrap()).unwrap();
                 let share_key = source.dh(&x25519::SecretKey::from_ed25519(&ctx.node_key).unwrap()).unwrap();
 
-                let packet = decrypt(packet.as_slice(), share_key.as_slice().try_into().unwrap());
+                let packet = decrypt(packet[0].as_slice(), share_key.as_slice().try_into().unwrap());
                 let received_round2_package = frost::keys::dkg::round2::Package::deserialize(&packet).unwrap();
                 // debug!("Received {} round2 package from: {:?}", task.id, sender.clone());
                 round2_packages.insert(sender.clone(), received_round2_package);
@@ -296,13 +297,14 @@ impl<H> Refresh<H> where H: RefreshAdaptor {
                 }
             };
 
-            let mut round1_packages = ctx.db_round1.get(task_id).unwrap_or(BTreeMap::new());
+            let mut round1_packages = ctx.db_round1.get(task_id).unwrap_or(BTreeMap::new())
+                .iter().map(|(k, v)| (k.clone(), v[0].clone())).collect::<BTreeMap<_,_>>();
 
             // frost does not need its own package to compute the threshold key
             round1_packages.remove(&ctx.identifier); 
 
             let keypair = ctx.keystore.get(task_id).unwrap();
-            match frost::keys::refresh::refresh_dkg_shares(&round2_secret_package, &round1_packages, &round2_packages,  keypair.pub_key, keypair.priv_key ) {
+            match frost::keys::refresh::refresh_dkg_shares(&round2_secret_package[0], &round1_packages, &round2_packages,  keypair.pub_key, keypair.priv_key ) {
                 Ok((priv_key, pub_key)) => { 
                     self.handler.on_complete(ctx, &mut task, &priv_key, &pub_key);
                 },
