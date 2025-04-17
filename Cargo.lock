@@ -1315,6 +1315,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "cosmrs"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34e74fa7a22930fe0579bef560f2d64b78415d4c47b9dd976c0635136809471d"
+dependencies = [
+ "bip32",
+ "cosmos-sdk-proto 0.27.0",
+ "ecdsa",
+ "eyre",
+ "k256",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
+ "signature",
+ "subtle-encoding",
+ "tendermint",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5880,7 +5900,7 @@ dependencies = [
  "chrono",
  "clap",
  "cosmos-sdk-proto 0.27.0",
- "cosmrs",
+ "cosmrs 0.21.1",
  "criterion",
  "dirs 5.0.1",
  "ed25519-compact",
@@ -5926,12 +5946,12 @@ dependencies = [
 
 [[package]]
 name = "side-proto"
-version = "2.0.0-alpha.5"
+version = "2.0.0-alpha.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5873eddcb85093677781e02d0f4517ddd23e934cbcc21360fd93789d5cb8809"
+checksum = "dca82e9e82e00ebfc4ea80fd55999edc3931e92142a9c3f15d63e057ce3695ae"
 dependencies = [
- "cosmos-sdk-proto 0.26.1",
- "cosmrs",
+ "cosmos-sdk-proto 0.27.0",
+ "cosmrs 0.22.0",
  "prost",
  "prost-types",
  "tendermint-proto",

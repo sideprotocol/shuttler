@@ -53,7 +53,7 @@ tendermint-rpc = {version="0.40.1", features=["websocket-client"]}
 # frost-adaptor-signature = {git = "https://github.com/sideprotocol/frost-adaptor-signature.git", branch = "master", features = ["serde", "serialization"]}
 frost-adaptor-signature = { version="2.1.0-rc.1", features = ["serde", "serialization"]}
 # side-proto = {git = "https://github.com/sideprotocol/side-rust", features = ["grpc"]}
-side-proto = {version="2.0.0-alpha.5", features = ["grpc"]}
+side-proto = {version="2.0.0-alpha.6", features = ["grpc"]}
 axum = "0.8.1"
 tower = "*"
 
@@ -62,7 +62,7 @@ ed25519-consensus = "2.1.0"
 ord = "0.22.1"
 ordinals = "0.0.15"
 tempfile = "3.13.0"
-tonic = {version = "0.12.1", features = ["codegen", "prost"]}
+tonic = { version = "0.12.0", default-features = true, features = ["codegen", "prost"] }
 void = "1.0"
 
 [dev-dependencies]
