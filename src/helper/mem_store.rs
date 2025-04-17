@@ -15,10 +15,10 @@ use super::store::Store;
 use super::{gossip::HeartBeatMessage, now};
 
 lazy_static! {
-    static ref DkgRound1SecretPacket: Mutex<BTreeMap<String, dkg::round1::SecretPackage>> = {
+    static ref DkgRound1SecretPacket: Mutex<BTreeMap<String, Vec<dkg::round1::SecretPackage>>> = {
         Mutex::new(BTreeMap::new())
     };
-    static ref DkgRound2SecretPacket: Mutex<BTreeMap<String, dkg::round2::SecretPackage>> = {
+    static ref DkgRound2SecretPacket: Mutex<BTreeMap<String, Vec<dkg::round2::SecretPackage>>> = {
         Mutex::new(BTreeMap::new())
     };
     pub static ref AliveTable: Mutex<BTreeMap<Identifier, u64>> = {
@@ -81,12 +81,12 @@ pub fn is_peer_trusted_peer( ctx: &Context, identifier: &Identifier) -> bool {
     }
 }
 
-pub fn get_dkg_round1_secret_packet(task_id: &str) -> Option<dkg::round1::SecretPackage> {
+pub fn get_dkg_round1_secret_packet(task_id: &str) -> Option<Vec<dkg::round1::SecretPackage>> {
     let map = DkgRound1SecretPacket.lock().unwrap();
     map.get(task_id).cloned()
 }
 
-pub fn set_dkg_round1_secret_packet(task_id: &str, secret_packet: dkg::round1::SecretPackage) {
+pub fn set_dkg_round1_secret_packet(task_id: &str, secret_packet: Vec<dkg::round1::SecretPackage>) {
     let mut map = DkgRound1SecretPacket.lock().unwrap();
     map.insert(task_id.to_string(), secret_packet);
 }
@@ -96,12 +96,12 @@ pub fn remove_dkg_round1_secret_packet(task_id: &str) {
     map.remove(task_id);
 }
 
-pub fn get_dkg_round2_secret_packet(task_id: &str) -> Option<dkg::round2::SecretPackage> {
+pub fn get_dkg_round2_secret_packet(task_id: &str) -> Option<Vec<dkg::round2::SecretPackage>> {
     let map = DkgRound2SecretPacket.lock().unwrap();
     map.get(task_id).cloned()
 }
 
-pub fn set_dkg_round2_secret_packet(task_id: &str, secret_packet: dkg::round2::SecretPackage) {
+pub fn set_dkg_round2_secret_packet(task_id: &str, secret_packet: Vec<dkg::round2::SecretPackage>) {
     let mut map = DkgRound2SecretPacket.lock().unwrap();
     map.insert(task_id.to_string(), secret_packet);
 }

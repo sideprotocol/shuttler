@@ -285,9 +285,7 @@ impl<'a> Shuttler<'a> {
             }
         } else {
             return;
-        };
-
-        tracing::debug!("event: {:?}", event);        
+        };   
 
         if let Some(events) = event.events {
             let e = crate::apps::SideEvent::BlockEvent(events);

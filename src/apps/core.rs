@@ -153,6 +153,7 @@ pub struct DkgInput {
     pub participants: Vec<Identifier>,
     pub threshold: u16,
     pub tweaks: Vec<i32>,
+    pub batch_size: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -167,11 +168,15 @@ pub struct Task {
 }
 
 impl Task {
-    pub fn new_dkg(id: String, participants: Vec<Identifier>, threshold: u16) -> Self {
-       Task::new_dkg_with_tweak(id, participants, threshold, vec![])
+    pub fn new_dkg(id: String, participants: Vec<Identifier>, threshold: u16, batch_size: usize) -> Self {
+       Task::new_dkg_with_args(id, participants, threshold, vec![], batch_size)
     }
 
     pub fn new_dkg_with_tweak(id: String, participants: Vec<Identifier>, threshold: u16, tweaks: Vec<i32>) -> Self {
+       Task::new_dkg_with_args(id, participants, threshold, tweaks, 1)
+    }
+
+    pub fn new_dkg_with_args(id: String, participants: Vec<Identifier>, threshold: u16, tweaks: Vec<i32>, batch_size: usize) -> Self {
         Self {
             id,
             status: Status::DkgRound1,
@@ -180,6 +185,7 @@ impl Task {
                 participants,
                 threshold,
                 tweaks,
+                batch_size: 1,
             },
             sign_inputs: BTreeMap::new(),
             psbt: "".to_owned(),
@@ -211,8 +217,8 @@ type SignatureShareStore =
 type SignerNonceStore = DefaultStore<String, BTreeMap<Index, round1::SigningNonces>>;
 
 pub type Round1Store =
-    MemStore<String, BTreeMap<Identifier, frost_adaptor_signature::keys::dkg::round1::Package>>;
-pub type Round2Store = MemStore<String, BTreeMap<Identifier, Vec<u8>>>;
+    MemStore<String, BTreeMap<Identifier, Vec<frost_adaptor_signature::keys::dkg::round1::Package>>>;
+pub type Round2Store = MemStore<String, BTreeMap<Identifier, Vec<Vec<u8>>>>;
 
 pub struct Context {
     pub swarm: Swarm<ShuttlerBehaviour>,

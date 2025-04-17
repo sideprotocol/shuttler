@@ -94,8 +94,8 @@ impl DKGAdaptor for KeygenHander {
         }
         None
     }
-    fn on_complete(&self, ctx: &mut Context, task: &mut Task, priv_key: &frost_adaptor_signature::keys::KeyPackage, pub_key: &frost_adaptor_signature::keys::PublicKeyPackage) {
-
+    fn on_complete(&self, ctx: &mut Context, task: &mut Task, keys: Vec<(frost_adaptor_signature::keys::KeyPackage,frost_adaptor_signature::keys::PublicKeyPackage)>) {
+        let (priv_key, pub_key) = keys.into_iter().next().unwrap();
         let vaults = generate_vault_addresses(ctx, pub_key.clone(), priv_key.clone(), &task.dkg_input.tweaks, ctx.conf.bitcoin.network);
         let id: u64 = task.id.replace("create-vault-", "").parse().unwrap();
         let mut sig_msg = id.to_be_bytes().to_vec();

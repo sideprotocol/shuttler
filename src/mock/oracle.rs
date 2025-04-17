@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fs};
 use cosmrs::Any;
 use side_proto::{prost::Message, 
     side::dlc::{DlcNonce, DlcOracle, 
-        DlcOracleStatus, DlcPriceEvent, MsgSubmitNonce, MsgSubmitOraclePubKey},
+        DlcOracleStatus},
     };
 
 use crate::apps::SideEvent;
@@ -99,6 +99,7 @@ pub fn create_oracle_event(env: MockEnv) -> SideEvent {
     creation.insert("create_oracle.id".to_owned(), vec!["1".to_owned()]);
     creation.insert("create_oracle.participants".to_owned(), vec![env.participants.join(",")]);
     creation.insert("create_oracle.threshold".to_owned(), vec![(env.participants.len() * 2 / 3).to_string()]);
+
     SideEvent::BlockEvent(creation)
 }
 
