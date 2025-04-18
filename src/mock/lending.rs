@@ -32,8 +32,6 @@ pub fn handle_lending_dkg_submission(home: &str, m: &Any) {
         }
         fs::create_dir_all(fullpath(home, key)).unwrap();
 
-        // let bytes = fs::read(fullpath(home, ORACLE_DKG_FILE_NAME)).unwrap();
-        // let mut o = DlcOracle::decode(bytes.as_slice()).unwrap();
         let mut o = DlcOracle::default();
         o.id = 1;
         o.pubkey = msg.pub_keys[0].clone();
@@ -60,12 +58,18 @@ pub fn create_oracle_event(env: MockEnv) -> SideEvent {
 }
 
 pub fn create_signing_event(env: MockEnv) -> SideEvent {
-    let mut creation = BTreeMap::new();
-    creation.insert("initiate_signing.id".to_owned(), vec!["1".to_owned()]);
-    creation.insert("initiate_signing.participants".to_owned(), vec![env.participants.join(",")]);
-    creation.insert("initiate_signing.threshold".to_owned(), vec![(env.participants.len() * 2 / 3).to_string()]);
-    creation.insert("initiate_signing.type".to_owned(), vec!["0".to_owned()]);
-    creation.insert("initiate_signing.option".to_owned(), vec!["".to_owned()]);
+    if let Ok(bytes) = fs::read(fullpath(&env.home, ORACLE_DKG_FILE_NAME)) {
+        let o = DlcOracle::decode(bytes.as_slice()).unwrap();
 
-    SideEvent::BlockEvent(creation)
+        let mut creation = BTreeMap::new();
+        creation.insert("initiate_signing.id".to_owned(), vec!["1".to_owned()]);
+        creation.insert("initiate_signing.type".to_owned(), vec!["0".to_owned()]);
+        creation.insert("initiate_signing.sig_hashes".to_owned(), vec![o.pubkey.to_string()]);
+        creation.insert("initiate_signing.pub_key".to_owned(), vec![o.pubkey]);
+        creation.insert("initiate_signing.option".to_owned(), vec!["".to_owned()]);
+    
+        SideEvent::BlockEvent(creation)
+    } else {
+        SideEvent::BlockEvent(BTreeMap::new()) // empty event if file not found
+    }
 }

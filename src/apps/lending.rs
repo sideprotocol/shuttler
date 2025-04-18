@@ -135,7 +135,7 @@ impl SignAdaptor for SignerHandler {
                 println!("Trigger Price Event: {:?}", events);
                 let mut tasks = vec![];
                 for ((((id, pub_key), sig_hashes), mode), option ) in events.get("initiate_signing.id")?.iter()
-                .zip(events.get("initiate_signing.pub_key")?)
+                    .zip(events.get("initiate_signing.pub_key")?)
                     .zip(events.get("initiate_signing.sig_hashes")?)
                     .zip(events.get("initiate_signing.type")?)
                     .zip(events.get("initiate_signing.option")?) {

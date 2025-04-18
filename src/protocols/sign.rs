@@ -245,7 +245,7 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
                 if *index == 0 {
                     let participants = &input.participants;
                 
-                    debug!("Commitments {} {}/{}", &task.id[..6], received, participants.len());
+                    debug!("Commitments {} {}/{}", &task.id, received, participants.len());
 
                     if received != keypair.pub_key.verifying_shares().len() && received != participants.len() {
                         return
@@ -364,7 +364,7 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
             }
 
             if *index == 0 {
-                debug!("Signature share {} {}/{}", &task_id[..6], signature_shares.len(), signing_commitments.len() )
+                debug!("Signature share {} {}/{}", &task_id, signature_shares.len(), signing_commitments.len() )
             }
 
             signature_shares.retain(|k, _| {signing_commitments.contains_key(k)});
