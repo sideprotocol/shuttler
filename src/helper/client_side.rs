@@ -8,15 +8,14 @@ use cosmos_sdk_proto::{Any, cosmos::{
 }};
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_client::ServiceClient as TendermintServiceClient;
 use futures::SinkExt;
-use reqwest::Error;
 use tokio::sync::Mutex;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tonic::{Response, Status};
-use side_proto::side::btcbridge::{
-    query_client::QueryClient as BtcQueryClient, QueryParamsRequest,
-    QueryBlockHeaderByHeightRequest, QueryBlockHeaderByHeightResponse,
-    QueryChainTipRequest, QueryChainTipResponse, 
-    QuerySigningRequestByTxHashRequest, QuerySigningRequestByTxHashResponse
+use side_proto::side::{
+    btcbridge::{
+        query_client::QueryClient as BtcQueryClient, QueryBlockHeaderByHeightRequest, QueryBlockHeaderByHeightResponse, QueryChainTipRequest, QueryChainTipResponse, QueryParamsRequest, QuerySigningRequestByTxHashRequest, QuerySigningRequestByTxHashResponse
+    },
+    tss::{query_client::QueryClient as LendingQueryClient, QuerySigningRequestsRequest, QuerySigningRequestsResponse, SigningStatus},
 };
 use tokio_tungstenite::tungstenite::protocol::Message as WebSocketMessage;
 
@@ -69,25 +68,6 @@ pub async fn connect_ws_client(endpoint: &str) -> WebSocketStream<MaybeTlsStream
         tracing::error!("sidechain websocket client disconnected: {}", host);
         thread::sleep(Duration::from_secs(5));
     }
-
-    // Wrapper<DeEvent>
-    // let empty = r#"{"jsonrpc":"2.0","id":0,"result":{}}"#;
-    // loop {
-    //     select! {
-    //         Some(recv) = ws_stream.next() => {
-    //             // assert!(recv.is_ok(), "received");
-    //             if let Ok(Message::Text(utf8_bytes)) = recv {
-    //                 let text = utf8_bytes.to_string();
-    //                 if text == empty {
-    //                     continue;
-    //                 }
-    //                 let event = serde_json::from_str::<Wrapper<DeEvent>>(&text).unwrap();
-    //                 println!("{:?}", event)
-    //             }
-                
-    //         }   
-    //     }
-    // }
 }
 
 pub async fn get_bitcoin_tip_on_side(host: &str) -> Result<Response<QueryChainTipResponse>, Status> {
@@ -123,26 +103,6 @@ pub async fn get_confirmations_on_side(host: &str) -> u64 {
     x.params.unwrap().confirmations as u64
 }
 
-// pub async fn get_signing_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {
-//     let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
-//         Ok(client) => client,
-//         Err(e) => {
-//             return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
-//         }
-//     };
-
-//     btc_client.query_signing_requests(QuerySigningRequestsRequest {
-//         pagination: Some(PageRequest {
-//             key: vec![],
-//             offset: 0,
-//             limit: 50,
-//             count_total: false,
-//             reverse: false,
-//         }),
-//         status: 1i32
-//     }).await
-// }
-
 pub async fn get_latest_validators(host: &str) -> Result<Response<GetLatestValidatorSetResponse>, Status> {
     let mut client = match TendermintServiceClient::connect(host.to_string()).await {
         Ok(c) => c,
@@ -155,7 +115,7 @@ pub async fn get_latest_validators(host: &str) -> Result<Response<GetLatestValid
     client.get_latest_validator_set(GetLatestValidatorSetRequest{pagination: Some(page_request)}).await
 }
 
-pub async fn get_signing_request_by_txid(host: &str, txid: String) -> Result<Response<QuerySigningRequestByTxHashResponse>, Status> {
+pub async fn get_bridge_signing_request_by_txid(host: &str, txid: String) -> Result<Response<QuerySigningRequestByTxHashResponse>, Status> {
     let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
         Err(e) => {
@@ -168,17 +128,19 @@ pub async fn get_signing_request_by_txid(host: &str, txid: String) -> Result<Res
     }).await
 }
 
-pub async fn mock_signing_requests() -> Result<SigningRequestsResponse, Error> {
-    Ok(SigningRequestsResponse {
-        requests: vec![
-            SigningRequest {
-                address: "bc1q5wgdhplnzn075eq7xep4zes7lnk5jy2ke0scsm".to_string(),
-                psbt: "cHNidP8BAIkCAAAAARuMLk06K1ufndtymk3RaWdbLy21UYs9vUs8D6o8HjtNAAAAAAAAAAAAAkCcAAAAAAAAIlEglUAPVXmsEIekhIthcGwg/vRxs93mpUYfH3vFVlGNjiEoIwAAAAAAACJRIJVAD1V5rBCHpISLYXBsIP70cbPd5qVGHx97xVZRjY4hAAAAAAABAStQwwAAAAAAACJRIJVAD1V5rBCHpISLYXBsIP70cbPd5qVGHx97xVZRjY4hAQMEAAAAAAAAAA==".to_string(),
-                status: "pending".to_string(),
-                sequence: 1,
-            }],
-        pagination: None,
-    })
+pub async fn get_lending_signing_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {
+    let mut lending_client = match LendingQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
+        }
+    };
+
+    lending_client.signing_requests(QuerySigningRequestsRequest {
+        module: "".to_string(),
+        status: SigningStatus::Pending as i32,
+        pagination: None
+    }).await
 }
 
 pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result<tonic::Response<BroadcastTxResponse>, Status> {
@@ -339,48 +301,3 @@ async fn test_signature() {
     assert_eq!(res.unwrap().code, 0);  
 
 }
-
-// #[test]
-// fn test_basic_sign() {
-
-//     // Replace with your mnemonic and HD path
-//     let hd_path = DerivationPath::from_str("m/84'/0'/0'/0/0").expect("invalid HD path");
-//     // Generate seed from mnemonic
-//     let mnemonic = Mnemonic::from_str(&"abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about").expect("Invalid mnemonic");
-
-//     // Derive HD key
-//     let secp = Secp256k1::new();
-//     // let derivation_path = DerivationPath::from_str(hd_path).expect("Invalid HD path");
-//     let master = Xpriv::new_master(Network::Bitcoin, &mnemonic.to_seed("")).expect("failed to create master key");
-//     let priv_key = master.derive_priv(&secp, &hd_path).expect("Failed to derive key").to_priv();
-//     // RgS0txD+kfWE//CE4akVn+T4QI//OAWWpgSUhHTOT6M=
-//     println!("Priv Key: {:?}", to_base64(priv_key.to_bytes().as_slice()));
-    
-//     let secp = Secp256k1::new();
-//     let msg_hash = signed_msg_hash(b"1234".to_vec());
-//     let msg = Message::from_digest_slice(msg_hash.as_byte_array()).unwrap();
-//     // slcH5qITi0nbdS1O1wLcpYbcT/zrKrT8stRyjoNcDGk=
-//     println!("Msg Hash: {:?} {:?}", to_base64(msg_hash.as_byte_array()), msg);
-    
-//     // H4K6oH19PE4lp8YmXOpJeMlIZ/zy4AnLVAJ0NvTgq1ftHG6kcsuKF9m2H2zlKPCOdXJSanYc0ZkmYhwjOrIstPk=
-//     let signature = secp.sign_ecdsa_recoverable(&msg, &priv_key.inner);
-//     // let mut sig_raw = signature.serialize_compact().1;
-//     let mut v = vec![];
-//     println!("Signature: {:?}", signature.serialize_compact().0.to_i32() as u8);
-//     v.push((signature.serialize_compact().0.to_i32() + 27 + 4) as u8);
-//     v.append(&mut signature.serialize_compact().1.to_vec());
-//     println!("Signature: {:?}", to_base64(v.as_slice()));
-//     println!("Signature: {:?}", signature);
-//     println!("Signature: {:?}", to_base64(&signature.to_standard().serialize_compact()));
-//     // priv_key.inner.keypair(&secp).public_key().verify(&secp, &msg, &signature).expect("failed to verify signature");
-//     // println!("pubkey: {:?} {}", priv_key.public_key(&secp), to_base64(&priv_key.public_key(&secp).to_bytes()[..]));
-
-//     // signing key
-//     let sign_key = SigningKey::from_slice(&priv_key.to_bytes()).expect("Failed to create signing key");
-//     println!("Sign key {}", to_base64(sign_key.public_key().to_bytes().as_slice()));
-//     let sig = sign_key.sign(msg_hash.as_byte_array()).expect("Failed to sign message");
-//     println!("Signature: {:?}", sig.to_string());
-//     println!("Signature: {:?}", to_base64(sig.to_vec().as_slice()));
-
-//     // let pk = CompressedPublicKey::from_private_key(&secp, priv_key).expect("failed to get pubkey");
-// }

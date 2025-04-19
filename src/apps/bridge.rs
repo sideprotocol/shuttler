@@ -12,7 +12,7 @@ use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 use side_proto::side::btcbridge::{MsgCompleteDkg, MsgSubmitSignatures};
 
 use crate::apps::{App, Context, Status, SubscribeMessage, Task };
-use crate::config::{Config, VaultKeypair};
+use crate::config::{Config, VaultKeypair, APP_NAME_BRIDGE};
 use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::encoding::{from_base64, pubkey_to_identifier, to_base64};
 use crate::helper::mem_store;
@@ -24,13 +24,13 @@ use crate::protocols::sign::{SignAdaptor, StandardSigner};
 use super::SideEvent;
 
 // #[derive(Debug)]
-pub struct BridgeSigner {
+pub struct BridgeApp {
     pub bitcoin_client: Client,
     pub keygen: DKG<KeygenHander>,
     pub signer: StandardSigner<SignatureHandler>,
 }
 
-impl BridgeSigner {
+impl BridgeApp {
     pub fn new(conf: Config) -> Self {
         let bitcoin_client = Client::new(
             &conf.bitcoin.rpc,
@@ -46,7 +46,10 @@ impl BridgeSigner {
     }  
 }
 
-impl App for BridgeSigner {
+impl App for BridgeApp {
+    fn name(&self) -> String {
+        APP_NAME_BRIDGE.to_string()
+    }
     fn on_message(&self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()> {
         // debug!("Received {:?}", message);
         self.keygen.on_message(ctx, message)?;
@@ -57,8 +60,12 @@ impl App for BridgeSigner {
         vec![self.keygen.topic(), self.signer.topic()]
     }
     fn on_event(&self, ctx: &mut Context, event: &SideEvent) {
-        self.keygen.execute(ctx, event);
-        self.signer.execute(ctx, event);
+        self.keygen.on_event(ctx, event);
+        self.signer.on_event(ctx, event);
+    }
+    fn execute(&self, ctx: &mut Context, tasks: Vec<Task>) -> anyhow::Result<()> {
+        self.signer.execute(ctx, &tasks);
+        Ok(())
     }
 }
 
@@ -186,7 +193,7 @@ impl SignAdaptor for SignatureHandler {
                     if let Ok(psbt_bytes ) = from_base64(&psbt_text) {
                         if let Ok(psbt) = Psbt::deserialize(psbt_bytes.as_slice()) {
 
-                            let mut inputs = BTreeMap::new();    
+                            let mut inputs = vec![];    
                             let preouts = psbt.inputs.iter()
                                 .map(|input| input.witness_utxo.clone().unwrap())
                                 .collect::<Vec<_>>();
@@ -286,22 +293,22 @@ impl SignAdaptor for SignatureHandler {
 
         // submit the transaction if I am the sender.
 
-        let mut psbt_bytes = from_base64(&task.psbt)?;
+        let mut psbt_bytes = from_base64(&task.memo)?;
         let mut psbt = Psbt::deserialize(psbt_bytes.as_slice())?;
 
-        for (index, input) in task.sign_inputs.iter() {
+        for (index, input) in task.sign_inputs.iter().enumerate() {
 
             let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&input.signature.as_ref().unwrap().inner().serialize()?)?;
 
-            psbt.inputs[*index].tap_key_sig = Option::Some(bitcoin::taproot::Signature {
+            psbt.inputs[index].tap_key_sig = Option::Some(bitcoin::taproot::Signature {
                 signature: sig,
                 sighash_type: TapSighashType::Default,
             });
 
-            let witness = Witness::p2tr_key_spend(&psbt.inputs[*index].tap_key_sig.unwrap());
-            psbt.inputs[*index].final_script_witness = Some(witness);
-            psbt.inputs[*index].partial_sigs = BTreeMap::new();
-            psbt.inputs[*index].sighash_type = None;
+            let witness = Witness::p2tr_key_spend(&psbt.inputs[index].tap_key_sig.unwrap());
+            psbt.inputs[index].final_script_witness = Some(witness);
+            psbt.inputs[index].partial_sigs = BTreeMap::new();
+            psbt.inputs[index].sighash_type = None;
         };
 
         let signed_tx = psbt.clone().extract_tx()?;
@@ -324,7 +331,7 @@ impl SignAdaptor for SignatureHandler {
         ctx.tx_sender.send(any)?;
 
         task.submitted = true;
-        task.psbt = to_base64(&psbt_bytes);
+        task.memo = to_base64(&psbt_bytes);
         task.status = Status::SignComplete;
         ctx.task_store.save(&task.id, &task);
 

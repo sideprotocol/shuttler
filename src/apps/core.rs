@@ -27,11 +27,11 @@ pub enum SideEvent {
 }
 
 pub trait App {
+    fn name(&self) -> String;
     fn subscribe_topics(&self) -> Vec<IdentTopic>;
     fn on_message(&self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()>;
     fn on_event(&self, ctx: &mut Context, event: &SideEvent);
-    // fn on_tick(&self, ctx: &mut Context);
-    // fn tick(&self) -> Duration;
+    fn execute(&self, ctx: &mut Context, task: Vec<Task>) -> anyhow::Result<()>;
 }
 
 pub mod event {
@@ -162,8 +162,8 @@ pub struct Task {
     pub status: Status,
     pub time: u64,
     pub dkg_input: DkgInput,
-    pub sign_inputs: BTreeMap<usize, Input>,
-    pub psbt: String, // store psbt for later use
+    pub sign_inputs: Vec<Input>,
+    pub memo: String, // store psbt for later use
     pub submitted: bool,
 }
 
@@ -187,8 +187,8 @@ impl Task {
                 tweaks,
                 batch_size,
             },
-            sign_inputs: BTreeMap::new(),
-            psbt: "".to_owned(),
+            sign_inputs: vec![],
+            memo: "".to_owned(),
             submitted: false,
         }
     }
@@ -196,14 +196,14 @@ impl Task {
     pub fn new_signing(
         id: String,
         psbt: impl Into<String>,
-        sign_inputs: BTreeMap<usize, Input>,
+        sign_inputs: Vec<Input>,
     ) -> Self {
         Self {
             id,
             status: Status::SignRound1,
             time: now(),
             dkg_input: DkgInput::default(),
-            psbt: psbt.into(),
+            memo: psbt.into(),
             sign_inputs,
             submitted: false,
         }
@@ -232,6 +232,7 @@ pub struct Context {
     pub nonce_store: SignerNonceStore,
     pub commitment_store: CommitmentStore,
     pub signature_store: SignatureShareStore,
+    pub general_store: sled::Db,
     // pub price_store: Arc<PriceStore>,
     pub bitcoin_client: BitcoinClient,
 
@@ -269,6 +270,7 @@ impl Context {
             nonce_store: SignerNonceStore::new(conf.get_database_with_name("nonces")),
             commitment_store: CommitmentStore::new(conf.get_database_with_name("commitments")),
             signature_store: SignatureShareStore::new(conf.get_database_with_name("signature_shares")),
+            general_store: sled::open(conf.get_database_with_name("general")).unwrap(),
             // price_store: Arc::new(PriceStore::new(conf.get_database_with_name("prices"))),
             conf,
 

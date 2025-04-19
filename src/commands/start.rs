@@ -1,7 +1,7 @@
 
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-use crate::{apps::{bridge::BridgeSigner, lending::Lending, relayer::{tick::start_relayer_tasks, Relayer}, Shuttler }, config::Config};
+use crate::{apps::{bridge::BridgeApp, lending::LendingApp, relayer::{tick::start_relayer_tasks, Relayer}, Shuttler }, config::Config};
 
 pub async fn execute(home: &str, relayer: bool, bridge: bool, lending: bool, seed: bool) {
 
@@ -24,9 +24,9 @@ pub async fn execute(home: &str, relayer: bool, bridge: bool, lending: bool, see
         let r = Relayer::new(conf.clone());
         tokio::spawn(start_relayer_tasks(r));
     }
-    let b = BridgeSigner::new(conf.clone());
+    let b = BridgeApp::new(conf.clone());
     if bridge { shuttler.registry( &b); }
-    let o = Lending::new();
+    let o = LendingApp::new();
     if lending { shuttler.registry(&o); }
 
     shuttler.start(&conf).await;

@@ -45,14 +45,18 @@ impl<H> DKG<H> where H: DKGAdaptor {
         &self.handler
     }
 
-    pub fn execute(&self, ctx: &mut Context, event: &SideEvent) {
+    pub fn on_event(&self, ctx: &mut Context, event: &SideEvent) {
         if let Some(tasks) = self.handler.new_task(ctx, event) {
-            tasks.iter().for_each(|task| {
-                if ctx.task_store.exists(&task.id) { return }
-                ctx.task_store.save(&task.id, &task);
-                self.generate(ctx, &task);
-            })
+            self.execute(ctx, &tasks);
         }
+    }
+
+    pub fn execute(&self, ctx: &mut Context, tasks: &Vec<Task>) {
+        tasks.iter().for_each(|task| {
+            if ctx.task_store.exists(&task.id) { return }
+            ctx.task_store.save(&task.id, &task);
+            self.generate(ctx, &task);
+        })
     }
 }
 

@@ -51,18 +51,18 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
         IdentTopic::new(&self.name)
     }
 
-    // pub fn hander(&self) -> &H {
-    //     &self.handler
-    // }
-
-    pub fn execute(&self, ctx: &mut Context, event: &SideEvent) {
+    pub fn on_event(&self, ctx: &mut Context, event: &SideEvent){
         if let Some(tasks) = self.handler.new_task(ctx, event) {
-            tasks.iter().for_each(|task| {
-                if ctx.task_store.exists(&task.id) { return }
-                ctx.task_store.save(&task.id, &task);
-                self.generate_commitments(ctx, &task);
-            });
+            self.execute(ctx, &tasks);
         }
+    }
+
+    pub fn execute(&self, ctx: &mut Context, tasks: &Vec<Task>) {
+        tasks.iter().for_each(|task| {
+            if ctx.task_store.exists(&task.id) { return }
+            ctx.task_store.save(&task.id, &task);
+            self.generate_commitments(ctx, &task);
+        });
     }
     
     pub fn generate_commitments(&self, ctx: &mut Context, task: &Task) {
@@ -77,7 +77,7 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
         let mut commitments = BTreeMap::new();
         //let mut commitments = signer.get_signing_commitments(&task.id);
 
-        task.sign_inputs.iter().for_each(|(index, input)| {
+        task.sign_inputs.iter().enumerate().for_each(|(index, input)| {
             let mut rng = thread_rng();
             let key = match ctx.keystore.get(&input.key) {
                 Some(k) => k,
@@ -88,10 +88,10 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
             };
 
             let (nonce, commitment) = round1::commit(key.priv_key.signing_share(), &mut rng);
-            nonces.insert(*index, nonce);
+            nonces.insert(index, nonce);
             let mut input_commit = BTreeMap::new();
             input_commit.insert(ctx.identifier.clone(), commitment);
-            commitments.insert(*index, input_commit.clone());
+            commitments.insert(index, input_commit.clone());
         });
 
         println!("nonnce {:?}", nonces);
@@ -224,7 +224,7 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
         let stored_remote_commitments = ctx.commitment_store.get(&task.id).unwrap_or_default();
 
         let mut broadcast_packages = BTreeMap::new();
-        for (index, input) in task.sign_inputs.iter() {
+        for (index, input) in task.sign_inputs.iter().enumerate() {
             
             // filter packets from unknown parties
             if let Some(keypair) = ctx.keystore.get(&input.key) {
@@ -242,10 +242,10 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
                 }
     
                 // Only check the first one, because all inputs are in the same package
-                if *index == 0 {
+                if index == 0 {
                     let participants = &input.participants;
                 
-                    debug!("Commitments {} {}/{}", &task.id[..6], received, participants.len());
+                    debug!("Commitments {} {}/{}", &task.id, received, participants.len());
 
                     if received != keypair.pub_key.verifying_shares().len() && received != participants.len() {
                         return
@@ -334,7 +334,7 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
         let stored_remote_signature_shares = ctx.signature_store.get(&task.id).unwrap_or_default();
         
         let mut verifies = vec![];
-        for (index, input) in task.sign_inputs.iter_mut() {
+        for (index, input) in task.sign_inputs.iter_mut().enumerate() {
 
             let keypair = match ctx.keystore.get(&input.key) {
                 Some(keypair) => keypair,
@@ -363,8 +363,8 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
                 return
             }
 
-            if *index == 0 {
-                debug!("Signature share {} {}/{}", &task_id[..6], signature_shares.len(), signing_commitments.len() )
+            if index == 0 {
+                debug!("Signature share {} {}/{}", &task_id, signature_shares.len(), signing_commitments.len() )
             }
 
             signature_shares.retain(|k, _| {signing_commitments.contains_key(k)});

@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use lazy_static::lazy_static;
 
 use crate::apps::Context;
-use crate::config::TASK_INTERVAL;
+use crate::config::BLOCK_TOLERENCE;
 use super::store::Store;
 use super::{gossip::HeartBeatMessage, now};
 
@@ -31,9 +31,6 @@ lazy_static! {
         Mutex::new(BTreeMap::new())
     };
 }
-
-pub const HEART_BEAT_WINDOW: u64 = TASK_INTERVAL.as_secs() * 1;
-pub const BLOCK_TOLERENCE: u64 = 5;
 
 pub fn update_alive_table(self_identifier: &Identifier, alive: HeartBeatMessage) {
 

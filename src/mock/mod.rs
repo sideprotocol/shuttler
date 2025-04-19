@@ -40,7 +40,7 @@ pub const VAULT_FILE_NAME: &str = "address.txt";
 pub fn generate_event_queue(module: &String) -> EventQueue {
     if module == "bridge" {
         bridge_task_queue()
-    } else if module == "oracle" {
+    } else if module == "lending" {
         lending_task_queue()
     } else {
         lending_task_queue()
@@ -58,9 +58,9 @@ fn handle_tx_submissions(home: &str, tx_num: u32, tx_bytes: &Vec<u8>) {
         tx.body.messages.iter().for_each(|m| {
             if m.type_url == "/side.btcbridge.MsgCompleteDKG" {
                 handle_bridge_dkg_submission(home, tx_num, m);
-            } else if m.type_url == "/side.dlc.MsgSubmitOraclePubKey" {
+            } else if m.type_url == "/side.tss.MsgCompleteDKG" {
                 handle_lending_dkg_submission(home, m);
-            } else if m.type_url == "/side.dlc.MsgSubmitNonce" {
+            } else if m.type_url == "/side.tss.MsgSubmitSignatures" {
                 handle_signature_submission(home, m);
             } else {
                 println!("Received msg: {}", m.type_url);
