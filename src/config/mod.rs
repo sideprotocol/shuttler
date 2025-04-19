@@ -10,10 +10,12 @@ use crate::helper::cipher::random_bytes;
 
 const CONFIG_FILE: &str = "config.toml";
 
-pub const TASK_INTERVAL: Duration = Duration::from_secs(30);
 use lazy_static::lazy_static;
 
 pub mod candidate;
+pub mod keys;
+
+pub use keys::*;
 
 lazy_static! {
     static ref PRIV_VALIDATOR_KEY: Mutex<Option<PrivValidatorKey>> = Mutex::new(None);

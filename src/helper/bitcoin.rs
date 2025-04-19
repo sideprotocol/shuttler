@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 
 use anyhow::anyhow;
 use bitcoin::sighash::{Prevouts, SighashCache};
@@ -29,7 +28,7 @@ pub fn new_task_from_psbt(ctx: &Context, psbt_base64: &String, sign_mode: SignMo
     let task_id = &psbt.unsigned_tx.compute_txid().to_string();
 
     info!("Prepare for signing: {:?} {} inputs ", &task_id[..6], psbt.inputs.len()  );
-    let mut inputs = BTreeMap::new();
+    let mut inputs = vec![];
     let preouts = psbt.inputs.iter()
         //.filter(|input| input.witness_utxo.is_some())
         .map(|input| input.witness_utxo.clone().unwrap())
@@ -63,7 +62,7 @@ pub fn new_task_from_psbt(ctx: &Context, psbt_base64: &String, sign_mode: SignMo
             signature: None,
         };
 
-        inputs.insert(i, input);
+        inputs.push(input);
  
     };
 

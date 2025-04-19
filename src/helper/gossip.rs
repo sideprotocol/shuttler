@@ -4,10 +4,9 @@ use frost_adaptor_signature::Identifier;
 use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{Deserialize, Serialize};
 
-use crate::apps::{Context, Shuttler, ShuttlerBehaviour};
+use crate::{apps::{Context, Shuttler, ShuttlerBehaviour}, config::{BLOCK_HEIGHT, HEART_BEAT_WINDOW}};
 
 use super::{mem_store, now};
-pub const HEART_BEAT_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(60);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum SubscribeTopic {
@@ -46,7 +45,9 @@ pub fn subscribe_gossip_topics(swarm: &mut Swarm<ShuttlerBehaviour>, app: &Shutt
 
 pub fn sending_heart_beat(ctx: &mut Context, block_height: u64) {
 
-        let last_seen = now() + mem_store::HEART_BEAT_WINDOW;
+        ctx.general_store.insert(BLOCK_HEIGHT, &block_height.to_be_bytes()).unwrap();
+
+        let last_seen = now() + HEART_BEAT_WINDOW;
         let payload = HeartBeatPayload {
             identifier: ctx.identifier.clone(),
             last_seen,

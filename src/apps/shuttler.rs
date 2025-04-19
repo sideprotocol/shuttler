@@ -2,6 +2,7 @@ use std::{
     hash::{DefaultHasher, Hash, Hasher}, io, str::FromStr, time::Duration
 };
 
+use chrono::{Local, Timelike};
 use cosmrs::Any;
 use ed25519_compact::{PublicKey, SecretKey, Signature};
 use futures::stream::StreamExt;
@@ -9,18 +10,20 @@ use libp2p::{
     gossipsub, identify, identity::Keypair, kad::{self, store::MemoryStore}, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, Multiaddr, PeerId, Swarm
 };
 use tendermint_rpc::{event::v0_38::DeEvent, response::Wrapper};
-use tokio::{select, signal, spawn};
+use tokio::{select, signal, spawn, time::Instant};
 use tracing::{debug, info, warn, error};
 
 use crate::{
     apps::{
         App, Context, SubscribeMessage
     },
-    config::{candidate::Candidate, Config},
+    config::{candidate::Candidate, Config, APP_NAME_LENDING},
     helper::{
-        client_side::{connect_ws_client, send_cosmos_transaction}, encoding::pubkey_to_identifier, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store
+        client_side::{self, connect_ws_client, send_cosmos_transaction}, encoding::pubkey_to_identifier, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store, store::Store
     }, rpc::run_rpc_server,
 };
+
+use super::{Input, SignMode, Task};
 
 pub struct Shuttler<'a> {
     pub apps: Vec<&'a dyn App>,
@@ -186,7 +189,7 @@ impl<'a> Shuttler<'a> {
         //     run_rpc_server(rpc).await.expect("RPC Server stopped");
         // });
 
-        // let mut context = Arc::clone(&arc_context);
+        let mut ticker = tokio::time::interval_at(get_next_full_hour(), Duration::from_secs(60 * 60));
         loop {
             select! {
                 recv = sidechain_event_stream.next() => {
@@ -198,6 +201,9 @@ impl<'a> Shuttler<'a> {
                             sidechain_event_stream = connect_ws_client(&conf.side_chain.rpc).await;
                         }
                     }
+                }
+                _ = ticker.tick() => {
+                    self.handle_missed_signing_request(&mut context).await;
                 }
                 swarm_event = context.swarm.select_next_some() => match swarm_event {
                     SwarmEvent::Behaviour(ShuttlerBehaviourEvent::Gossip(gossipsub::Event::Message{ message, .. })) => {
@@ -251,6 +257,7 @@ impl<'a> Shuttler<'a> {
                     },
                 },
                 _ = signal::ctrl_c() => {
+                    info!("Received Ctrl-C, shutting down...");
                     break;
                 }
             }
@@ -275,7 +282,7 @@ impl<'a> Shuttler<'a> {
 
     fn handle_block_event(&self, ctx: &mut Context,  message: tokio_tungstenite::tungstenite::Message) {
 
-        let event = if let tokio_tungstenite::tungstenite::Message::Text(msg_bytes) = message {
+        let event: DeEvent = if let tokio_tungstenite::tungstenite::Message::Text(msg_bytes) = message {
             match serde_json::from_slice::<Wrapper<DeEvent>>(msg_bytes.as_bytes()) {
                 Ok(wrap) => match wrap.into_result() {
                     Ok(e) => e,
@@ -288,22 +295,17 @@ impl<'a> Shuttler<'a> {
         };   
 
         if let Some(events) = event.events {
-            let e = crate::apps::SideEvent::BlockEvent(events);
+            let e: super::SideEvent = crate::apps::SideEvent::BlockEvent(events);
             self.apps.iter().for_each(|a| a.on_event(ctx, &e));
         }
         match event.data {
             tendermint_rpc::event::v0_38::DeEventData::NewBlock { block, result_finalize_block , ..} => {
                 if let Some(b) = block { 
-                    sending_heart_beat(ctx, b.header.height.value());
+                    let height = b.header.height.value();
+                    debug!("Received New block: #{:?}", height);
+                    sending_heart_beat(ctx, height);
                 }
                 if let Some(finalize_block) = result_finalize_block {
-                    // debug!("tx_result: {:?}", finalize_block.tx_results);
-                    // for tx in finalize_block.tx_results {
-                    //     if tx.code.is_err() {continue;}
-                    //     let e = crate::apps::SideEvent::TxEvent(tx.events);
-                    //     self.apps.iter().for_each(|a| a.on_event(ctx, &e ));
-                    // }
-
                     let e = crate::apps::SideEvent::TxEvent(finalize_block.events);
                     self.apps.iter().for_each(|a| a.on_event(ctx, &e ));
                 }
@@ -313,6 +315,55 @@ impl<'a> Shuttler<'a> {
             }
             _ => debug!("Does not support {}", event.query),
         }
+    }
+
+    // TODO: Handle missed signing request
+    async fn handle_missed_signing_request(&self, ctx: &mut Context) {
+
+        let mut tasks = vec![];
+        if let Ok(x) = client_side::get_lending_signing_requests(&ctx.conf.side_chain.grpc).await {
+            x.into_inner().requests.iter().for_each(|r| {
+                if ctx.task_store.exists(&format!("lending-{}", r.id)) {
+                    if let Some(create_time) = r.creation_time {
+                        // remove the task if it is older than 1 hour
+                        // the task will be restarted in the next round
+                        let now = Local::now();
+                        let create_time = create_time.seconds as i64;
+                        let diff = now.timestamp() - create_time;
+                        if diff > 60 * 60  {
+                            ctx.task_store.remove(&format!("lending-{}", r.id));
+                            return
+                        }
+                    }
+                    return
+                } else if let Some(ami) = ctx.keystore.get(&r.pub_key) {
+                    let participants = ami.pub_key.verifying_shares().keys().cloned().collect::<Vec<_>>();
+                    // parse the nonce from r.options.unwrap().
+                    let nonce = ami.pub_key.verifying_key().clone();
+                    let sign_mode = match r.r#type() {
+                        side_proto::side::tss::SigningType::Schnorr => SignMode::Sign,
+                        side_proto::side::tss::SigningType::SchnorrWithCommitment => SignMode::SignWithGroupcommitment(nonce),
+                        side_proto::side::tss::SigningType::SchnorrAdaptor => SignMode::SignWithAdaptorPoint(nonce),
+                    };
+                    let inputs = r.sig_hashes.iter().map(|s| Input::new_with_message_mode(
+                        r.pub_key.clone(), s.clone().into_bytes(), participants.clone(), sign_mode.clone()
+                    )).collect::<Vec<_>>();
+                    let task = Task::new_signing(
+                        format!("lending-{}", r.id),
+                        "",
+                        inputs,
+                    );
+                    ctx.task_store.save(&task.id, &task);
+                    tasks.push(task);
+                };
+            });
+            
+        }
+        
+        if let Some(lending) = self.apps.iter().find(|a| a.name() == APP_NAME_LENDING) {
+            let _ = lending.execute(ctx, tasks);
+        };
+
     }
 
 }
@@ -360,5 +411,18 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<ShuttlerBehaviour>, conf: &Config) {
             }
         }
     }
+}
+
+fn get_next_full_hour() -> Instant {
+    let now = Local::now();
+    let next_hour = now
+        .with_minute(0)
+        .unwrap()
+        .with_second(0)
+        .unwrap()
+        .with_nanosecond(0)
+        .unwrap()
+        + Duration::from_secs(60 * 60);
+    Instant::now() + Duration::from_secs(next_hour.timestamp() as u64)
 }
 

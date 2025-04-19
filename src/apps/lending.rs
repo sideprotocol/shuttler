@@ -6,7 +6,7 @@ use cosmrs::Any;
 use side_proto::side::tss::{MsgCompleteDkg, MsgSubmitSignatures};
 use tracing::debug;
 
-use crate::config::VaultKeypair;
+use crate::config::{VaultKeypair, APP_NAME_LENDING};
 use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier, to_base64};
 use crate::helper::store::Store;
 use crate::protocols::sign::{SignAdaptor, StandardSigner};
@@ -16,12 +16,12 @@ use crate::apps::{App, Context, FrostSignature, Input, SignMode, SubscribeMessag
 
 use super::SideEvent;
 
-pub struct Lending {
+pub struct LendingApp {
     pub keygen: DKG<KeygenHander>,
     pub signer: StandardSigner<SignerHandler>
 }
 
-impl Lending {
+impl LendingApp {
     pub fn new() -> Self {
         Self {
             keygen: DKG::new("lending_key_generator", KeygenHander{}),
@@ -30,22 +30,26 @@ impl Lending {
     }
 }
 
-impl App for Lending {
+impl App for LendingApp {
+
+    fn name(&self) -> String {
+        APP_NAME_LENDING.to_string()
+    }
 
     fn on_message(&self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()>{
         self.signer.on_message(ctx, message)?;
         self.keygen.on_message(ctx, message)
-        // self.nonce_gen.on_message(ctx, message)?;
-        // self.nonce_gen.hander().signer.on_message(ctx, message)
-        // Ok(())
     }
     fn subscribe_topics(&self) -> Vec<libp2p::gossipsub::IdentTopic> {
         vec![self.keygen.topic(), self.signer.topic(),]
     }
     fn on_event(&self, ctx: &mut Context, event: &SideEvent) {
-        self.signer.execute(ctx, event);
-        self.keygen.execute(ctx, event);
-        // self.nonce_gen.execute(ctx, event);
+        self.signer.on_event(ctx, event);
+        self.keygen.on_event(ctx, event);
+    }
+    fn execute(&self, ctx: &mut Context, tasks: Vec<Task>) -> anyhow::Result<()> {
+        self.signer.execute(ctx, &tasks);
+        Ok(())
     }
 }
 pub struct KeygenHander{}
@@ -150,7 +154,7 @@ impl SignAdaptor for SignerHandler {
                                 };
                             }
 
-                            let mut sign_inputs = BTreeMap::new();
+                            let mut sign_inputs = vec![];
                             let participants = keypair.pub_key.verifying_shares().keys().map(|p| p.clone()).collect::<Vec<_>>();
                             
                             if let Ok(message) = hex::decode(sig_hashes) {
@@ -168,7 +172,7 @@ impl SignAdaptor for SignerHandler {
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task)-> anyhow::Result<()> {
         let mut signatures = vec![];
-        for (_, input) in task.sign_inputs.iter() {
+        for input in task.sign_inputs.iter() {
             if let Some(FrostSignature::Standard(sig)) = input.signature  {
                 signatures.push(hex::encode(&sig.serialize()?));
             }
