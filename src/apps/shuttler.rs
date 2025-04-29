@@ -339,11 +339,20 @@ impl<'a> Shuttler<'a> {
                 } else if let Some(ami) = ctx.keystore.get(&r.pub_key) {
                     let participants = ami.pub_key.verifying_shares().keys().cloned().collect::<Vec<_>>();
                     // parse the nonce from r.options.unwrap().
-                    let nonce = ami.pub_key.verifying_key().clone();
-                    let sign_mode = match r.r#type() {
-                        side_proto::side::tss::SigningType::Schnorr => SignMode::Sign,
-                        side_proto::side::tss::SigningType::SchnorrWithCommitment => SignMode::SignWithGroupcommitment(nonce),
-                        side_proto::side::tss::SigningType::SchnorrAdaptor => SignMode::SignWithAdaptorPoint(nonce),
+                    // r.r#type().
+                    let mut sign_mode = SignMode::Sign;
+                    match r.r#type() {
+                        side_proto::side::tss::SigningType::SchnorrWithCommitment => if let Some(o) = &r.options {
+                            if let Some(comm) = ctx.keystore.get(&o.nonce) {
+                                sign_mode = SignMode::SignWithGroupcommitment(comm.pub_key.verifying_key().clone());
+                            }
+                        },
+                        side_proto::side::tss::SigningType::SchnorrAdaptor => if let Some(o) = &r.options {
+                            if let Some(comm) = ctx.keystore.get(&o.adaptor_point) {
+                                sign_mode = SignMode::SignWithAdaptorPoint(comm.pub_key.verifying_key().clone());
+                            }
+                        },
+                        _ => {},
                     };
                     let inputs = r.sig_hashes.iter().map(|s| Input::new_with_message_mode(
                         r.pub_key.clone(), s.clone().into_bytes(), participants.clone(), sign_mode.clone()
