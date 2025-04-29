@@ -8,15 +8,30 @@ use cosmos_sdk_proto::{Any, cosmos::{
 }};
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_client::ServiceClient as TendermintServiceClient;
 use futures::SinkExt;
+use tendermint::block::Height;
+use tendermint_rpc::{endpoint, Client, HttpClient};
 use tokio::sync::Mutex;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tonic::{Response, Status};
+
 use side_proto::side::{
-    btcbridge::{
-        query_client::QueryClient as BtcQueryClient, QueryBlockHeaderByHeightRequest, QueryBlockHeaderByHeightResponse, QueryChainTipRequest, QueryChainTipResponse, QueryParamsRequest, QuerySigningRequestByTxHashRequest, QuerySigningRequestByTxHashResponse
+    oracle::{
+        query_client::QueryClient as OracleQueryClient, QueryBlockHeaderByHeightRequest, QueryBlockHeaderByHeightResponse, QueryChainTipRequest, QueryChainTipResponse
     },
-    tss::{query_client::QueryClient as LendingQueryClient, QuerySigningRequestsRequest, QuerySigningRequestsResponse, SigningStatus},
+    btcbridge::{
+        query_client::QueryClient as BridgeQueryClient, QueryParamsRequest, QuerySigningRequestByTxHashRequest, QuerySigningRequestByTxHashResponse
+    },
+    tss::{
+        query_client::QueryClient as TssQueryClient, QuerySigningRequestsRequest, QuerySigningRequestsResponse, SigningStatus
+    },
+    lending::{
+        query_client::QueryClient as LendingQueryClient, QueryLoanDlcMetaRequest, QueryLoanDlcMetaResponse, QueryRedemptionRequest, QueryRedemptionResponse
+    },
+    liquidation::{
+        query_client::QueryClient as LiquidationQueryClient, QueryLiquidationRequest, QueryLiquidationResponse
+    },
 };
+
 use tokio_tungstenite::tungstenite::protocol::Message as WebSocketMessage;
 
 use lazy_static::lazy_static;
@@ -71,36 +86,82 @@ pub async fn connect_ws_client(endpoint: &str) -> WebSocketStream<MaybeTlsStream
 }
 
 pub async fn get_bitcoin_tip_on_side(host: &str) -> Result<Response<QueryChainTipResponse>, Status> {
-    let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
+    let mut client = match OracleQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
         Err(e) => {
             return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
         }
     };
 
-    btc_client.query_chain_tip(QueryChainTipRequest {}).await
+    client.query_chain_tip(QueryChainTipRequest {}).await
 }
 
 pub async fn get_bitcoin_block_header_on_side(host: &str, height: u64) -> Result<Response<QueryBlockHeaderByHeightResponse>, Status> {
-    let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
+    let mut client = match OracleQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
         Err(e) => {
             return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
         }
     };
 
-    btc_client.query_block_header_by_height(QueryBlockHeaderByHeightRequest { height }).await
+    client.query_block_header_by_height(QueryBlockHeaderByHeightRequest { height }).await
 }
 
-pub async fn get_confirmations_on_side(host: &str) -> u64 {
-    let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
+
+pub async fn get_confirmation_depth(host: &str) -> u64 {
+    // TODO
+    // use deposit confirmation depth for now
+    get_deposit_confirmation_depth(host).await
+}
+
+pub async fn get_deposit_confirmation_depth(host: &str) -> u64 {
+    let mut client = match BridgeQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
         Err(_) => {
-            return 1 as u64;
+            return 6 as u64;
         }
     };
-    let x = btc_client.query_params(QueryParamsRequest{}).await.unwrap().into_inner();
-    x.params.unwrap().confirmations as u64
+
+    let res = match client.query_params(QueryParamsRequest{}).await {
+        Ok(res) => res.into_inner(),
+        Err(_) => {
+            return 6 as u64;
+        }
+    };
+
+    match res.params {
+        Some(params) => { 
+            return params.deposit_confirmation_depth as u64;
+        }
+        None => {
+            return 6 as u64;
+        }
+    };
+}
+
+pub async fn get_withdraw_confirmation_depth(host: &str) -> u64 {
+    let mut client = match BridgeQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(_) => {
+            return 6 as u64;
+        }
+    };
+
+    let res = match client.query_params(QueryParamsRequest{}).await {
+        Ok(res) => res.into_inner(),
+        Err(_) => {
+            return 6 as u64;
+        }
+    };
+
+    match res.params {
+        Some(params) => { 
+            return params.withdraw_confirmation_depth as u64;
+        }
+        None => {
+            return 6 as u64;
+        }
+    };
 }
 
 pub async fn get_latest_validators(host: &str) -> Result<Response<GetLatestValidatorSetResponse>, Status> {
@@ -116,31 +177,93 @@ pub async fn get_latest_validators(host: &str) -> Result<Response<GetLatestValid
 }
 
 pub async fn get_bridge_signing_request_by_txid(host: &str, txid: String) -> Result<Response<QuerySigningRequestByTxHashResponse>, Status> {
-    let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
+    let mut client = match BridgeQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
         Err(e) => {
             return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
         }
     };
 
-    btc_client.query_signing_request_by_tx_hash(QuerySigningRequestByTxHashRequest {
+    client.query_signing_request_by_tx_hash(QuerySigningRequestByTxHashRequest {
         txid,
     }).await
 }
 
-pub async fn get_lending_signing_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {
-    let mut lending_client = match LendingQueryClient::connect(host.to_string()).await {
+pub async fn get_tss_signing_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {
+    let mut tss_client = match TssQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
         Err(e) => {
             return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
         }
     };
 
-    lending_client.signing_requests(QuerySigningRequestsRequest {
+    tss_client.signing_requests(QuerySigningRequestsRequest {
         module: "".to_string(),
         status: SigningStatus::Pending as i32,
         pagination: None
     }).await
+}
+
+pub async fn get_loan_dlc_meta(host: &str, loan_id: String) -> Result<Response<QueryLoanDlcMetaResponse>, Status> {
+    let mut client = match LendingQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(Status::cancelled(format!("Failed to create lending query client: {}", e)));
+        }
+    };
+
+    client.loan_dlc_meta(QueryLoanDlcMetaRequest {
+        loan_id,
+    }).await
+}
+
+pub async fn get_redemption(host: &str, id: u64) -> Result<Response<QueryRedemptionResponse>, Status> {
+    let mut client = match LendingQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(Status::cancelled(format!("Failed to create lending query client: {}", e)));
+        }
+    };
+
+    client.redemption(QueryRedemptionRequest{
+        id,
+    }).await
+}
+
+pub async fn get_liquidation(host: &str, id: u64) -> Result<Response<QueryLiquidationResponse>, Status> {
+    let mut client = match LiquidationQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(Status::cancelled(format!("Failed to create liquidation query client: {}", e)));
+        }
+    };
+
+    client.liquidation(QueryLiquidationRequest {
+        id,
+    }).await
+}
+
+pub async fn get_latest_block(rpc: &str) -> Result<endpoint::block::Response, tendermint_rpc::Error> {
+    let client = match HttpClient::new(rpc) {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(e);
+        }
+    };
+
+    client.latest_block().await
+}
+
+pub async fn get_block_results(rpc: &str, height: u64) -> Result<endpoint::block_results::Response, tendermint_rpc::Error> {
+    let client = match HttpClient::new(rpc) {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(e);
+        }
+    };
+
+    let block_height = Height::try_from(height).expect("Should be able to be converted safely");
+    client.block_results(block_height).await
 }
 
 pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result<tonic::Response<BroadcastTxResponse>, Status> {
@@ -288,7 +411,7 @@ async fn test_signature() {
     let msg = MsgSubmitSignatures {
         sender: conf.relayer_bitcoin_address(),
         txid: "abcd".to_string(),
-        psbt: "123".to_string(),
+        signatures: vec!["123".to_string()],
     };
 
     let msg = Any::from_msg(&msg).unwrap();

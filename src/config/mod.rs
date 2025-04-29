@@ -51,10 +51,13 @@ pub struct Config {
 
     pub relay_runes: bool,
 
-    pub last_scanned_height: u64,
+    pub last_scanned_height_side: u64,
+    pub last_scanned_height_bitcoin: u64,
 
     pub loop_interval: u64,
     pub batch_relayer_count: u64,
+
+    pub max_attempts: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -253,9 +256,11 @@ impl Config {
             },
             relay_runes: false,
             // tweaks: BTreeMap::new(),
-            last_scanned_height: 0,
+            last_scanned_height_side: 0,
+            last_scanned_height_bitcoin: 0,
             loop_interval: 60,
             batch_relayer_count: 10,
+            max_attempts: 5,
         }
     }
 
