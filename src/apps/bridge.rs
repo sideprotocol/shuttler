@@ -2,7 +2,7 @@
 use cosmrs::Any;
 use libp2p::gossipsub::IdentTopic;
 use tracing::{error, info};
-use bitcoin::{Address, Network, Psbt, TapNodeHash, XOnlyPublicKey};
+use bitcoin::{Network, TapNodeHash, XOnlyPublicKey};
 use bitcoincore_rpc::{Auth, Client};
 use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 
@@ -116,7 +116,7 @@ impl DKGAdaptor for KeygenHander {
             id,
             sender: ctx.conf.relayer_bitcoin_address(),
             vaults,
-            consensus_address: ctx.id_base64.clone(),
+            consensus_pubkey: ctx.id_base64.clone(),
             signature,
         };
         let any = Any::from_msg(&cosm_msg).unwrap();

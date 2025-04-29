@@ -1,5 +1,4 @@
 
-use std::collections::BTreeMap;
 
 use bitcoin::hex::DisplayHex;
 use cosmrs::Any;
@@ -121,7 +120,8 @@ impl DKGAdaptor for KeygenHander {
             sender: ctx.conf.relayer_bitcoin_address(),
             pub_keys: pub_keys,
             signature,
-            consensus_pubkey: to_base64(&ctx.conf.load_validator_key().consensus_pubkey().public_key().to_bytes()),
+            // consensus_pubkey: to_base64(&ctx.conf.load_validator_key().consensus_pubkey().public_key().to_bytes()),
+            consensus_pubkey: ctx.id_base64.clone()
         };
 
         let any = Any::from_msg(&cosm_msg).unwrap();
