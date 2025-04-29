@@ -1,7 +1,7 @@
 
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-use crate::{apps::{bridge::BridgeApp, lending::LendingApp, relayer::{tick::start_relayer_tasks, Relayer}, Shuttler }, config::Config};
+use crate::{apps::{bridge::BridgeApp, lending::LendingApp, relayer::{bridge::start_relayer_tasks, Relayer}, Shuttler }, config::Config};
 
 pub async fn execute(home: &str, relayer: bool, bridge: bool, lending: bool, seed: bool) {
 

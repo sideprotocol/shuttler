@@ -62,6 +62,5 @@ pub mod init;
 pub mod start;
 pub mod address;
 pub mod reset;
-pub mod submit_header;
 pub mod submit_tx;
 pub mod test;

@@ -5,7 +5,7 @@ use std::time::Duration;
 use bitcoincore_rpc::{Auth, Client};
 use crate::{config::Config, helper::{client_fee_provider::FeeProviderClient, client_ordinals::OrdinalsClient}};
 
-pub mod tick;
+pub mod bridge;
 
 #[derive(Debug)]
 pub struct Relayer {
