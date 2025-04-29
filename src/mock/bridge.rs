@@ -38,7 +38,7 @@ pub fn create_vault_event(env: MockEnv) -> SideEvent {
     let mut creation = BTreeMap::new();
     creation.insert("create_bridge_vault.id".to_owned(), vec!["1".to_owned()]);
     creation.insert("create_bridge_vault.participants".to_owned(), vec![env.participants.join(",")]);
-    creation.insert("create_bridge_vault.tweaks".to_owned(), vec!["1".to_owned()]);
+    creation.insert("create_bridge_vault.batch_size".to_owned(), vec!["2".to_owned()]);
     creation.insert("create_bridge_vault.threshold".to_owned(), vec![(env.participants.len() * 2 / 3).to_string()]);
 
     println!("send vault event: {:?}", creation);
@@ -54,9 +54,10 @@ pub fn create_transaction_event(env: MockEnv) -> SideEvent {
         txs.split(",").for_each(|t| {
             let tt = t.split("##").collect::<Vec<_>>();
             if tt.len() == 2 {
-                events.push( Event::new("bridge_transaction".to_owned(), vec![
-                    EventAttribute::from(("txid", tt[0], false)),
-                    EventAttribute::from(("psbt", tt[1], false)),
+                events.push( Event::new("initiate_signing_bridge".to_owned(), vec![
+                    EventAttribute::from(("id", tt[0], false)),
+                    EventAttribute::from(("signers", tt[1], false)),
+                    EventAttribute::from(("sig_hashes", tt[1], false)),
                 ]));
             }
         });
