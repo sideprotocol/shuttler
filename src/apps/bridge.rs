@@ -324,7 +324,7 @@ impl SignAdaptor for SignatureHandler {
         let msg = MsgSubmitSignatures {
             sender: ctx.conf.relayer_bitcoin_address(),
             txid: signed_tx.compute_txid().to_string(),
-            psbt: to_base64(&psbt_bytes),
+            signatures: vec![to_base64(&psbt_bytes)],
         };
 
         let any = Any::from_msg(&msg)?;
