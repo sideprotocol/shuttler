@@ -295,6 +295,7 @@ fn test_key_generation() {
     println!("pub: {:?}", keypair.public_key().serialize().as_hex());
 }
 
+
 #[test]
 fn test_key_bitcoin() {
 
