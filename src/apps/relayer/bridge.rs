@@ -1,208 +1,146 @@
-use bitcoin::{consensus::encode, Address, Block, BlockHash, OutPoint, Transaction, Txid};
-use bitcoincore_rpc::{Error, RpcApi};
+use std::sync::{atomic::{AtomicU64, Ordering}, LazyLock};
+
+use bitcoin::{consensus::encode, Address, Block, BlockHash, OutPoint, Psbt, Transaction, Txid};
+use bitcoincore_rpc::RpcApi;
 use tokio::join;
 use tonic::{Response, Status};
 use tracing::{debug, error, info};
 
+use cosmos_sdk_proto::{Any, cosmos::tx::v1beta1::BroadcastTxResponse};
+
 use crate::{
     apps::relayer::Relayer,
     helper::{
-        bitcoin::{self as bitcoin_utils}, client_side::{self, send_cosmos_transaction}, encoding::to_base64, 
+        bitcoin::{self as bitcoin_utils}, client_side::{self, send_cosmos_transaction}, encoding::{from_base64, to_base64}, 
     },
 };
 
-use cosmos_sdk_proto::{Any, cosmos::tx::v1beta1::BroadcastTxResponse };
-use side_proto::side::btcbridge::{
-    BlockHeader, MsgSubmitBlockHeaders, MsgSubmitDepositTransaction, 
-    MsgSubmitFeeRate, MsgSubmitWithdrawTransaction, QueryParamsRequest,
-    query_client::QueryClient as BTCBridgeClient,
-};
-
+use side_proto::{cosmos::base::query::v1beta1::PageRequest, side::btcbridge::{query_client::QueryClient as BridgeQueryClient, QuerySigningRequestRequest, QuerySigningRequestsRequest}};
+use side_proto::side::btcbridge::{MsgSubmitDepositTransaction, MsgSubmitFeeRate, MsgSubmitWithdrawTransaction, QueryParamsRequest, SigningStatus};
 
 const DB_KEY_BITCOIN_TIP: &str = "bitcoin_tip";
 const DB_KEY_VAULTS: &str = "bitcoin_vaults";
 const DB_KEY_VAULTS_LAST_UPDATE: &str = "bitcoin_vaults_last_update";
 
 /// Start relayer tasks
-/// 1. Sync BTC blocks
-/// 2. Scan vault txs
-pub async fn start_relayer_tasks(relayer: Relayer) {
+/// 1. Scan vault txs
+/// 2. Sync signed txs
+/// 3. Submit fee rate
+pub async fn start_relayer_tasks(relayer: &Relayer) {
     join!(
-        sync_btc_blocks(&relayer),
         scan_vault_txs(&relayer),
+        sync_signed_transactions(&relayer),
         submit_fee_rate(&relayer),
     );
 }
 
-pub async fn sync_btc_blocks(relayer: &Relayer) {
-    let interval = relayer.config().loop_interval;
+static SEQUENCE: LazyLock<AtomicU64> = LazyLock::new(|| AtomicU64::new(0));
 
-    let tip_on_bitcoin = match relayer.bitcoin_client.get_block_count() {
-        Ok(height) => height,
+
+pub async fn sync_signed_transactions(relayer: &Relayer) {
+
+    let host = relayer.config().side_chain.grpc.as_str();
+
+    let mut bridge_client = match BridgeQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
         Err(e) => {
-            error!(error=%e);
+            error!("Error: {:?}", e);
             return;
         }
     };
 
-    let mut tip_on_side = match client_side::get_bitcoin_tip_on_side(&relayer.config().side_chain.grpc).await {
-        Ok(res) => res.get_ref().height,
-        Err(e) => {
-            error!(error=%e);
-            return;
-        }
-    };
+    if SEQUENCE.load(Ordering::Relaxed) == 0 {
 
-    if tip_on_bitcoin == tip_on_side {
-        debug!(
-            "No new blocks to sync, tip_on_bitcoin: {}, tip_on_side: {}, sleep for {} seconds...",
-            tip_on_bitcoin, tip_on_side, interval
-        );
-        return
-    }
-    
-    let batch_relayer_count = relayer.config().batch_relayer_count;
-    let batch = if tip_on_side + batch_relayer_count > tip_on_bitcoin {
-        tip_on_bitcoin
-    } else {
-        tip_on_side + batch_relayer_count
-    };
-    debug!("Syncing blocks from {} to {}", tip_on_side, batch);
+        let x = bridge_client.query_signing_requests(QuerySigningRequestsRequest {
+            status: SigningStatus::Broadcasted as i32,
+            pagination: Some(PageRequest {
+                key: vec![],
+                offset: 0,
+                limit: 1,
+                count_total: false,
+                reverse: false,
+            }),
+        }).await;
 
-    // check parent blocks hash before syncing blocks
-    let confirmations = client_side::get_confirmations_on_side(&relayer.config().side_chain.grpc).await;
-    for n in 1..=confirmations {
-        check_block_hash_is_corrent(&relayer, tip_on_side + n - confirmations).await;
-    }
-
-    let mut block_headers: Vec<BlockHeader> = vec![];
-    while tip_on_side < batch {
-        tip_on_side = tip_on_side + 1;
-        let header = match fetch_block_header_by_height(relayer, tip_on_side).await {
-            Ok(header) => header,
+        let resp = match x {
+            Ok(r) => r.into_inner(),
             Err(e) => {
-                error!("Failed to fetch block header: {:?}", e);
-                break;
-            }
-        };
-        block_headers.push(header);
-    }
-    if block_headers.is_empty() {
-        debug!("Block headers is empty, sleep for {} seconds...", interval);
-        return;
-    }
-
-    // submit block headers in a batch
-    match send_block_headers(relayer, &block_headers).await {
-        Ok(resp) => {
-            let tx_response = resp.into_inner().tx_response.unwrap();
-            if tx_response.code != 0 {
-                error!("Failed to send block headers: {:?}", tx_response);
-            } else {
-                info!("Sent block headers: {:?}", tx_response);
-            }
-        }
-        Err(e) => {
-            error!("Failed to send block headers: {:?}", e);
-        }
-    };
-}
-
-pub async fn fetch_block_header_by_height(relayer: &Relayer, height: u64) -> Result<BlockHeader, Error> {
-    let hash = match relayer.bitcoin_client.get_block_hash(height) {
-        Ok(hash) => hash,
-        Err(e) => {
-            error!(error=%e);
-            return Err(e);
-        }
-    };
-
-    let header = match relayer.bitcoin_client.get_block_header(&hash) {
-        Ok(b) => b,
-        Err(e) => {
-            error!(error=%e);
-            return Err(e);
-        }
-    };
-
-    Ok(BlockHeader {
-        version: header.version.to_consensus() as u64,
-        hash: header.block_hash().to_string(),
-        height,
-        previous_block_hash: header.prev_blockhash.to_string(),
-        merkle_root: header.merkle_root.to_string(),
-        nonce: header.nonce as u64,
-        bits: format!("{:x}", header.bits.to_consensus()),
-        time: header.time as u64,
-        ntx: 0u64,
-    })
-}
-
-pub async fn check_block_hash_is_corrent(relayer: &Relayer, height: u64) {
-    let hash = match relayer.bitcoin_client.get_block_hash(height) {
-        Ok(hash) => hash,
-        Err(e) => {
-            error!(error=%e);
-            return;
-        }
-    };
-    let bitcoin_hash = hash.to_string();
-    let side_hash =
-        match client_side::get_bitcoin_block_header_on_side(&relayer.config().side_chain.grpc, height).await {
-            Ok(res) => res.get_ref().block_header.clone().unwrap().hash,
-            Err(e) => {
-                error!(error=%e);
-                return;
-            }
+                error!("Error: {:?}", e);
+                return
+            },
         };
 
-    if side_hash.len() != 0 && bitcoin_hash != side_hash {
-        let header = match relayer.bitcoin_client.get_block_header(&hash) {
-            Ok(b) => b,
-            Err(e) => {
-                error!(error=%e);
-                return;
-            }
-        };
+        println!("{:?}", resp.requests);
 
-        let mut block_headers: Vec<BlockHeader> = vec![];
-        block_headers.push(BlockHeader {
-            version: header.version.to_consensus() as u64,
-            hash: header.block_hash().to_string(),
-            height,
-            previous_block_hash: header.prev_blockhash.to_string(),
-            merkle_root: header.merkle_root.to_string(),
-            nonce: header.nonce as u64,
-            bits: format!("{:x}", header.bits.to_consensus()),
-            time: header.time as u64,
-            ntx: 0u64,
-        });
-
-        match send_block_headers(relayer, &block_headers).await {
-            Ok(_) => {
-                debug!("Resend block headers to fix block hash, {:?}", block_headers.iter().map(|b| b.height).collect::<Vec<_>>());
-                return;
-            }
-            Err(e) => {
-                error!("Failed to resend block headers: {:?}", e);
-                return;
-            }
+        if resp.requests.len() > 0 {
+            let s = resp.requests[0].sequence;
+            if s >= 1 { 
+                // latest sequence on chain
+                SEQUENCE.fetch_add(s, Ordering::Relaxed); 
+            };
         }
+        
     }
-}
 
-pub async fn send_block_headers(
-    relayer: &Relayer,
-    block_headers: &Vec<BlockHeader>,
-) -> Result<Response<BroadcastTxResponse>, Status> {
-    let submit_block_msg = MsgSubmitBlockHeaders {
-        sender: relayer.config().relayer_bitcoin_address().to_string(),
-        block_headers: block_headers.clone(),
-    };
+    let mut sequence = SEQUENCE.load(Ordering::SeqCst); 
 
-    info!("Submitting block headers: {:?}", submit_block_msg);
-    let any_msg = Any::from_msg(&submit_block_msg).unwrap();
-    send_cosmos_transaction(relayer.config(), any_msg).await
+    loop {
+
+        info!("Start sync signed transaction {}", sequence);
+
+        match bridge_client.query_signing_request(QuerySigningRequestRequest { sequence }).await {
+            Ok(r) => {
+
+                if let Some(sr) = r.into_inner().request {
+
+                    if sr.status == SigningStatus::Confirmed as i32 || sr.status == SigningStatus::Failed as i32 {
+                        sequence += 1; 
+                        SEQUENCE.fetch_add( 1, Ordering::SeqCst);
+                        continue;
+                    }
+                    
+                    if sr.status != SigningStatus::Broadcasted as i32 || sr.psbt.len() == 0 {
+                        return
+                    }
+
+                    let psbt_bytes = from_base64(&sr.psbt).unwrap();
+                    let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
+                        Ok(psbt) => psbt,
+                        Err(e) => {
+                            error!("Failed to deserialize PSBT: {}", e);
+                            return;
+                        }
+                    };
+
+                    let signed_tx = psbt.clone().extract_tx().expect("failed to extract signed tx");
+
+                    match relayer.bitcoin_client.send_raw_transaction(&signed_tx) {
+                        Ok(txid) => {
+                            sequence += 1; 
+                            SEQUENCE.fetch_add( 1, Ordering::SeqCst); 
+                            info!("PSBT broadcasted to Bitcoin: {}", txid);
+                        }
+                        Err(err) => {
+                            error! ("Failed to broadcast PSBT: {:?}, err: {:?}", signed_tx.compute_txid(), err);
+                            if err.to_string().contains("Transaction already in block chain") {
+                                sequence += 1; 
+                                SEQUENCE.fetch_add( 1, Ordering::SeqCst);
+                                continue;
+                            }
+                            return;
+                        }
+                    }
+                } else {
+                    return
+                }
+            },
+            Err(e) => {
+                error!("Error: {:?}", e);
+                return
+            } 
+        };
+    }
+
 }
 
 pub async fn scan_vault_txs(relayer: &Relayer) {
@@ -218,23 +156,24 @@ pub async fn scan_vault_txs(relayer: &Relayer) {
             }
         };
 
-    let confirmations = client_side::get_confirmations_on_side(&relayer.config().side_chain.grpc).await;
+    let confirmations = client_side::get_confirmation_depth(&relayer.config().side_chain.grpc).await;
     if height > side_tip - confirmations + 1 {
         debug!("No new txs to sync, height: {}, side tip: {}, sleep for {} seconds...", height, side_tip, interval);
         return;
     }
 
     debug!("Scanning height: {:?}, side tip: {:?}", height, side_tip);
-    scan_vault_txs_by_height(relayer, height).await;
-    save_last_scanned_height(relayer, height);
+    if scan_vault_txs_by_height(relayer, height).await {
+        save_last_scanned_height(relayer, height);
+    }
 }
 
-pub async fn scan_vault_txs_by_height(relayer: &Relayer, height: u64) {
+pub async fn scan_vault_txs_by_height(relayer: &Relayer, height: u64) -> bool {
     let block_hash = match relayer.bitcoin_client.get_block_hash(height) {
         Ok(hash) => hash,
         Err(e) => {
             error!("Failed to get block hash: {:?}, err: {:?}", height, e);
-            return;
+            return false
         }
     };
 
@@ -242,7 +181,7 @@ pub async fn scan_vault_txs_by_height(relayer: &Relayer, height: u64) {
         Ok(block) => block,
         Err(e) => {
             error!("Failed to get block: {}, err: {}", height, e);
-            return;
+            return false;
         }
     };
 
@@ -256,23 +195,39 @@ pub async fn scan_vault_txs_by_height(relayer: &Relayer, height: u64) {
             i
         );
 
-        check_and_handle_tx(relayer, &block_hash, &block, tx, i, &vaults).await
+        check_and_handle_tx_with_retry(relayer, &block_hash, &block, tx, i, &vaults).await;
+    }
+
+    return true;
+}
+
+pub async fn check_and_handle_tx_with_retry(relayer: &Relayer, block_hash: &BlockHash, block: &Block, tx: &Transaction, index: usize, vaults: &Vec<String>) {
+    let mut attempts = 0;
+
+    loop {
+        if check_and_handle_tx(relayer, &block_hash, &block, tx, index, &vaults).await {
+            return;
+        }
+
+        attempts += 1;
+        if attempts >= relayer.config.max_attempts {
+            return;
+        }
     }
 }
 
-pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, block: &Block, tx: &Transaction, index: usize, vaults: &Vec<String>) {
+pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, block: &Block, tx: &Transaction, index: usize, vaults: &Vec<String>) -> bool {
     if bitcoin_utils::may_be_withdraw_tx(&tx) {
         let prev_txid = tx.input[0].previous_output.txid;
         let prev_vout = tx.input[0].previous_output.vout;
 
-        let address = match relayer
-            .bitcoin_client
-            .get_raw_transaction (&prev_txid, None)
-        {
+        let address = match relayer.bitcoin_client.get_raw_transaction (&prev_txid, None) {
             Ok(prev_tx) => {
                 if prev_tx.output.len() <= prev_vout as usize {
                     error!("Invalid previous tx");
-                    return;
+
+                    // continue due to the tx is invalid
+                    return true;
                 }
 
                 match Address::from_script(prev_tx.output[prev_vout as usize].script_pubkey.as_script(), relayer.config().bitcoin.network) {
@@ -308,17 +263,17 @@ pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, bloc
                         let tx_response = resp.into_inner().tx_response.unwrap();
                         if tx_response.code != 0 {
                             error!("Failed to submit withdrawal tx: {:?}", tx_response);
-                            return;
+                            return false;
                         }
     
                         info!("Submitted withdrawal tx: {:?}", tx_response);
+                        return true;
                     }
                     Err(e) => {
                         error!("Failed to submit withdrawal tx: {:?}", e);
+                        return false;
                     }
                 }
-
-                return;
             }
         }
     }
@@ -329,14 +284,16 @@ pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, bloc
         if bitcoin_utils::is_runes_deposit(tx) {
             if !relayer.config().relay_runes {
                 debug!("Skip the tx due to runes relaying not enabled");
-                return;
+                return true;
             }
 
             let edict = match bitcoin_utils::parse_runes(tx) {
                 Some(edict) => edict,
                 None => {
                     debug!("Failed to parse runes deposit tx {}", tx.compute_txid());
-                    return;
+
+                    // continue due to the deposit is invalid
+                    return true; 
                 }
             };
 
@@ -345,7 +302,10 @@ pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, bloc
                 Ok(rune) => rune.entry.spaced_rune,
                 Err(e) => {
                     error!("Failed to get rune {}: {}", edict.id, e);
-                    return;
+
+                    // continue due to the deposit may be invalid
+                    // or this can be correctly handled for other relayers
+                    return true;
                 }
             };
 
@@ -354,14 +314,19 @@ pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, bloc
                 Ok(output) => output,
                 Err(e) => {
                     error!("Failed to get output {}:{} from ord: {}", tx.compute_txid(), edict.output, e);
-                    return;
+
+                    // continue due to the deposit may be invalid
+                    // or this can be correctly handled for other relayers
+                    return true;
                 }
             };
 
             // validate if the runes deposit is valid
             if !bitcoin_utils::validate_runes(&edict, &rune, &output) {
                 debug!("Failed to validate runes deposit tx {}", tx.compute_txid());
-                return;
+
+                // continue due to the deposit is invalid
+                return true;
             }
         }
 
@@ -369,12 +334,8 @@ pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, bloc
             block.txdata.iter().map(|tx| tx.compute_txid()).collect(),
             index,
         );
-
         let prev_txid = tx.input[0].previous_output.txid;
-        let prev_tx = match relayer
-            .bitcoin_client
-            .get_raw_transaction(&prev_txid, None)
-        {
+        let prev_tx = match relayer.bitcoin_client.get_raw_transaction(&prev_txid, None) {
             Ok(prev_tx) => prev_tx,
             Err(e) => {
                 error!(
@@ -382,7 +343,7 @@ pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, bloc
                     prev_txid, e
                 );
 
-                return;
+                return false;
             }
         };
 
@@ -391,23 +352,24 @@ pub async fn check_and_handle_tx(relayer: &Relayer, block_hash: &BlockHash, bloc
                 let tx_response = resp.into_inner().tx_response.unwrap();
                 if tx_response.code != 0 {
                     error!("Failed to submit deposit tx: {:?}", tx_response);
-                    return;
+                    return false;
                 }
 
                 info!("Submitted deposit tx: {:?}", tx_response);
+                return true;
             }
             Err(e) => {
                 error!("Failed to submit deposit tx: {:?}", e);
+                return false;
             }
         }
     }
+
+    return true;
 }
 
 pub async fn check_and_handle_tx_by_hash(relayer: &Relayer, hash: &Txid) {
-    let tx_info = match relayer
-        .bitcoin_client
-        .get_raw_transaction_info(&hash, None)
-    {
+    let tx_info = match relayer.bitcoin_client.get_raw_transaction_info(&hash, None) {
         Ok(tx_info) => tx_info,
         Err(e) => {
             error!(
@@ -438,7 +400,6 @@ pub async fn check_and_handle_tx_by_hash(relayer: &Relayer, hash: &Txid) {
             return;
         }
     };
-
     let block = match relayer.bitcoin_client.get_block(&block_hash) {
         Ok(block) => block,
         Err(e) => {
@@ -451,7 +412,7 @@ pub async fn check_and_handle_tx_by_hash(relayer: &Relayer, hash: &Txid) {
 
     let vaults = get_cached_vaults(relayer).await;
 
-    check_and_handle_tx(relayer, &block_hash, &block, &tx, tx_index, &vaults).await
+    check_and_handle_tx(relayer, &block_hash, &block, &tx, tx_index, &vaults).await;
 }
 
 pub async fn send_withdraw_tx(
@@ -497,10 +458,10 @@ pub async fn send_deposit_tx(
 pub(crate) fn get_last_scanned_height(relayer: &Relayer ) -> u64 {
     match relayer.db_relayer.get(DB_KEY_BITCOIN_TIP) {
         Ok(Some(tip)) => {
-            serde_json::from_slice(&tip).unwrap_or(relayer.config().last_scanned_height)
+            serde_json::from_slice(&tip).unwrap_or(relayer.config().last_scanned_height_bitcoin)
         }
         _ => {
-            relayer.config().last_scanned_height
+            relayer.config().last_scanned_height_bitcoin
         }
     }
 }
@@ -521,7 +482,7 @@ async fn get_cached_vaults(relayer: &Relayer) -> Vec<String> {
     }
 
     let grpc = relayer.config().side_chain.grpc.clone();
-    let mut client = BTCBridgeClient::connect(grpc).await.unwrap();
+    let mut client = side_proto::side::btcbridge::query_client::QueryClient::connect(grpc).await.unwrap();
     let x = client.query_params(QueryParamsRequest{}).await.unwrap().into_inner();
     match x.params {
         Some(params) => {

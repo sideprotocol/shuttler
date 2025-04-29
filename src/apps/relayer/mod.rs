@@ -3,9 +3,11 @@
 use std::time::Duration;
 
 use bitcoincore_rpc::{Auth, Client};
+use futures::join;
 use crate::{config::Config, helper::{client_fee_provider::FeeProviderClient, client_ordinals::OrdinalsClient}};
 
-pub mod tick;
+pub mod bridge;
+pub mod lending;
 
 #[derive(Debug)]
 pub struct Relayer {
@@ -53,5 +55,10 @@ impl Relayer {
         &self.config
     }
 
+    pub async fn start(&self) {
+        join!(
+            bridge::start_relayer_tasks(self),
+            lending::start_relayer_tasks(self),
+        );
+    }
 }
-

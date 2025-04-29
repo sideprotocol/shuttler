@@ -31,12 +31,7 @@ pub enum Commands {
         lending: bool,
         #[clap(long, default_value = "false")]
         seed: bool,
-    },
-    #[command(about = "Submit a bitcoin header to the sidechain")]
-    SubmitHeader {
-        #[clap(long, default_value = "0")]
-        height: u64,
-    },
+    },   
     #[command(about = "Submit a bitcoin transaction to the sidechain")]
     SubmitTx {
         #[clap(long, default_value = "")]
@@ -62,6 +57,5 @@ pub mod init;
 pub mod start;
 pub mod address;
 pub mod reset;
-pub mod submit_header;
 pub mod submit_tx;
 pub mod test;
