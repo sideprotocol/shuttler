@@ -11,7 +11,7 @@ use side_proto::side::btcbridge::{MsgCompleteDkg, MsgSubmitSignatures};
 use crate::apps::{App, Context, Input, SignMode, Status, SubscribeMessage, Task };
 use crate::config::{Config, VaultKeypair, APP_NAME_BRIDGE};
 use crate::helper::bitcoin::get_group_address_by_tweak;
-use crate::helper::encoding::{from_base64, pubkey_to_identifier, to_base64};
+use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier, to_base64};
 
 use crate::helper::store::Store;
 use crate::protocols::dkg::{DKGAdaptor, DKG};
@@ -111,7 +111,8 @@ impl DKGAdaptor for KeygenHander {
             sig_msg.extend(v.as_bytes())
         }
 
-        let signature = hex::encode(ctx.node_key.sign(&sig_msg, None));
+        let message = hex::decode(hash(&sig_msg)).unwrap();
+        let signature = hex::encode(ctx.node_key.sign(message, None));
         let cosm_msg = MsgCompleteDkg {
             id,
             sender: ctx.conf.relayer_bitcoin_address(),

@@ -112,8 +112,8 @@ impl DKGAdaptor for KeygenHander {
             let key_bytes = hex::decode(key).unwrap();
             message_keys.extend(key_bytes);
         };
-        let message = hash(&message_keys);
-        let signature = hex::encode(ctx.node_key.sign(&hex::decode(message).unwrap(), None));
+        let message = hex::decode(hash(&message_keys)).unwrap();
+        let signature = hex::encode(ctx.node_key.sign(&message, None));
 
         let cosm_msg = MsgCompleteDkg {
             id: id,
