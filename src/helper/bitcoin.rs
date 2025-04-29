@@ -1,7 +1,7 @@
 
 use anyhow::anyhow;
 use bitcoin::sighash::{Prevouts, SighashCache};
-use bitcoin::Psbt;
+use bitcoin::{witness, Psbt};
 use bitcoin::{hashes::Hash,
     consensus::encode::serialize, key::Secp256k1, opcodes, Address, Network, PublicKey, ScriptBuf, TapNodeHash, TapSighashType, Transaction, Txid, XOnlyPublicKey
 };
@@ -11,7 +11,7 @@ use ordinals::SpacedRune;
 use tracing::info;
 
 use crate::apps::{Context, Input, SignMode, Task};
-use crate::helper::encoding::from_base64;
+use crate::helper::encoding::{from_base64, to_base64};
 use crate::helper::mem_store;
 use crate::helper::store::Store;
 
@@ -137,6 +137,25 @@ pub fn get_address_from_pk_script(pk_script: ScriptBuf, network: Network) -> Str
         Ok(address) => address.to_string(),
         _ => String::new(),
     }
+}
+
+pub fn get_signed_tx_from_psbt(psbt_base64: &String) -> anyhow::Result<Transaction> {
+    let psbt_bytes = from_base64(&psbt_base64)?;
+
+    let psbt = Psbt::deserialize(psbt_bytes.as_slice())?;
+
+    let signed_tx = psbt.extract_tx()?;
+
+    Ok(signed_tx)
+}
+
+pub fn build_psbt_from_signed_tx(tx: &Transaction) -> String {
+    let mut unsigned_tx = tx.clone();
+    unsigned_tx.input.iter_mut().for_each(|ti| {ti.script_sig = ScriptBuf::new(); ti.witness = witness::Witness::new()});
+    
+    let packet = Psbt::from_unsigned_tx(unsigned_tx).unwrap().serialize();
+
+    to_base64(packet.as_slice())
 }
 
 pub fn compute_tx_proof(txids: Vec<Txid>, index: usize) -> Vec<String> {

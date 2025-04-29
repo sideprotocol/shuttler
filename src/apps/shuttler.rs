@@ -321,7 +321,7 @@ impl<'a> Shuttler<'a> {
     async fn handle_missed_signing_request(&self, ctx: &mut Context) {
 
         let mut tasks = vec![];
-        if let Ok(x) = client_side::get_lending_signing_requests(&ctx.conf.side_chain.grpc).await {
+        if let Ok(x) = client_side::get_tss_signing_requests(&ctx.conf.side_chain.grpc).await {
             x.into_inner().requests.iter().for_each(|r| {
                 if ctx.task_store.exists(&format!("lending-{}", r.id)) {
                     if let Some(create_time) = r.creation_time {

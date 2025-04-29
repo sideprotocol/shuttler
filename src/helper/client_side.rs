@@ -8,9 +8,12 @@ use cosmos_sdk_proto::{Any, cosmos::{
 }};
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_client::ServiceClient as TendermintServiceClient;
 use futures::SinkExt;
+use tendermint::block::Height;
+use tendermint_rpc::{endpoint, Client, HttpClient};
 use tokio::sync::Mutex;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tonic::{Response, Status};
+
 use side_proto::side::{
     oracle::{
         query_client::QueryClient as OracleQueryClient, QueryBlockHeaderByHeightRequest, QueryBlockHeaderByHeightResponse, QueryChainTipRequest, QueryChainTipResponse
@@ -18,8 +21,17 @@ use side_proto::side::{
     btcbridge::{
         query_client::QueryClient as BridgeQueryClient, QueryParamsRequest, QuerySigningRequestByTxHashRequest, QuerySigningRequestByTxHashResponse
     },
-    tss::{query_client::QueryClient as LendingQueryClient, QuerySigningRequestsRequest, QuerySigningRequestsResponse, SigningStatus},
+    tss::{
+        query_client::QueryClient as TssQueryClient, QuerySigningRequestsRequest, QuerySigningRequestsResponse, SigningStatus
+    },
+    lending::{
+        query_client::QueryClient as LendingQueryClient, QueryLoanDlcMetaRequest, QueryLoanDlcMetaResponse, QueryRedemptionRequest, QueryRedemptionResponse
+    },
+    liquidation::{
+        query_client::QueryClient as LiquidationQueryClient, QueryLiquidationRequest, QueryLiquidationResponse
+    },
 };
+
 use tokio_tungstenite::tungstenite::protocol::Message as WebSocketMessage;
 
 use lazy_static::lazy_static;
@@ -177,19 +189,81 @@ pub async fn get_bridge_signing_request_by_txid(host: &str, txid: String) -> Res
     }).await
 }
 
-pub async fn get_lending_signing_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {
-    let mut lending_client = match LendingQueryClient::connect(host.to_string()).await {
+pub async fn get_tss_signing_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {
+    let mut tss_client = match TssQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
         Err(e) => {
             return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
         }
     };
 
-    lending_client.signing_requests(QuerySigningRequestsRequest {
+    tss_client.signing_requests(QuerySigningRequestsRequest {
         module: "".to_string(),
         status: SigningStatus::Pending as i32,
         pagination: None
     }).await
+}
+
+pub async fn get_loan_dlc_meta(host: &str, loan_id: String) -> Result<Response<QueryLoanDlcMetaResponse>, Status> {
+    let mut client = match LendingQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(Status::cancelled(format!("Failed to create lending query client: {}", e)));
+        }
+    };
+
+    client.loan_dlc_meta(QueryLoanDlcMetaRequest {
+        loan_id,
+    }).await
+}
+
+pub async fn get_redemption(host: &str, id: u64) -> Result<Response<QueryRedemptionResponse>, Status> {
+    let mut client = match LendingQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(Status::cancelled(format!("Failed to create lending query client: {}", e)));
+        }
+    };
+
+    client.redemption(QueryRedemptionRequest{
+        id,
+    }).await
+}
+
+pub async fn get_liquidation(host: &str, id: u64) -> Result<Response<QueryLiquidationResponse>, Status> {
+    let mut client = match LiquidationQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(Status::cancelled(format!("Failed to create liquidation query client: {}", e)));
+        }
+    };
+
+    client.liquidation(QueryLiquidationRequest {
+        id,
+    }).await
+}
+
+pub async fn get_latest_block(rpc: &str) -> Result<endpoint::block::Response, tendermint_rpc::Error> {
+    let client = match HttpClient::new(rpc) {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(e);
+        }
+    };
+
+    client.latest_block().await
+}
+
+pub async fn get_block_results(rpc: &str, height: u64) -> Result<endpoint::block_results::Response, tendermint_rpc::Error> {
+    let client = match HttpClient::new(rpc) {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(e);
+        }
+    };
+
+    let block_height = Height::try_from(height).expect("Should be able to be converted safely");
+    client.block_results(block_height).await
 }
 
 pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result<tonic::Response<BroadcastTxResponse>, Status> {

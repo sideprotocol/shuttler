@@ -26,7 +26,7 @@ const DB_KEY_VAULTS_LAST_UPDATE: &str = "bitcoin_vaults_last_update";
 /// 1. Scan vault txs
 /// 2. Sync signed txs
 /// 3. Submit fee rate
-pub async fn start_relayer_tasks(relayer: Relayer) {
+pub async fn start_relayer_tasks(relayer: &Relayer) {
     join!(
         scan_vault_txs(&relayer),
         sync_signed_transactions(&relayer),
@@ -458,10 +458,10 @@ pub async fn send_deposit_tx(
 pub(crate) fn get_last_scanned_height(relayer: &Relayer ) -> u64 {
     match relayer.db_relayer.get(DB_KEY_BITCOIN_TIP) {
         Ok(Some(tip)) => {
-            serde_json::from_slice(&tip).unwrap_or(relayer.config().last_scanned_height)
+            serde_json::from_slice(&tip).unwrap_or(relayer.config().last_scanned_height_bitcoin)
         }
         _ => {
-            relayer.config().last_scanned_height
+            relayer.config().last_scanned_height_bitcoin
         }
     }
 }
