@@ -73,7 +73,7 @@ impl DKGAdaptor for KeygenHander {
                 if events.contains_key("initiate_dkg_bridge.id") {
                     // println!("Events: {:?}", events);
                     let mut tasks = vec![];
-                    for (((id, ps), tweaks ), t)in events.get("initiate_dkg_bridge.id")?.iter()
+                    for (((id, ps), tks ), t)in events.get("initiate_dkg_bridge.id")?.iter()
                         .zip(events.get("initiate_dkg_bridge.participants")?)
                         .zip(events.get("initiate_dkg_bridge.batch_size")?)
                         .zip(events.get("initiate_dkg_bridge.threshold")?) {
@@ -84,11 +84,15 @@ impl DKGAdaptor for KeygenHander {
                                     participants.push(pubkey_to_identifier(&identifier));
                                 }
                             };
-                            if let Ok(threshold) = t.parse() {
-                                if threshold as usize * 3 >= participants.len() * 2  {
-                                    tasks.push(Task::new_dkg_with_tweak(format!("create-vault-{}", id), participants, threshold, tweaks.split(",").map(|t| t.parse::<i32>().unwrap()).collect()));
+                            if let Ok(size) = tks.parse::<i32>() {
+                                let tweaks = (0..size).collect();
+                                if let Ok(threshold) = t.parse() {
+                                    if threshold as usize * 3 >= participants.len() * 2  {
+                                        tasks.push(Task::new_dkg_with_tweak(format!("create-vault-{}", id), participants, threshold,  tweaks));
+                                    }
                                 }
-                            }
+
+                            };
                         };
                     return Some(tasks);
                 }
