@@ -12,8 +12,11 @@ use tokio::sync::Mutex;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tonic::{Response, Status};
 use side_proto::side::{
+    oracle::{
+        query_client::QueryClient as OracleQueryClient, QueryBlockHeaderByHeightRequest, QueryBlockHeaderByHeightResponse, QueryChainTipRequest, QueryChainTipResponse
+    },
     btcbridge::{
-        query_client::QueryClient as BtcQueryClient, QueryBlockHeaderByHeightRequest, QueryBlockHeaderByHeightResponse, QueryChainTipRequest, QueryChainTipResponse, QueryParamsRequest, QuerySigningRequestByTxHashRequest, QuerySigningRequestByTxHashResponse
+        query_client::QueryClient as BridgeQueryClient, QueryParamsRequest, QuerySigningRequestByTxHashRequest, QuerySigningRequestByTxHashResponse
     },
     tss::{query_client::QueryClient as LendingQueryClient, QuerySigningRequestsRequest, QuerySigningRequestsResponse, SigningStatus},
 };
@@ -71,36 +74,82 @@ pub async fn connect_ws_client(endpoint: &str) -> WebSocketStream<MaybeTlsStream
 }
 
 pub async fn get_bitcoin_tip_on_side(host: &str) -> Result<Response<QueryChainTipResponse>, Status> {
-    let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
+    let mut client = match OracleQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
         Err(e) => {
             return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
         }
     };
 
-    btc_client.query_chain_tip(QueryChainTipRequest {}).await
+    client.query_chain_tip(QueryChainTipRequest {}).await
 }
 
 pub async fn get_bitcoin_block_header_on_side(host: &str, height: u64) -> Result<Response<QueryBlockHeaderByHeightResponse>, Status> {
-    let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
+    let mut client = match OracleQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
         Err(e) => {
             return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
         }
     };
 
-    btc_client.query_block_header_by_height(QueryBlockHeaderByHeightRequest { height }).await
+    client.query_block_header_by_height(QueryBlockHeaderByHeightRequest { height }).await
 }
 
-pub async fn get_confirmations_on_side(host: &str) -> u64 {
-    let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
+
+pub async fn get_confirmation_depth(host: &str) -> u64 {
+    // TODO
+    // use deposit confirmation depth for now
+    get_deposit_confirmation_depth(host).await
+}
+
+pub async fn get_deposit_confirmation_depth(host: &str) -> u64 {
+    let mut client = match BridgeQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
         Err(_) => {
-            return 1 as u64;
+            return 6 as u64;
         }
     };
-    let x = btc_client.query_params(QueryParamsRequest{}).await.unwrap().into_inner();
-    x.params.unwrap().confirmations as u64
+
+    let res = match client.query_params(QueryParamsRequest{}).await {
+        Ok(res) => res.into_inner(),
+        Err(_) => {
+            return 6 as u64;
+        }
+    };
+
+    match res.params {
+        Some(params) => { 
+            return params.deposit_confirmation_depth as u64;
+        }
+        None => {
+            return 6 as u64;
+        }
+    };
+}
+
+pub async fn get_withdraw_confirmation_depth(host: &str) -> u64 {
+    let mut client = match BridgeQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(_) => {
+            return 6 as u64;
+        }
+    };
+
+    let res = match client.query_params(QueryParamsRequest{}).await {
+        Ok(res) => res.into_inner(),
+        Err(_) => {
+            return 6 as u64;
+        }
+    };
+
+    match res.params {
+        Some(params) => { 
+            return params.withdraw_confirmation_depth as u64;
+        }
+        None => {
+            return 6 as u64;
+        }
+    };
 }
 
 pub async fn get_latest_validators(host: &str) -> Result<Response<GetLatestValidatorSetResponse>, Status> {
@@ -116,14 +165,14 @@ pub async fn get_latest_validators(host: &str) -> Result<Response<GetLatestValid
 }
 
 pub async fn get_bridge_signing_request_by_txid(host: &str, txid: String) -> Result<Response<QuerySigningRequestByTxHashResponse>, Status> {
-    let mut btc_client = match BtcQueryClient::connect(host.to_string()).await {
+    let mut client = match BridgeQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
         Err(e) => {
             return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
         }
     };
 
-    btc_client.query_signing_request_by_tx_hash(QuerySigningRequestByTxHashRequest {
+    client.query_signing_request_by_tx_hash(QuerySigningRequestByTxHashRequest {
         txid,
     }).await
 }
@@ -288,7 +337,7 @@ async fn test_signature() {
     let msg = MsgSubmitSignatures {
         sender: conf.relayer_bitcoin_address(),
         txid: "abcd".to_string(),
-        psbt: "123".to_string(),
+        signatures: vec!["123".to_string()],
     };
 
     let msg = Any::from_msg(&msg).unwrap();
