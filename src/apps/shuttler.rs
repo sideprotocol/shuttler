@@ -1,8 +1,8 @@
 use std::{
-    hash::{DefaultHasher, Hash, Hasher}, io, str::FromStr, time::Duration
+    hash::{DefaultHasher, Hash, Hasher}, io, str::FromStr, time::{Duration, SystemTime, UNIX_EPOCH}
 };
 
-use chrono::{Local, Timelike};
+use chrono::Local;
 use cosmrs::Any;
 use ed25519_compact::{PublicKey, SecretKey, Signature};
 use futures::stream::StreamExt;
@@ -20,7 +20,7 @@ use crate::{
     config::{candidate::Candidate, Config, APP_NAME_BRIDGE, APP_NAME_LENDING},
     helper::{
         client_side::{self, connect_ws_client, send_cosmos_transaction}, encoding::{from_base64, pubkey_to_identifier}, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store, store::Store
-    }, rpc::run_rpc_server,
+    },
 };
 
 use super::{Input, SignMode, Task};
@@ -479,15 +479,9 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<ShuttlerBehaviour>, conf: &Config) {
 }
 
 fn get_next_full_hour() -> Instant {
-    let now = Local::now();
-    let next_hour = now
-        .with_minute(0)
-        .unwrap()
-        .with_second(0)
-        .unwrap()
-        .with_nanosecond(0)
-        .unwrap()
-        + Duration::from_secs(60 * 60);
-    Instant::now() + Duration::from_secs(next_hour.timestamp() as u64)
+    let window = 300u64;
+    let to = window - SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() % window;
+    Instant::now() + Duration::from_secs(to)
 }
+
 
