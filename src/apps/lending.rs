@@ -120,7 +120,6 @@ impl DKGAdaptor for KeygenHander {
             sender: ctx.conf.relayer_bitcoin_address(),
             pub_keys: pub_keys,
             signature,
-            // consensus_pubkey: to_base64(&ctx.conf.load_validator_key().consensus_pubkey().public_key().to_bytes()),
             consensus_pubkey: ctx.id_base64.clone()
         };
 
@@ -157,8 +156,7 @@ impl SignAdaptor for SignerHandler {
                             let mut sign_inputs = vec![];
                             let participants = keypair.pub_key.verifying_shares().keys().map(|p| p.clone()).collect::<Vec<_>>();
                             
-                            if let Ok(message) = hex::decode(sig_hashes) {
-                                println!("Trigger Price Event Message: {:?}", message.to_lower_hex_string());
+                            if let Ok(message) = from_base64(sig_hashes) {
                                 sign_inputs.insert(sign_inputs.len(), Input::new_with_message_mode(pub_key.to_owned(), message, participants, sign_mode));
                                 let task= Task::new_signing(format!("lending-{}", id), "" , sign_inputs);
                                 tasks.push(task);

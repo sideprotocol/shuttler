@@ -19,7 +19,7 @@ use crate::{
     },
     config::{candidate::Candidate, Config, APP_NAME_BRIDGE, APP_NAME_LENDING},
     helper::{
-        client_side::{self, connect_ws_client, send_cosmos_transaction}, encoding::pubkey_to_identifier, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store, store::Store
+        client_side::{self, connect_ws_client, send_cosmos_transaction}, encoding::{from_base64, pubkey_to_identifier}, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store, store::Store
     }, rpc::run_rpc_server,
 };
 
@@ -203,7 +203,7 @@ impl<'a> Shuttler<'a> {
                     }
                 }
                 _ = ticker.tick() => {
-                    self.handle_missed_signing_request(&mut context).await;
+                    self.handle_missed_tss_signing_request(&mut context).await;
                     self.handle_missed_bridge_signing_request(&mut context).await;
                 }
                 swarm_event = context.swarm.select_next_some() => match swarm_event {
@@ -319,7 +319,7 @@ impl<'a> Shuttler<'a> {
     }
 
     // TODO: Handle missed signing request
-    async fn handle_missed_signing_request(&self, ctx: &mut Context) {
+    async fn handle_missed_tss_signing_request(&self, ctx: &mut Context) {
 
         let mut tasks = vec![];
         if let Ok(x) = client_side::get_tss_signing_requests(&ctx.conf.side_chain.grpc).await {
@@ -355,16 +355,23 @@ impl<'a> Shuttler<'a> {
                         },
                         _ => {},
                     };
-                    let inputs = r.sig_hashes.iter().map(|s| Input::new_with_message_mode(
-                        r.pub_key.clone(), s.clone().into_bytes(), participants.clone(), sign_mode.clone()
-                    )).collect::<Vec<_>>();
-                    let task = Task::new_signing(
-                        format!("lending-{}", r.id),
-                        "",
-                        inputs,
-                    );
-                    ctx.task_store.save(&task.id, &task);
-                    tasks.push(task);
+                    let mut inputs = vec![];
+                    r.sig_hashes.iter().for_each(|s| {
+                        if let Ok(message) = from_base64(s) {
+                            inputs.push(Input::new_with_message_mode(
+                                r.pub_key.clone(), message, participants.clone(), sign_mode.clone()
+                            ))
+                        }
+                    });
+                    if inputs.len() > 0 {
+                        let task = Task::new_signing(
+                            format!("lending-{}", r.id),
+                            "",
+                            inputs,
+                        );
+                        ctx.task_store.save(&task.id, &task);
+                        tasks.push(task);
+                    }
                 };
             });
             
@@ -399,7 +406,7 @@ impl<'a> Shuttler<'a> {
                     r.signers.iter().zip(r.sig_hashes.iter()).for_each(|(s, m)| {
                         if let Some(sign_key) = ctx.keystore.get(s) {
                             let participants = sign_key.pub_key.verifying_shares().keys().cloned().collect::<Vec<_>>();
-                            if let Ok(message) = hex::decode(m) {
+                            if let Ok(message) = from_base64(m) {
                                 inputs.push( Input::new_with_message_mode(
                                     s.to_string(), message, participants.clone(), SignMode::SignWithTweak
                                 ));
