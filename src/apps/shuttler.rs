@@ -370,7 +370,6 @@ impl<'a> Shuttler<'a> {
                             "",
                             inputs,
                         );
-                        ctx.task_store.save(&task.id, &task);
                         tasks.push(task);
                     }
                 };
@@ -417,7 +416,6 @@ impl<'a> Shuttler<'a> {
                     });
                     if inputs.len() > 0 {
                         let task = Task::new_signing( r.txid.clone(), "", inputs);
-                        ctx.task_store.save(&task.id, &task);
                         tasks.push(task);
                     }
                 };
@@ -425,8 +423,8 @@ impl<'a> Shuttler<'a> {
             
         }
         
-        if let Some(lending) = self.apps.iter().find(|a| a.name() == APP_NAME_BRIDGE) {
-            let _ = lending.execute(ctx, tasks);
+        if let Some(app) = self.apps.iter().find(|a| a.name() == APP_NAME_BRIDGE) {
+            let _ = app.execute(ctx, tasks);
         };
 
     }
