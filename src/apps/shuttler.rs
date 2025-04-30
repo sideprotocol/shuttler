@@ -17,7 +17,7 @@ use crate::{
     apps::{
         App, Context, SubscribeMessage
     },
-    config::{candidate::Candidate, Config, APP_NAME_LENDING},
+    config::{candidate::Candidate, Config, APP_NAME_BRIDGE, APP_NAME_LENDING},
     helper::{
         client_side::{self, connect_ws_client, send_cosmos_transaction}, encoding::pubkey_to_identifier, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store, store::Store
     }, rpc::run_rpc_server,
@@ -204,6 +204,7 @@ impl<'a> Shuttler<'a> {
                 }
                 _ = ticker.tick() => {
                     self.handle_missed_signing_request(&mut context).await;
+                    self.handle_missed_bridge_signing_request(&mut context).await;
                 }
                 swarm_event = context.swarm.select_next_some() => match swarm_event {
                     SwarmEvent::Behaviour(ShuttlerBehaviourEvent::Gossip(gossipsub::Event::Message{ message, .. })) => {
@@ -370,6 +371,52 @@ impl<'a> Shuttler<'a> {
         }
         
         if let Some(lending) = self.apps.iter().find(|a| a.name() == APP_NAME_LENDING) {
+            let _ = lending.execute(ctx, tasks);
+        };
+
+    }
+
+    async fn handle_missed_bridge_signing_request(&self, ctx: &mut Context) {
+
+        let mut tasks = vec![];
+        if let Ok(x) = client_side::get_bridge_pending_signing_requests(&ctx.conf.side_chain.grpc).await {
+            x.into_inner().requests.iter().for_each(|r| {
+                if ctx.task_store.exists(&r.txid) {
+                    if let Some(create_time) = r.creation_time {
+                        // remove the task if it is older than 1 hour
+                        // the task will be restarted in the next round
+                        let now = Local::now();
+                        let create_time = create_time.seconds as i64;
+                        let diff = now.timestamp() - create_time;
+                        if diff > 60 * 60  {
+                            ctx.task_store.remove(&r.txid);
+                            return
+                        }
+                    }
+                    return
+                } else {
+                    let mut inputs = vec![];
+                    r.signers.iter().zip(r.sig_hashes.iter()).for_each(|(s, m)| {
+                        if let Some(sign_key) = ctx.keystore.get(s) {
+                            let participants = sign_key.pub_key.verifying_shares().keys().cloned().collect::<Vec<_>>();
+                            if let Ok(message) = hex::decode(m) {
+                                inputs.push( Input::new_with_message_mode(
+                                    s.to_string(), message, participants.clone(), SignMode::SignWithTweak
+                                ));
+                            }
+                        }
+                    });
+                    if inputs.len() > 0 {
+                        let task = Task::new_signing( r.txid.clone(), "", inputs);
+                        ctx.task_store.save(&task.id, &task);
+                        tasks.push(task);
+                    }
+                };
+            });
+            
+        }
+        
+        if let Some(lending) = self.apps.iter().find(|a| a.name() == APP_NAME_BRIDGE) {
             let _ = lending.execute(ctx, tasks);
         };
 

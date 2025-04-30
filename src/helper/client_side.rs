@@ -189,6 +189,17 @@ pub async fn get_bridge_signing_request_by_txid(host: &str, txid: String) -> Res
     }).await
 }
 
+pub async fn get_bridge_pending_signing_requests(host: &str) -> Result<Response<side_proto::side::btcbridge::QueryPendingSigningRequestsResponse>, Status> {
+    let mut client = match BridgeQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
+        }
+    };
+    
+    client.query_pending_signing_requests(side_proto::side::btcbridge::QueryPendingSigningRequestsRequest{pagination: None}).await
+}
+
 pub async fn get_tss_signing_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {
     let mut tss_client = match TssQueryClient::connect(host.to_string()).await {
         Ok(client) => client,
