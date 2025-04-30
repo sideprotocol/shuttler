@@ -180,10 +180,9 @@ impl SignAdaptor for SignatureHandler {
     
                             let mut inputs = vec![];
                             s.split(",").zip(h.split(",")).for_each(|(signer, sig_hash)| {
-
                                 if let Some(keypair) = ctx.keystore.get(&signer.to_string()) {
                                     let participants = keypair.pub_key.verifying_shares().keys().map(|p| p.clone()).collect::<Vec<_>>();
-                                    let input = Input::new_with_message_mode(signer.to_string(), hex::decode(sig_hash).unwrap(), participants, SignMode::SignWithTweak);
+                                    let input = Input::new_with_message_mode(signer.to_string(), from_base64(sig_hash).unwrap(), participants, SignMode::SignWithTweak);
                                     inputs.push(input);
                                 }
                             });
@@ -203,7 +202,7 @@ impl SignAdaptor for SignatureHandler {
         }
 
         let signatures = task.sign_inputs.iter()
-            .map(|input| to_base64(&input.signature.as_ref().unwrap().inner().serialize().unwrap()))
+            .map(|input| hex::encode(&input.signature.as_ref().unwrap().inner().serialize().unwrap()))
             .collect::<Vec<_>>();
         // submit signed psbt to side chain
         let msg = MsgSubmitSignatures {
