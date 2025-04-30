@@ -14,7 +14,7 @@ use crate::{
     helper::{
         encoding::to_base64,
         now,
-        store::{DefaultStore, MemStore},
+        store::{DefaultStore, MemStore, Store},
     },
 };
 
@@ -277,5 +277,14 @@ impl Context {
             db_round1: Round1Store::new(),
             db_round2: Round2Store::new(),
         }
+    }
+
+    pub fn clean_task_cache(&self, task_id: &String) {
+        self.task_store.remove(task_id);
+        self.nonce_store.remove(task_id);
+        self.commitment_store.remove(task_id);
+        self.signature_store.remove(task_id);
+        // self.db_round1.remove(task_id);
+        // self.db_round2.remove(task_id);
     }
 }

@@ -5,7 +5,7 @@ use cosmos_sdk_proto::cosmos::auth::v1beta1::{query_client::QueryClient as AuthQ
 use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 use serde::{Deserialize, Serialize};
 use tendermint_config::PrivValidatorKey;
-use std::{fs, path::PathBuf, str::FromStr, sync::Mutex, time::Duration};
+use std::{fs, path::PathBuf, str::FromStr, sync::Mutex};
 use crate::helper::cipher::random_bytes;
 
 const CONFIG_FILE: &str = "config.toml";

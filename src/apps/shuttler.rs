@@ -2,7 +2,6 @@ use std::{
     hash::{DefaultHasher, Hash, Hasher}, io, str::FromStr, time::{Duration, SystemTime, UNIX_EPOCH}
 };
 
-use chrono::Local;
 use cosmrs::Any;
 use ed25519_compact::{PublicKey, SecretKey, Signature};
 use futures::stream::StreamExt;
@@ -17,7 +16,7 @@ use crate::{
     apps::{
         App, Context, SubscribeMessage
     },
-    config::{candidate::Candidate, Config, APP_NAME_BRIDGE, APP_NAME_LENDING},
+    config::{candidate::Candidate, Config, APP_NAME_BRIDGE, APP_NAME_LENDING, TASK_INTERVAL},
     helper::{
         client_side::{self, connect_ws_client, send_cosmos_transaction}, encoding::{from_base64, pubkey_to_identifier}, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store, store::Store
     },
@@ -327,13 +326,9 @@ impl<'a> Shuttler<'a> {
             x.into_inner().requests.iter().for_each(|r| {
                 if ctx.task_store.exists(&format!("lending-{}", r.id)) {
                     if let Some(create_time) = r.creation_time {
-                        // remove the task if it is older than 1 hour
-                        // the task will be restarted in the next round
-                        let now = Local::now();
-                        let create_time = create_time.seconds as i64;
-                        let diff = now.timestamp() - create_time;
-                        if diff > 60 * 60  {
-                            ctx.task_store.remove(&format!("lending-{}", r.id));
+                        let create_time = create_time.seconds as u64;
+                        if create_time / TASK_INTERVAL % 2 == 1 {
+                            ctx.clean_task_cache(&format!("lending-{}", r.id));
                             return
                         }
                     }
@@ -391,13 +386,9 @@ impl<'a> Shuttler<'a> {
             x.into_inner().requests.iter().for_each(|r| {
                 if ctx.task_store.exists(&r.txid) {
                     if let Some(create_time) = r.creation_time {
-                        // remove the task if it is older than 1 hour
-                        // the task will be restarted in the next round
-                        let now = Local::now();
-                        let create_time = create_time.seconds as i64;
-                        let diff = now.timestamp() - create_time;
-                        if diff > 60 * 60  {
-                            ctx.task_store.remove(&r.txid);
+                        let create_time = create_time.seconds as u64;
+                        if create_time / TASK_INTERVAL % 2 == 1 {
+                            ctx.clean_task_cache(&r.txid);
                             return
                         }
                     }
@@ -477,8 +468,7 @@ fn dail_bootstrap_nodes(swarm: &mut Swarm<ShuttlerBehaviour>, conf: &Config) {
 }
 
 fn get_next_full_hour() -> Instant {
-    let window = 300u64;
-    let to = window - SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() % window;
+    let to = TASK_INTERVAL - SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() % TASK_INTERVAL;
     Instant::now() + Duration::from_secs(to)
 }
 
