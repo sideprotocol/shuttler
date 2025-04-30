@@ -189,7 +189,7 @@ impl<'a> Shuttler<'a> {
         //     run_rpc_server(rpc).await.expect("RPC Server stopped");
         // });
 
-        let mut ticker = tokio::time::interval_at(get_next_full_hour(), Duration::from_secs(60 * 60));
+        let mut ticker = tokio::time::interval_at(get_next_full_hour(), Duration::from_secs(5 * 60));
         loop {
             select! {
                 recv = sidechain_event_stream.next() => {
@@ -323,6 +323,7 @@ impl<'a> Shuttler<'a> {
 
         let mut tasks = vec![];
         if let Ok(x) = client_side::get_tss_signing_requests(&ctx.conf.side_chain.grpc).await {
+            debug!("fetch incompleted signing tasks: {:?}", x.get_ref().requests.iter().map(|r| r.id).collect::<Vec<_>>());
             x.into_inner().requests.iter().for_each(|r| {
                 if ctx.task_store.exists(&format!("lending-{}", r.id)) {
                     if let Some(create_time) = r.creation_time {
@@ -387,6 +388,7 @@ impl<'a> Shuttler<'a> {
 
         let mut tasks = vec![];
         if let Ok(x) = client_side::get_bridge_pending_signing_requests(&ctx.conf.side_chain.grpc).await {
+            debug!("fetch incompleted signing tasks: {:?}", x.get_ref().requests.iter().map(|r| r.txid.clone()).collect::<Vec<_>>());
             x.into_inner().requests.iter().for_each(|r| {
                 if ctx.task_store.exists(&r.txid) {
                     if let Some(create_time) = r.creation_time {
