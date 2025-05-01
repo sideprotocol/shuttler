@@ -53,117 +53,136 @@ static SEQUENCE: LazyLock<AtomicU64> = LazyLock::new(|| AtomicU64::new(0));
 
 pub async fn sync_signed_transactions(relayer: &Relayer) {
     let host = relayer.config().side_chain.grpc.as_str();
-
-    let mut bridge_client = match BridgeQueryClient::connect(host.to_string()).await {
-        Ok(client) => client,
-        Err(e) => {
-            error!("Error: {:?}", e);
-            return;
-        }
-    };
-
-    if SEQUENCE.load(Ordering::Relaxed) == 0 {
-        let x = bridge_client
-            .query_signing_requests(QuerySigningRequestsRequest {
-                status: SigningStatus::Broadcasted as i32,
-                pagination: Some(PageRequest {
-                    key: vec![],
-                    offset: 0,
-                    limit: 1,
-                    count_total: false,
-                    reverse: false,
-                }),
-            })
-            .await;
-
-        let resp = match x {
-            Ok(r) => r.into_inner(),
-            Err(e) => {
-                error!("Error: {:?}", e);
-                return;
-            }
-        };
-
-        println!("{:?}", resp.requests);
-
-        if resp.requests.len() > 0 {
-            let s = resp.requests[0].sequence;
-            if s >= 1 {
-                // latest sequence on chain
-                SEQUENCE.fetch_add(s, Ordering::Relaxed);
-            };
-        }
-    }
-
-    let mut sequence = SEQUENCE.load(Ordering::SeqCst);
+    let interval = relayer.config().loop_interval;
 
     loop {
-        info!("Start sync signed transaction {}", sequence);
-
-        match bridge_client
-            .query_signing_request(QuerySigningRequestRequest { sequence })
-            .await
-        {
-            Ok(r) => {
-                if let Some(sr) = r.into_inner().request {
-                    if sr.status == SigningStatus::Confirmed as i32
-                        || sr.status == SigningStatus::Failed as i32
-                    {
-                        sequence += 1;
-                        SEQUENCE.fetch_add(1, Ordering::SeqCst);
-                        continue;
-                    }
-
-                    if sr.status != SigningStatus::Broadcasted as i32 || sr.psbt.len() == 0 {
-                        return;
-                    }
-
-                    let psbt_bytes = from_base64(&sr.psbt).unwrap();
-                    let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
-                        Ok(psbt) => psbt,
-                        Err(e) => {
-                            error!("Failed to deserialize PSBT: {}", e);
-                            return;
-                        }
-                    };
-
-                    let signed_tx = psbt
-                        .clone()
-                        .extract_tx()
-                        .expect("failed to extract signed tx");
-
-                    match relayer.bitcoin_client.send_raw_transaction(&signed_tx) {
-                        Ok(txid) => {
-                            sequence += 1;
-                            SEQUENCE.fetch_add(1, Ordering::SeqCst);
-                            info!("PSBT broadcasted to Bitcoin: {}", txid);
-                        }
-                        Err(err) => {
-                            error!(
-                                "Failed to broadcast PSBT: {:?}, err: {:?}",
-                                signed_tx.compute_txid(),
-                                err
-                            );
-                            if err
-                                .to_string()
-                                .contains("Transaction already in block chain")
-                            {
-                                sequence += 1;
-                                SEQUENCE.fetch_add(1, Ordering::SeqCst);
-                                continue;
-                            }
-                            return;
-                        }
-                    }
-                } else {
-                    return;
-                }
-            }
+        let mut bridge_client = match BridgeQueryClient::connect(host.to_string()).await {
+            Ok(client) => client,
             Err(e) => {
                 error!("Error: {:?}", e);
-                return;
+                continue;
             }
         };
+
+        if SEQUENCE.load(Ordering::Relaxed) == 0 {
+            let x = bridge_client
+                .query_signing_requests(QuerySigningRequestsRequest {
+                    status: SigningStatus::Broadcasted as i32,
+                    pagination: Some(PageRequest {
+                        key: vec![],
+                        offset: 0,
+                        limit: 1,
+                        count_total: false,
+                        reverse: false,
+                    }),
+                })
+                .await;
+
+            let resp = match x {
+                Ok(r) => r.into_inner(),
+                Err(e) => {
+                    error!("Error: {:?}", e);
+                    continue;
+                }
+            };
+
+            println!("signed txs: {:?}", resp.requests.len());
+
+            if resp.requests.len() > 0 {
+                let s = resp.requests[0].sequence;
+                if s >= 1 {
+                    // latest sequence on chain
+                    SEQUENCE.fetch_add(s, Ordering::Relaxed);
+                }
+            } else {
+                sleep(Duration::from_secs(interval)).await;
+                continue;
+            }
+        }
+
+        loop {
+            let mut sequence = SEQUENCE.load(Ordering::SeqCst);
+
+            info!("Start syncing signed transaction {}", sequence);
+
+            match bridge_client
+                .query_signing_request(QuerySigningRequestRequest { sequence })
+                .await
+            {
+                Ok(r) => {
+                    if let Some(sr) = r.into_inner().request {
+                        if sr.status == SigningStatus::Unspecified as i32 {
+                            sleep(Duration::from_secs(interval)).await;
+                            continue;
+                        }
+                        if sr.status == SigningStatus::Confirmed as i32
+                            || sr.status == SigningStatus::Failed as i32
+                        {
+                            sequence += 1;
+                            SEQUENCE.fetch_add(1, Ordering::SeqCst);
+                            continue;
+                        }
+
+                        if sr.status != SigningStatus::Broadcasted as i32 || sr.psbt.len() == 0 {
+                            sequence += 1;
+                            SEQUENCE.fetch_add(1, Ordering::SeqCst);
+                            continue;
+                        }
+
+                        let psbt_bytes = from_base64(&sr.psbt).unwrap();
+                        let psbt = match Psbt::deserialize(psbt_bytes.as_slice()) {
+                            Ok(psbt) => psbt,
+                            Err(e) => {
+                                error!("Failed to deserialize PSBT: {}", e);
+                                continue;
+                            }
+                        };
+
+                        let signed_tx = psbt
+                            .clone()
+                            .extract_tx()
+                            .expect("failed to extract signed tx");
+
+                        match relayer.bitcoin_client.send_raw_transaction(&signed_tx) {
+                            Ok(txid) => {
+                                sequence += 1;
+                                SEQUENCE.fetch_add(1, Ordering::SeqCst);
+                                
+                                info!("PSBT broadcasted to Bitcoin: {}", txid);
+                            }
+                            Err(err) => {
+                                error!(
+                                    "Failed to broadcast PSBT: {:?}, err: {:?}",
+                                    signed_tx.compute_txid(),
+                                    err
+                                );
+
+                                if err
+                                    .to_string()
+                                    .contains("Transaction already in block chain")
+                                {
+                                    sequence += 1;
+                                    SEQUENCE.fetch_add(1, Ordering::SeqCst);
+                                }
+
+                                if err
+                                    .to_string()
+                                    .contains("Transaction outputs already in utxo set")
+                                {
+                                    sequence += 1;
+                                    SEQUENCE.fetch_add(1, Ordering::SeqCst);
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Error: {:?}", e);
+                }
+            };
+
+            continue;
+        }
     }
 }
 
