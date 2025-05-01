@@ -322,12 +322,12 @@ impl<'a> Shuttler<'a> {
 
         let mut tasks = vec![];
         if let Ok(x) = client_side::get_tss_signing_requests(&ctx.conf.side_chain.grpc).await {
-            debug!("fetch incompleted signing tasks: {:?}", x.get_ref().requests.iter().map(|r| r.id).collect::<Vec<_>>());
+            debug!("fetch incompleted tss signing tasks: {:?}", x.get_ref().requests.iter().map(|r| r.id).collect::<Vec<_>>());
             x.into_inner().requests.iter().for_each(|r| {
                 if ctx.task_store.exists(&format!("lending-{}", r.id)) {
                     if let Some(create_time) = r.creation_time {
                         let create_time = create_time.seconds as u64;
-                        if create_time / TASK_INTERVAL % 2 == 1 {
+                        if (crate::helper::now() - create_time) / TASK_INTERVAL % 2 == 1 {
                             ctx.clean_task_cache(&format!("lending-{}", r.id));
                             return
                         }
@@ -382,12 +382,12 @@ impl<'a> Shuttler<'a> {
 
         let mut tasks = vec![];
         if let Ok(x) = client_side::get_bridge_pending_signing_requests(&ctx.conf.side_chain.grpc).await {
-            debug!("fetch incompleted signing tasks: {:?}", x.get_ref().requests.iter().map(|r| r.txid.clone()).collect::<Vec<_>>());
+            debug!("fetch incompleted bridge signing tasks: {:?}", x.get_ref().requests.iter().map(|r| r.txid.clone()).collect::<Vec<_>>());
             x.into_inner().requests.iter().for_each(|r| {
                 if ctx.task_store.exists(&r.txid) {
                     if let Some(create_time) = r.creation_time {
                         let create_time = create_time.seconds as u64;
-                        if create_time / TASK_INTERVAL % 2 == 1 {
+                        if (crate::helper::now() - create_time) / TASK_INTERVAL % 2 == 1 {
                             ctx.clean_task_cache(&r.txid);
                             return
                         }
