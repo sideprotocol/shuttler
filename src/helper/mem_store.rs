@@ -32,9 +32,17 @@ lazy_static! {
     };
 }
 
+pub fn alive_participants() -> Vec<Identifier> {
+    let table= AliveTable.lock().unwrap();
+        // tracing::debug!("alive: {:?}", table);
+        table.keys()
+            .map(|k| k.clone())
+            .collect::<Vec<_>>()
+}
+
 pub fn update_alive_table(self_identifier: &Identifier, alive: HeartBeatMessage) {
 
-    tracing::debug!("{:?} {}, {} ", alive.payload.identifier, alive.payload.block_height, if alive.payload.last_seen > now() {alive.payload.last_seen - now()} else {0} );
+    // tracing::debug!("{:?} {}, {} ", alive.payload.identifier, alive.payload.block_height, if alive.payload.last_seen > now() {alive.payload.last_seen - now()} else {0} );
     if alive.payload.last_seen < now() { return }
 
     let mut table= AliveTable.lock().unwrap();
