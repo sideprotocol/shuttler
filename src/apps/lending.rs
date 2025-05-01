@@ -1,12 +1,11 @@
 
 
-use bitcoin::hex::DisplayHex;
 use cosmrs::Any;
 use side_proto::side::tss::{MsgCompleteDkg, MsgSubmitSignatures};
 use tracing::debug;
 
 use crate::config::{VaultKeypair, APP_NAME_LENDING};
-use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier, to_base64};
+use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier};
 use crate::helper::mem_store;
 use crate::helper::store::Store;
 use crate::protocols::sign::{SignAdaptor, StandardSigner};

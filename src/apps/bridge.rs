@@ -11,7 +11,7 @@ use side_proto::side::btcbridge::{MsgCompleteDkg, MsgSubmitSignatures};
 use crate::apps::{App, Context, Input, SignMode, Status, SubscribeMessage, Task };
 use crate::config::{Config, VaultKeypair, APP_NAME_BRIDGE};
 use crate::helper::bitcoin::get_group_address_by_tweak;
-use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier, to_base64};
+use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier};
 
 use crate::helper::mem_store;
 use crate::helper::store::Store;
