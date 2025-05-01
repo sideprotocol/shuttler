@@ -13,6 +13,7 @@ use crate::config::{Config, VaultKeypair, APP_NAME_BRIDGE};
 use crate::helper::bitcoin::get_group_address_by_tweak;
 use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier, to_base64};
 
+use crate::helper::mem_store;
 use crate::helper::store::Store;
 use crate::protocols::dkg::{DKGAdaptor, DKG};
 use crate::protocols::sign::{SignAdaptor, StandardSigner};
@@ -180,8 +181,8 @@ impl SignAdaptor for SignatureHandler {
     
                             let mut inputs = vec![];
                             s.split(",").zip(h.split(",")).for_each(|(signer, sig_hash)| {
-                                if let Some(keypair) = ctx.keystore.get(&signer.to_string()) {
-                                    let participants = keypair.pub_key.verifying_shares().keys().map(|p| p.clone()).collect::<Vec<_>>();
+                                let participants = mem_store::count_task_participants(ctx, &signer.to_string());
+                                if participants.len() > 0 {
                                     let input = Input::new_with_message_mode(signer.to_string(), from_base64(sig_hash).unwrap(), participants, SignMode::SignWithTweak);
                                     inputs.push(input);
                                 }

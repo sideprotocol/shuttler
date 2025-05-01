@@ -333,8 +333,7 @@ impl<'a> Shuttler<'a> {
                         }
                     }
                     return
-                } else if let Some(ami) = ctx.keystore.get(&r.pub_key) {
-                    let participants = ami.pub_key.verifying_shares().keys().cloned().collect::<Vec<_>>();
+                } else {
                     // parse the nonce from r.options.unwrap().
                     // r.r#type().
                     let mut sign_mode = SignMode::Sign;
@@ -354,9 +353,10 @@ impl<'a> Shuttler<'a> {
                     let mut inputs = vec![];
                     r.sig_hashes.iter().for_each(|s| {
                         if let Ok(message) = from_base64(s) {
-                            inputs.push(Input::new_with_message_mode(
-                                r.pub_key.clone(), message, participants.clone(), sign_mode.clone()
-                            ))
+                            let participants = mem_store::count_task_participants(ctx, &r.pub_key);
+                            if participants.len() > 0 {
+                                inputs.push(Input::new_with_message_mode( r.pub_key.clone(), message, participants, sign_mode.clone() ))
+                            }
                         }
                     });
                     if inputs.len() > 0 {
@@ -396,12 +396,10 @@ impl<'a> Shuttler<'a> {
                 } else {
                     let mut inputs = vec![];
                     r.signers.iter().zip(r.sig_hashes.iter()).for_each(|(s, m)| {
-                        if let Some(sign_key) = ctx.keystore.get(s) {
-                            let participants = sign_key.pub_key.verifying_shares().keys().cloned().collect::<Vec<_>>();
+                        let participants = mem_store::count_task_participants(ctx, s);
+                        if participants.len() > 0 {
                             if let Ok(message) = from_base64(m) {
-                                inputs.push( Input::new_with_message_mode(
-                                    s.to_string(), message, participants.clone(), SignMode::SignWithTweak
-                                ));
+                                inputs.push( Input::new_with_message_mode(s.to_string(), message, participants.clone(), SignMode::SignWithTweak));
                             }
                         }
                     });
