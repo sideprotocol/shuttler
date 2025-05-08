@@ -1,12 +1,12 @@
 
 
-use bitcoin::hex::DisplayHex;
 use cosmrs::Any;
 use side_proto::side::tss::{MsgCompleteDkg, MsgSubmitSignatures};
 use tracing::debug;
 
 use crate::config::{VaultKeypair, APP_NAME_LENDING};
-use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier, to_base64};
+use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier};
+use crate::helper::mem_store;
 use crate::helper::store::Store;
 use crate::protocols::sign::{SignAdaptor, StandardSigner};
 use crate::protocols::dkg::{DKGAdaptor, DKG};
@@ -143,24 +143,23 @@ impl SignAdaptor for SignerHandler {
                     .zip(events.get("initiate_signing.type")?)
                     .zip(events.get("initiate_signing.option")?) {
 
-                        if let Some(keypair) = ctx.keystore.get(&pub_key) {
-                            let mut sign_mode = SignMode::Sign;
-                            if let Some(nonce_keypair) = ctx.keystore.get(&option) {                          
-                                if mode.eq("1") {
-                                    sign_mode = SignMode::SignWithGroupcommitment(nonce_keypair.pub_key.verifying_key().clone())
-                                } else if mode.eq("2") {
-                                    sign_mode = SignMode::SignWithAdaptorPoint(nonce_keypair.pub_key.verifying_key().clone())
-                                };
-                            }
+                        let mut sign_mode = SignMode::Sign;
+                        if let Some(nonce_keypair) = ctx.keystore.get(&option) {                          
+                            if mode.eq("1") {
+                                sign_mode = SignMode::SignWithGroupcommitment(nonce_keypair.pub_key.verifying_key().clone())
+                            } else if mode.eq("2") {
+                                sign_mode = SignMode::SignWithAdaptorPoint(nonce_keypair.pub_key.verifying_key().clone())
+                            };
+                        }
 
-                            let mut sign_inputs = vec![];
-                            let participants = keypair.pub_key.verifying_shares().keys().map(|p| p.clone()).collect::<Vec<_>>();
-                            
-                            if let Ok(message) = from_base64(sig_hashes) {
+                        let mut sign_inputs = vec![];
+                        if let Ok(message) = from_base64(sig_hashes) {
+                            let participants = mem_store::count_task_participants(ctx, pub_key);
+                            if participants.len() > 0 {
                                 sign_inputs.insert(sign_inputs.len(), Input::new_with_message_mode(pub_key.to_owned(), message, participants, sign_mode));
                                 let task= Task::new_signing(format!("lending-{}", id), "" , sign_inputs);
                                 tasks.push(task);
-                            }   
+                            }
                         }
                     };
                 return Some(tasks);
