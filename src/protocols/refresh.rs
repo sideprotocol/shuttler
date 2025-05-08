@@ -71,8 +71,8 @@ pub struct RefreshMessage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RefreshPayload {
-    Round1(Data<round1::Package>),
-    Round2(Data<BTreeMap<Identifier, Vec<u8>>>)
+    Round1(Data<Vec<(String, round1::Package)>>),
+    Round2(Data<Vec<(String, BTreeMap<Identifier, Vec<u8>>)>>)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,7 +208,7 @@ impl<H> Refresh<H> where H: RefreshAdaptor {
 
     }
 
-    fn received_round1_packages(&self, ctx: &mut Context, packets: Data<round1::Package>) {
+    fn received_round1_packages(&self, ctx: &mut Context, packets: Data<(String, round1::Package)>) {
 
         let task_id = &packets.task_id;
         // store round 1 packets
@@ -256,6 +256,7 @@ impl<H> Refresh<H> where H: RefreshAdaptor {
             Some(t) => t.clone(),
             None => return,
         };
+
         let mut local = ctx.db_round2.get(task_id).unwrap_or(BTreeMap::new()); 
         local.insert(packets.sender, vec![data]);
         ctx.db_round2.save(&task_id, &local);
