@@ -152,11 +152,16 @@ impl SignAdaptor for SignerHandler {
                             };
                         }
 
-                        let mut sign_inputs = vec![];
-                        if let Ok(message) = from_base64(sig_hashes) {
-                            let participants = mem_store::count_task_participants(ctx, pub_key);
-                            if participants.len() > 0 {
-                                sign_inputs.insert(sign_inputs.len(), Input::new_with_message_mode(pub_key.to_owned(), message, participants, sign_mode));
+                        let participants = mem_store::count_task_participants(ctx, pub_key);
+                        if participants.len() > 0 {
+                            let mut sign_inputs = vec![];
+                            sig_hashes.split(",").enumerate().for_each(|(index, sig)| {
+                                if let Ok(message) = from_base64(sig) {
+                                        sign_inputs.insert(index, Input::new_with_message_mode(pub_key.clone(), message, participants.clone(), sign_mode.clone()));
+                                    }
+                                }
+                            );
+                            if sign_inputs.len() > 0 {
                                 let task= Task::new_signing(format!("lending-{}", id), "" , sign_inputs);
                                 tasks.push(task);
                             }
