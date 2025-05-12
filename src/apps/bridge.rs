@@ -16,6 +16,7 @@ use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier};
 use crate::helper::mem_store;
 use crate::helper::store::Store;
 use crate::protocols::dkg::{DKGAdaptor, DKG};
+use crate::protocols::refresh::{ParticipantRefresher, RefreshAdaptor};
 use crate::protocols::sign::{SignAdaptor, StandardSigner};
 
 use super::event::get_attribute_value;
@@ -26,6 +27,7 @@ pub struct BridgeApp {
     pub bitcoin_client: Client,
     pub keygen: DKG<KeygenHander>,
     pub signer: StandardSigner<SignatureHandler>,
+    pub refresh: ParticipantRefresher<RefreshHandler>
 }
 
 impl BridgeApp {
@@ -40,6 +42,7 @@ impl BridgeApp {
             bitcoin_client,
             keygen: DKG::new("bridge_dkg", KeygenHander{}),
             signer: StandardSigner::new("bridge_signing", SignatureHandler{}),
+            refresh: ParticipantRefresher::new("bridge_refresh", RefreshHandler{})
         }
     }  
 }
@@ -51,15 +54,17 @@ impl App for BridgeApp {
     fn on_message(&self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()> {
         // debug!("Received {:?}", message);
         self.keygen.on_message(ctx, message)?;
+        self.refresh.on_message(ctx, message)?;
         self.signer.on_message(ctx, message)
     }
     
     fn subscribe_topics(&self) -> Vec<IdentTopic> {
-        vec![self.keygen.topic(), self.signer.topic()]
+        vec![self.keygen.topic(), self.signer.topic(), self.refresh.topic()]
     }
     fn on_event(&self, ctx: &mut Context, event: &SideEvent) {
         self.keygen.on_event(ctx, event);
         self.signer.on_event(ctx, event);
+        self.refresh.on_event(ctx, event);
     }
     fn execute(&self, ctx: &mut Context, tasks: Vec<Task>) -> anyhow::Result<()> {
         self.signer.execute(ctx, &tasks);
@@ -251,5 +256,16 @@ impl SignAdaptor for SignatureHandler {
         ctx.task_store.save(&task.id, &task);
 
         anyhow::Ok(())
+    }
+}
+
+pub struct RefreshHandler;
+impl RefreshAdaptor for RefreshHandler {
+    fn new_task(&self, ctx: &mut Context, events: &SideEvent) -> Option<Vec<Task>> {
+        todo!()
+    }
+
+    fn on_complete(&self, ctx: &mut Context, task: &mut Task, keys: Vec<(frost_adaptor_signature::keys::KeyPackage, frost_adaptor_signature::keys::PublicKeyPackage)>) {
+        todo!()
     }
 }
