@@ -18,6 +18,7 @@ use crate::helper::store::Store;
 use crate::protocols::dkg::{DKGAdaptor, DKG};
 use crate::protocols::sign::{SignAdaptor, StandardSigner};
 
+use super::event::get_attribute_value;
 use super::{SideEvent, TaskInput};
 
 // #[derive(Debug)]
@@ -197,7 +198,26 @@ impl SignAdaptor for SignatureHandler {
                     return Some(tasks);
                 }
             },
-            _ => {},
+            SideEvent::TxEvent(events) => {
+                let mut tasks = vec![];
+                for e in events.iter().filter(|e| e.kind == "initiate_signing_bridge") {
+                    let id = get_attribute_value(&e.attributes, "id")?;
+                    let s = get_attribute_value(&e.attributes, "signers")?;
+                    let h = get_attribute_value(&e.attributes, "sig_hashes")?;
+
+                    let mut inputs = vec![];
+                    s.split(",").zip(h.split(",")).for_each(|(signer, sig_hash)| {
+                        let participants = mem_store::count_task_participants(ctx, &signer.to_string());
+                        if participants.len() > 0 {
+                            let input = Input::new_with_message_mode(signer.to_string(), from_base64(sig_hash).unwrap(), participants, SignMode::SignWithTweak);
+                            inputs.push(input);
+                        }
+                    });
+                    tasks.push( Task::new_signing(id.to_string(), "", inputs));
+                }
+                return Some(tasks);
+            },
+
         }
         None
     }

@@ -15,6 +15,7 @@ use crate::protocols::dkg::{DKGAdaptor, DKG};
 
 use crate::apps::{App, Context, FrostSignature, Input, SignMode, SubscribeMessage, Task};
 
+use super::event::get_attribute_value;
 use super::{SideEvent, TaskInput};
 
 pub struct LendingApp {
@@ -142,47 +143,88 @@ impl DKGAdaptor for KeygenHander {
 pub struct SignerHandler{}
 impl SignAdaptor for SignerHandler {
     fn new_task(&self, ctx: &mut Context, event: &SideEvent) -> Option<Vec<Task>> {
-        if let SideEvent::BlockEvent(events) = event {
-            if events.contains_key("initiate_signing.id") {
-                println!("Trigger Price Event: {:?}", events);
-                let mut tasks = vec![];
-                for ((((id, pub_key), sig_hashes), mode), option ) in events.get("initiate_signing.id")?.iter()
-                    .zip(events.get("initiate_signing.pub_key")?)
-                    .zip(events.get("initiate_signing.sig_hashes")?)
-                    .zip(events.get("initiate_signing.type")?)
-                    .zip(events.get("initiate_signing.option")?) {
-
-                        let mut sign_mode = SignMode::Sign;                      
-                        if mode.eq(SigningType::SchnorrWithCommitment.as_str_name()) {
-                            if let Some(nonce_keypair) = ctx.keystore.get(&option) {    
-                                sign_mode = SignMode::SignWithGroupcommitment(nonce_keypair.pub_key.verifying_key().clone())
-                            }
-                        } else if mode.eq(SigningType::SchnorrAdaptor.as_str_name()) {
-                            let hex_adaptor = hex::decode(&option).ok()?;
-                            if let Ok(adaptor) = VerifyingKey::deserialize(&hex_adaptor) {
-                                // let mode = SignMode::SignWithAdaptorPoint(adaptor);    
-                                sign_mode = SignMode::SignWithAdaptorPoint(adaptor)
+        match event {
+            SideEvent::BlockEvent( events) => {
+                if events.contains_key("initiate_signing.id") {
+                    let mut tasks = vec![];
+                    for ((((id, pub_key), sig_hashes), mode), option ) in events.get("initiate_signing.id")?.iter()
+                        .zip(events.get("initiate_signing.pub_key")?)
+                        .zip(events.get("initiate_signing.sig_hashes")?)
+                        .zip(events.get("initiate_signing.type")?)
+                        .zip(events.get("initiate_signing.option")?) {
+    
+                            let mut sign_mode = SignMode::Sign;                      
+                            if mode.eq(SigningType::SchnorrWithCommitment.as_str_name()) {
+                                if let Some(nonce_keypair) = ctx.keystore.get(&option) {    
+                                    sign_mode = SignMode::SignWithGroupcommitment(nonce_keypair.pub_key.verifying_key().clone())
+                                }
+                            } else if mode.eq(SigningType::SchnorrAdaptor.as_str_name()) {
+                                let hex_adaptor = hex::decode(&option).ok()?;
+                                if let Ok(adaptor) = VerifyingKey::deserialize(&hex_adaptor) {
+                                    // let mode = SignMode::SignWithAdaptorPoint(adaptor);    
+                                    sign_mode = SignMode::SignWithAdaptorPoint(adaptor)
+                                }
+                            };
+    
+                            let participants = mem_store::count_task_participants(ctx, pub_key);
+                            if participants.len() > 0 {
+                                let mut sign_inputs = vec![];
+                                sig_hashes.split(",").enumerate().for_each(|(index, sig)| {
+                                    if let Ok(message) = from_base64(sig) {
+                                            sign_inputs.insert(index, Input::new_with_message_mode(pub_key.clone(), message, participants.clone(), sign_mode.clone()));
+                                        }
+                                    }
+                                );
+                                if sign_inputs.len() > 0 {
+                                    let task= Task::new_signing(format!("lending-{}", id), "" , sign_inputs);
+                                    tasks.push(task);
+                                }
                             }
                         };
+                    return Some(tasks);
+                }
+            },
+            SideEvent::TxEvent(events) => {
+                let mut tasks = vec![];
+                for e in events.iter().filter(|e| e.kind == "initiate_signing") {
+                    let id = get_attribute_value(&e.attributes, "id")?;
+                    let pub_key = get_attribute_value(&e.attributes, "pub_key")?;
+                    let mode = get_attribute_value(&e.attributes, "type")?;
+                    let sig_hashes = get_attribute_value(&e.attributes, "sig_hashes")?;
+                    let option = get_attribute_value(&e.attributes, "option")?;
 
-                        let participants = mem_store::count_task_participants(ctx, pub_key);
-                        if participants.len() > 0 {
-                            let mut sign_inputs = vec![];
-                            sig_hashes.split(",").enumerate().for_each(|(index, sig)| {
-                                if let Ok(message) = from_base64(sig) {
-                                        sign_inputs.insert(index, Input::new_with_message_mode(pub_key.clone(), message, participants.clone(), sign_mode.clone()));
-                                    }
-                                }
-                            );
-                            if sign_inputs.len() > 0 {
-                                let task= Task::new_signing(format!("lending-{}", id), "" , sign_inputs);
-                                tasks.push(task);
-                            }
+                    let mut sign_mode = SignMode::Sign;                      
+                    if mode.eq(SigningType::SchnorrWithCommitment.as_str_name()) {
+                        if let Some(nonce_keypair) = ctx.keystore.get(&option) {    
+                            sign_mode = SignMode::SignWithGroupcommitment(nonce_keypair.pub_key.verifying_key().clone())
+                        }
+                    } else if mode.eq(SigningType::SchnorrAdaptor.as_str_name()) {
+                        let hex_adaptor = hex::decode(&option).ok()?;
+                        if let Ok(adaptor) = VerifyingKey::deserialize(&hex_adaptor) {
+                            // let mode = SignMode::SignWithAdaptorPoint(adaptor);    
+                            sign_mode = SignMode::SignWithAdaptorPoint(adaptor)
                         }
                     };
+
+                    let participants = mem_store::count_task_participants(ctx, &pub_key);
+                    if participants.len() > 0 {
+                        let mut sign_inputs = vec![];
+                        sig_hashes.split(",").enumerate().for_each(|(index, sig)| {
+                            if let Ok(message) = from_base64(sig) {
+                                    sign_inputs.insert(index, Input::new_with_message_mode(pub_key.clone(), message, participants.clone(), sign_mode.clone()));
+                                }
+                            }
+                        );
+                        if sign_inputs.len() > 0 {
+                            let task= Task::new_signing(format!("lending-{}", id), "" , sign_inputs);
+                            tasks.push(task);
+                        }
+                    }
+                }
                 return Some(tasks);
             }
         }
+        
         None
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task)-> anyhow::Result<()> {
