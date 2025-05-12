@@ -252,7 +252,7 @@ impl SignAdaptor for SignatureHandler {
 
         task.submitted = true;
         // task.memo = to_base64(&psbt_bytes);
-        task.status = Status::SignComplete;
+        task.status = Status::Complete;
         ctx.task_store.save(&task.id, &task);
 
         anyhow::Ok(())

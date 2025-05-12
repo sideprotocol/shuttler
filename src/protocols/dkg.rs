@@ -41,7 +41,7 @@ impl<H> DKG<H> where H: DKGAdaptor {
         IdentTopic::new(&self.name)
     }
 
-    pub fn hander(&self) -> &H {
+    pub fn handler(&self) -> &H {
         &self.handler
     }
 
@@ -290,11 +290,11 @@ impl<H> DKG<H> where H: DKGAdaptor {
             info!("Received round1 packets from all participants: {}", task_id);
             match self.generate_round2_packages(ctx,  &task, received) {
                 Ok(_) => {
-                    task.status = Status::DkgRound2;
+                    task.status = Status::Round2;
                     ctx.task_store.save(&task.id, &task);
                 }
                 Err(e) => {
-                    task.status = Status::DkgComplete;
+                    task.status = Status::Complete;
                     ctx.task_store.save(&task.id, &task);
                     error!("Failed to generate round2 packages: {} - {:?}", task.id, e);
                 }

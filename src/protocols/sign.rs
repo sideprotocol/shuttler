@@ -67,7 +67,7 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
     
     pub fn generate_commitments(&self, ctx: &mut Context, task: &Task) {
 
-        if task.status == Status::SignComplete {
+        if task.status == Status::Complete {
             return
         }
 
@@ -409,7 +409,7 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
                             .collect::<Vec<_>>().join(" ");
         info!("Verify {}: {}", &task.id[..6], output );
 
-        task.status = Status::SignComplete;
+        task.status = Status::Complete;
         task.input = TaskInput::SIGN(sign_inputs);
         ctx.task_store.save(&task.id, &task);
         

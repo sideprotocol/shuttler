@@ -70,12 +70,9 @@ pub mod event {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Status {
-    DkgRound1,
-    DkgRound2,
-    DkgComplete,
-    SignRound1,
-    SignRound2,
-    SignComplete,
+    Round1,
+    Round2,
+    Complete,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,35 +181,26 @@ impl Task {
     }
 
     pub fn new_dkg_with_args(id: String, participants: Vec<Identifier>, threshold: u16, tweaks: Vec<i32>, batch_size: usize) -> Self {
-        Self {
-            id,
-            status: Status::DkgRound1,
-            time: now(),
-            input: TaskInput::DKG(DkgInput {
-                participants,
-                threshold,
-                tweaks,
-                batch_size,
-            }),
-            memo: "".to_owned(),
-            submitted: false,
-        }
+        Self::new_with_input(id, TaskInput::DKG(DkgInput {
+            participants,
+            threshold,
+            tweaks,
+            batch_size,
+        }), "".to_owned())
     }
 
     pub fn new_signing(
         id: String,
-        psbt: impl Into<String>,
+        memo: impl Into<String>,
         sign_inputs: Vec<Input>,
     ) -> Self {
-        Self {
-            id,
-            status: Status::SignRound1,
-            time: now(),
-            memo: psbt.into(),
-            input: TaskInput::SIGN(sign_inputs),
-            submitted: false,
-        }
+        Self::new_with_input(id, TaskInput::SIGN(sign_inputs), memo)
     }
+
+    pub fn new_with_input(id: String, input: TaskInput, memo: impl Into<String>) -> Self {
+        Self { id, status: Status::Round1, time: now(), input, memo: memo.into(), submitted: false }
+    }
+    
 }
 type Index = usize;
 type CommitmentStore =

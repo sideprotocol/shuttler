@@ -260,8 +260,25 @@ impl SignAdaptor for SignerHandler {
 
 pub struct RefreshHandler;
 impl RefreshAdaptor for RefreshHandler {
-    fn new_task(&self, ctx: &mut Context, events: &SideEvent) -> Option<Vec<Task>> {
-        todo!()
+    fn new_task(&self, ctx: &mut Context, event: &SideEvent) -> Option<Vec<Task>> {
+        match event {
+            SideEvent::BlockEvent( events) => {
+                if events.contains_key("initiate_refresh.id") {
+                    let mut tasks = vec![];
+                    for (((id, dkg_id), removed), news) in events.get("initiate_refresh.id")?.iter()
+                        .zip(events.get("initiate_refresh.dkg_id")?)
+                        .zip(events.get("initiate_refresh.removed_participants")?)
+                        .zip(events.get("initiate_refresh.new_participants")?) {
+    
+                            
+                        };
+                    return Some(tasks);
+                }
+            },
+            SideEvent::TxEvent(events) => {
+            }
+        }
+        None
     }
 
     fn on_complete(&self, ctx: &mut Context, task: &mut Task, keys: Vec<(frost_adaptor_signature::keys::KeyPackage, frost_adaptor_signature::keys::PublicKeyPackage)>) {

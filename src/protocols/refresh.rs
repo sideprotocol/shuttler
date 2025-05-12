@@ -40,7 +40,7 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
         IdentTopic::new(&self.name)
     }
 
-    pub fn hander(&self) -> &H {
+    pub fn handler(&self) -> &H {
         &self.handler
     }
 
@@ -275,11 +275,11 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
             let round1_packages = local.clone().iter().map(|(k, v)| (k.clone(), v[0].clone())).collect::<BTreeMap<_,_>>();
             match self.generate_round2_packages(ctx,  &task, round1_packages) {
                 Ok(_) => {
-                    task.status = Status::DkgRound2;
+                    task.status = Status::Round2;
                     ctx.task_store.save(&task.id, &task);
                 }
                 Err(e) => {
-                    task.status = Status::DkgComplete;
+                    task.status = Status::Complete;
                     ctx.task_store.save(&task.id, &task);
                     error!("Failed to generate round2 packages: {} - {:?}", task.id, e);
                 }
