@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{apps::{Context, Shuttler, ShuttlerBehaviour}, config::{BLOCK_HEIGHT, HEART_BEAT_DURATION}};
 
-use super::{mem_store, now};
+use super::{mem_store, now, store::Store};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum SubscribeTopic {
@@ -45,7 +45,7 @@ pub fn subscribe_gossip_topics(swarm: &mut Swarm<ShuttlerBehaviour>, app: &Shutt
 
 pub fn sending_heart_beat(ctx: &mut Context, block_height: u64) {
 
-        ctx.general_store.insert(BLOCK_HEIGHT, &block_height.to_be_bytes()).unwrap();
+        ctx.general_store.save(&BLOCK_HEIGHT, &block_height.to_string());
 
         let last_seen = now() + HEART_BEAT_DURATION.as_secs();
         let payload = HeartBeatPayload {

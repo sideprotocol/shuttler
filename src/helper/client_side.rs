@@ -215,6 +215,21 @@ pub async fn get_tss_signing_requests(host: &str) -> Result<Response<QuerySignin
     }).await
 }
 
+pub async fn get_tss_mosa_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {
+    let mut tss_client = match TssQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
+        }
+    };
+
+    tss_client.signing_requests(QuerySigningRequestsRequest {
+        module: "".to_string(),
+        status: SigningStatus::Signed as i32,
+        pagination: None
+    }).await
+}
+
 pub async fn get_loan_dlc_meta(host: &str, loan_id: String) -> Result<Response<QueryLoanDlcMetaResponse>, Status> {
     let mut client = match LendingQueryClient::connect(host.to_string()).await {
         Ok(client) => client,

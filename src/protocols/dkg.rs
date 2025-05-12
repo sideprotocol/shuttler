@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use frost_adaptor_signature as frost;
 use frost::{Identifier, keys::dkg::round1};
 
-use crate::apps::{Context, SideEvent, Status, SubscribeMessage, Task};
+use crate::apps::{Context, SideEvent, Status, SubscribeMessage, Task, TaskInput};
 use crate::helper::gossip::publish_topic_message;
 use crate::helper::store::Store;
 use crate::helper::mem_store;
@@ -104,18 +104,23 @@ impl<H> DKG<H> where H: DKGAdaptor {
 
     pub fn generate(&self, ctx: &mut Context, task: &Task) {
 
-        if task.dkg_input.participants.len() < 3 || !task.dkg_input.participants.contains(&ctx.identifier){
+        let dkg_input = match &task.input {
+            TaskInput::DKG(i) => i,
+            _ => return
+        };
+
+        if dkg_input.participants.len() < 3 || !dkg_input.participants.contains(&ctx.identifier){
             return;
         }
 
         let mut rng = thread_rng();
         let mut payload_data = vec![];
         let mut secrets = vec![];
-        for _i in 0..task.dkg_input.batch_size {
+        for _i in 0..dkg_input.batch_size {
             if let Ok((secret_packet, round1_package)) = frost::keys::dkg::part1(
                 ctx.identifier.clone(),
-                task.dkg_input.participants.len() as u16,
-                task.dkg_input.threshold,
+                dkg_input.participants.len() as u16,
+                dkg_input.threshold,
                 &mut rng,
             ) {
                 debug!("round1_secret_package: {:?}", &task.id);
@@ -159,7 +164,12 @@ impl<H> DKG<H> where H: DKGAdaptor {
             }
         };
 
-        if task.dkg_input.participants.len() as u16 != round1_packages.len() as u16 {
+        let dkg_input = match &task.input {
+            TaskInput::DKG(i) => i,
+            _ => return Err(DKGError("umatched input".to_string()))
+        };
+
+        if dkg_input.participants.len() as u16 != round1_packages.len() as u16 {
             return Err(DKGError(format!("Have not received enough packages: {}", task_id)));
         }
 
@@ -269,9 +279,13 @@ impl<H> DKG<H> where H: DKGAdaptor {
             None => return,
         };
 
-        received.retain(|id, _| task.dkg_input.participants.contains(id));
+        let dkg_input = match &task.input {
+            TaskInput::DKG(i) => i,
+            _ => return
+        };
+        received.retain(|id, _| dkg_input.participants.contains(id));
 
-        if task.dkg_input.participants.len() == received.len() {
+        if dkg_input.participants.len() == received.len() {
             
             info!("Received round1 packets from all participants: {}", task_id);
             match self.generate_round2_packages(ctx,  &task, received) {
@@ -313,13 +327,17 @@ impl<H> DKG<H> where H: DKGAdaptor {
             None => return,
         };
 
-        received.retain(|id, _| task.dkg_input.participants.contains(id));
+        let dkg_input = match &task.input {
+            TaskInput::DKG(i) => i,
+            _ => return
+        };
+        received.retain(|id, _| dkg_input.participants.contains(id));
 
-        if task.dkg_input.participants.len() == received.len() + 1 {
+        if dkg_input.participants.len() == received.len() + 1 {
             // info!("Received round2 packets from all participants: {}", task.id);
 
             // initialize a batch of empty BTreeMap.
-            let mut batch = (0..task.dkg_input.batch_size).map(|_i| BTreeMap::new() ).collect::<Vec<_>>();
+            let mut batch = (0..dkg_input.batch_size).map(|_i| BTreeMap::new() ).collect::<Vec<_>>();
             
             // let mut round2_packages = BTreeMap::new();
             received.iter().filter(|(k, _)| *k != &ctx.identifier ).for_each(|(sender, packet)| {

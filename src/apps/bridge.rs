@@ -18,7 +18,7 @@ use crate::helper::store::Store;
 use crate::protocols::dkg::{DKGAdaptor, DKG};
 use crate::protocols::sign::{SignAdaptor, StandardSigner};
 
-use super::SideEvent;
+use super::{SideEvent, TaskInput};
 
 // #[derive(Debug)]
 pub struct BridgeApp {
@@ -104,7 +104,12 @@ impl DKGAdaptor for KeygenHander {
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task, keys: Vec<(frost_adaptor_signature::keys::KeyPackage,frost_adaptor_signature::keys::PublicKeyPackage)>) {
         let (priv_key, pub_key) = keys.into_iter().next().unwrap();
-        let vaults = generate_vault_addresses(ctx, pub_key.clone(), priv_key.clone(), &task.dkg_input.tweaks, ctx.conf.bitcoin.network);
+        
+        let dkg_input = match &task.input {
+            TaskInput::DKG(i) => i,
+            _ => return
+        };
+        let vaults = generate_vault_addresses(ctx, pub_key.clone(), priv_key.clone(), &dkg_input.tweaks, ctx.conf.bitcoin.network);
         let id: u64 = task.id.replace("create-vault-", "").parse().unwrap();
         let mut sig_msg = id.to_be_bytes().to_vec();
 
@@ -202,7 +207,12 @@ impl SignAdaptor for SignatureHandler {
             return anyhow::Ok(());
         }
 
-        let signatures = task.sign_inputs.iter()
+        let sign_inputs = match &task.input {
+            TaskInput::SIGN(i) => i,
+            _ => return anyhow::Ok(()), 
+        };
+
+        let signatures = sign_inputs.iter()
             .map(|input| hex::encode(&input.signature.as_ref().unwrap().inner().serialize().unwrap()))
             .collect::<Vec<_>>();
         // submit signed psbt to side chain

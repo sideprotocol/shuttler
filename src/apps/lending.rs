@@ -8,16 +8,18 @@ use crate::config::{VaultKeypair, APP_NAME_LENDING};
 use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier};
 use crate::helper::mem_store;
 use crate::helper::store::Store;
+use crate::protocols::refresh::{ParticipantRefresher, RefreshAdaptor};
 use crate::protocols::sign::{SignAdaptor, StandardSigner};
 use crate::protocols::dkg::{DKGAdaptor, DKG};
 
 use crate::apps::{App, Context, FrostSignature, Input, SignMode, SubscribeMessage, Task};
 
-use super::SideEvent;
+use super::{SideEvent, TaskInput};
 
 pub struct LendingApp {
     pub keygen: DKG<KeygenHander>,
-    pub signer: StandardSigner<SignerHandler>
+    pub signer: StandardSigner<SignerHandler>,
+    pub refresher: ParticipantRefresher<RefreshHandler>,
 }
 
 impl LendingApp {
@@ -25,6 +27,7 @@ impl LendingApp {
         Self {
             keygen: DKG::new("lending_key_generator", KeygenHander{}),
             signer: StandardSigner::new("lending_signer", SignerHandler{}),
+            refresher: ParticipantRefresher::new("lending_refresh", RefreshHandler{})
         }
     }
 }
@@ -37,10 +40,11 @@ impl App for LendingApp {
 
     fn on_message(&self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()>{
         self.signer.on_message(ctx, message)?;
-        self.keygen.on_message(ctx, message)
+        self.keygen.on_message(ctx, message)?;
+        self.refresher.on_message(ctx, message)
     }
     fn subscribe_topics(&self) -> Vec<libp2p::gossipsub::IdentTopic> {
-        vec![self.keygen.topic(), self.signer.topic(),]
+        vec![self.keygen.topic(), self.signer.topic(), self.refresher.topic()]
     }
     fn on_event(&self, ctx: &mut Context, event: &SideEvent) {
         self.signer.on_event(ctx, event);
@@ -105,6 +109,9 @@ impl DKGAdaptor for KeygenHander {
         debug!("Oracle pubkey >>>: {:?}", pub_keys);
 
         let id: u64 = task.id.replace("lending-dkg-", "").parse().unwrap();
+
+        // save dkg id and keys for refresh
+        ctx.general_store.save(&format!("{}",id).as_str(), &pub_keys.join(","));
         
         // convert string array to bytes
         let mut message_keys = id.to_be_bytes()[..].to_vec();
@@ -174,21 +181,36 @@ impl SignAdaptor for SignerHandler {
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task)-> anyhow::Result<()> {
         let mut signatures = vec![];
-        for input in task.sign_inputs.iter() {
-            if let Some(FrostSignature::Standard(sig)) = input.signature  {
-                signatures.push(hex::encode(&sig.serialize()?));
+
+        if let TaskInput::SIGN(sign_inputs) = &task.input {
+            for input in sign_inputs.iter() {
+                if let Some(FrostSignature::Standard(sig)) = input.signature  {
+                    signatures.push(hex::encode(&sig.serialize()?));
+                }
+            }
+            let cosm_msg = MsgSubmitSignatures {
+                id: task.id.replace("lending-", "").parse()?,
+                sender: ctx.conf.relayer_bitcoin_address(),
+                signatures ,
+            };
+            let any = Any::from_msg(&cosm_msg)?;
+            if let Err(e) = ctx.tx_sender.send(any) {
+                tracing::error!("{:?}", e)
             }
         }
-        let cosm_msg = MsgSubmitSignatures {
-            id: task.id.replace("lending-", "").parse()?,
-            sender: ctx.conf.relayer_bitcoin_address(),
-            signatures ,
-        };
-        let any = Any::from_msg(&cosm_msg)?;
-        if let Err(e) = ctx.tx_sender.send(any) {
-            tracing::error!("{:?}", e)
-        }
+        
         Ok(())
+    }
+}
+
+pub struct RefreshHandler;
+impl RefreshAdaptor for RefreshHandler {
+    fn new_task(&self, ctx: &mut Context, events: &SideEvent) -> Option<Vec<Task>> {
+        todo!()
+    }
+
+    fn on_complete(&self, ctx: &mut Context, task: &mut Task, keys: Vec<(frost_adaptor_signature::keys::KeyPackage, frost_adaptor_signature::keys::PublicKeyPackage)>) {
+        todo!()
     }
 }
 

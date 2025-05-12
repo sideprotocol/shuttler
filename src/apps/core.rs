@@ -15,7 +15,7 @@ use crate::{
         encoding::to_base64,
         now,
         store::{DefaultStore, MemStore, Store},
-    },
+    }, protocols::refresh::RefreshInput,
 };
 
 pub type SubscribeMessage = libp2p::gossipsub::Message;
@@ -156,13 +156,20 @@ pub struct DkgInput {
     pub batch_size: usize,
 }
 
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TaskInput {
+    DKG(DkgInput),
+    SIGN(Vec<Input>),
+    REFRESH(RefreshInput),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
     pub id: String,
     pub status: Status,
     pub time: u64,
-    pub dkg_input: DkgInput,
-    pub sign_inputs: Vec<Input>,
+    pub input: TaskInput,
     pub memo: String, // store psbt for later use
     pub submitted: bool,
 }
@@ -181,13 +188,12 @@ impl Task {
             id,
             status: Status::DkgRound1,
             time: now(),
-            dkg_input: DkgInput {
+            input: TaskInput::DKG(DkgInput {
                 participants,
                 threshold,
                 tweaks,
                 batch_size,
-            },
-            sign_inputs: vec![],
+            }),
             memo: "".to_owned(),
             submitted: false,
         }
@@ -202,9 +208,8 @@ impl Task {
             id,
             status: Status::SignRound1,
             time: now(),
-            dkg_input: DkgInput::default(),
             memo: psbt.into(),
-            sign_inputs,
+            input: TaskInput::SIGN(sign_inputs),
             submitted: false,
         }
     }
@@ -232,10 +237,11 @@ pub struct Context {
     pub nonce_store: SignerNonceStore,
     pub commitment_store: CommitmentStore,
     pub signature_store: SignatureShareStore,
-    pub general_store: sled::Db,
+    pub general_store: DefaultStore<&'static str, String>,
     // pub price_store: Arc<PriceStore>,
     pub bitcoin_client: BitcoinClient,
 
+    // dkg stores
     pub db_round1: Round1Store,
     pub db_round2: Round2Store,
 }
@@ -270,8 +276,7 @@ impl Context {
             nonce_store: SignerNonceStore::new(conf.get_database_with_name("nonces")),
             commitment_store: CommitmentStore::new(conf.get_database_with_name("commitments")),
             signature_store: SignatureShareStore::new(conf.get_database_with_name("signature_shares")),
-            general_store: sled::open(conf.get_database_with_name("general")).unwrap(),
-            // price_store: Arc::new(PriceStore::new(conf.get_database_with_name("prices"))),
+            general_store: DefaultStore::new(conf.get_database_with_name("general")),
             conf,
 
             db_round1: Round1Store::new(),
