@@ -49,6 +49,7 @@ impl App for LendingApp {
     fn on_event(&self, ctx: &mut Context, event: &SideEvent) {
         self.signer.on_event(ctx, event);
         self.keygen.on_event(ctx, event);
+        // self.refresher.
     }
     fn execute(&self, ctx: &mut Context, tasks: Vec<Task>) -> anyhow::Result<()> {
         self.signer.execute(ctx, &tasks);
