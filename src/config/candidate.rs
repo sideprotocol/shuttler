@@ -4,7 +4,7 @@ use frost_adaptor_signature::Identifier;
 use libp2p::PeerId;
 use tracing::{debug, warn};
 
-use crate::helper::{client_side, encoding::{identifier_to_peer_id, pubkey_to_identifier}, now};
+use crate::helper::{client_side, encoding::{from_base64, identifier_to_peer_id, pubkey_to_identifier}, now};
 
 #[derive(Debug)]
 pub struct Candidate {
@@ -44,8 +44,16 @@ impl Candidate {
             return 
         }
         
-        let validators: Vec<cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::Validator> = match client_side::get_latest_validators(&self.host).await {
-            Ok(r) => r.into_inner().validators,
+        // let validators: Vec<cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::Validator> = match client_side::get_latest_validators(&self.host).await {
+        //     Ok(r) => r.into_inner().validators,
+        //     Err(e) => {
+        //         warn!("failed to sync valdiators: {:?}", e);
+        //         return
+        //     },
+        // };
+
+        let params = match client_side::get_tss_params(&self.host).await {
+            Ok(r) => r.into_inner().params.unwrap(),
             Err(e) => {
                 warn!("failed to sync valdiators: {:?}", e);
                 return
@@ -57,14 +65,12 @@ impl Candidate {
         self.peers.clear();
         self.identifiers.clear();
 
-        validators.iter().for_each(|v| {
-            if let Some(k) = &v.pub_key {
-                if let Ok(pk ) = k.to_msg::<cosmos_sdk_proto::cosmos::crypto::ed25519::PubKey>() {
-                    let id = pubkey_to_identifier(&pk.key);
-                    debug!("added {:?} in white list", id);
-                    self.peers.push(identifier_to_peer_id(&id ));
-                    self.identifiers.push( id );
-                }
+        params.allowed_dkg_participants.iter().for_each(|v| {
+            if let Ok(pk ) = from_base64(v) {
+                let id = pubkey_to_identifier(&pk);
+                debug!("added {:?} in white list", id);
+                self.peers.push(identifier_to_peer_id(&id ));
+                self.identifiers.push( id );
             }
         });
     }
