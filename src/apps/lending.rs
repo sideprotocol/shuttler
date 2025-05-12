@@ -185,8 +185,15 @@ impl SignAdaptor for SignerHandler {
 
         if let TaskInput::SIGN(sign_inputs) = &task.input {
             for input in sign_inputs.iter() {
-                if let Some(FrostSignature::Standard(sig)) = input.signature  {
-                    signatures.push(hex::encode(&sig.serialize()?));
+                if let Some(signature) = input.signature.clone() {
+                    match signature {
+                        FrostSignature::Standard(sig) => {
+                            signatures.push(hex::encode(&sig.serialize()?));
+                        }
+                        FrostSignature::Adaptor(sig) => {
+                            signatures.push(hex::encode(&sig.0.default_serialize()?));
+                        }
+                    }
                 }
             }
             let cosm_msg = MsgSubmitSignatures {
