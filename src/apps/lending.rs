@@ -1,7 +1,8 @@
 
 
 use cosmrs::Any;
-use side_proto::side::tss::{MsgCompleteDkg, MsgSubmitSignatures};
+use frost_adaptor_signature::VerifyingKey;
+use side_proto::side::tss::{MsgCompleteDkg, MsgSubmitSignatures, SigningType};
 use tracing::debug;
 
 use crate::config::{VaultKeypair, APP_NAME_LENDING};
@@ -151,14 +152,18 @@ impl SignAdaptor for SignerHandler {
                     .zip(events.get("initiate_signing.type")?)
                     .zip(events.get("initiate_signing.option")?) {
 
-                        let mut sign_mode = SignMode::Sign;
-                        if let Some(nonce_keypair) = ctx.keystore.get(&option) {                          
-                            if mode.eq("1") {
+                        let mut sign_mode = SignMode::Sign;                      
+                        if mode.eq(SigningType::SchnorrWithCommitment.as_str_name()) {
+                            if let Some(nonce_keypair) = ctx.keystore.get(&option) {    
                                 sign_mode = SignMode::SignWithGroupcommitment(nonce_keypair.pub_key.verifying_key().clone())
-                            } else if mode.eq("2") {
-                                sign_mode = SignMode::SignWithAdaptorPoint(nonce_keypair.pub_key.verifying_key().clone())
-                            };
-                        }
+                            }
+                        } else if mode.eq(SigningType::SchnorrAdaptor.as_str_name()) {
+                            let hex_adaptor = hex::decode(&option).ok()?;
+                            if let Ok(adaptor) = VerifyingKey::deserialize(&hex_adaptor) {
+                                // let mode = SignMode::SignWithAdaptorPoint(adaptor);    
+                                sign_mode = SignMode::SignWithAdaptorPoint(adaptor)
+                            }
+                        };
 
                         let participants = mem_store::count_task_participants(ctx, pub_key);
                         if participants.len() > 0 {

@@ -4,6 +4,7 @@ use std::{
 
 use cosmrs::Any;
 use ed25519_compact::{PublicKey, SecretKey, Signature};
+use frost_adaptor_signature::VerifyingKey;
 use futures::stream::StreamExt;
 use libp2p::{
     gossipsub, identify, identity::Keypair, kad::{self, store::MemoryStore}, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, Multiaddr, PeerId, Swarm
@@ -344,8 +345,11 @@ impl<'a> Shuttler<'a> {
                             }
                         },
                         side_proto::side::tss::SigningType::SchnorrAdaptor => if let Some(o) = &r.options {
-                            if let Some(comm) = ctx.keystore.get(&o.adaptor_point) {
-                                sign_mode = SignMode::SignWithAdaptorPoint(comm.pub_key.verifying_key().clone());
+                            if let Ok(hex_adaptor) = hex::decode(&o.adaptor_point) {
+                                if let Ok(adaptor) = VerifyingKey::deserialize(&hex_adaptor) {
+                                    // let mode = SignMode::SignWithAdaptorPoint(adaptor);    
+                                    sign_mode = SignMode::SignWithAdaptorPoint(adaptor)
+                                }
                             }
                         },
                         _ => {},
