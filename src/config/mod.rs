@@ -142,8 +142,8 @@ pub async fn get_relayer_account(conf: &Config) -> BaseAccount {
                     // BASE_ACCOUNT.lock().unwrap().replace(base_account.clone());
                     base_account
                 }
-                Err(_) => {
-                    panic!("===============================================\n Relayer account don't exist on side chain \n===============================================");
+                Err(e) => {
+                    panic!("\n Relayer account don't exist on side chain: {e} ");
                 }
             }
         }
@@ -172,10 +172,6 @@ impl Config {
         prv_key
             
     }
-
-    // pub fn get_validator_key(&self) -> Option<PrivValidatorKey> {
-    //     PRIV_VALIDATOR_KEY.lock().unwrap().clone()
-    // }
 
     pub fn from_file(app_home: &str) -> Result<Self, std::io::Error> {
         

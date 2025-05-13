@@ -19,6 +19,7 @@ use bitcoin::{hashes::{sha256d, Hash},
     TxOut, Address, ScriptBuf, Transaction, Txid
 };
 use tendermint::abci::EventAttribute;
+use tendermint::block::Height;
 
 use crate::apps::SideEvent;
 use crate::helper::cipher::random_bytes;
@@ -31,7 +32,7 @@ mod lending;
 pub mod websocket;
 pub use bridge::*;
 
-type EventQueue = BTreeMap<u64, fn(MockEnv) -> SideEvent>;
+type EventQueue = BTreeMap<u64, fn(MockEnv, Height) -> SideEvent>;
 
 pub const SINGING_FILE_NAME: &str = "signing-requests.json";
 pub const BRIDGE_DKG_FILE_NAME: &str = "dkg-request.json";
@@ -86,7 +87,7 @@ pub fn extact_value(attr: &Vec<EventAttribute>, key: &str) -> Option<String> {
 pub struct MockEnv {
     home: String,
     module: String, 
-    participants: Vec<String>
+    participants: Vec<String>,
 }
 
 impl MockEnv {

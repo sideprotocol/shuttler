@@ -87,7 +87,7 @@ async fn accept_connection(mock_env: MockEnv, stream: TcpStream ) {
 
 fn create_block_event(queue: &EventQueue, height: &Height, env: &MockEnv) -> BTreeMap<String, Vec<String>> {
     if let Some(f) = queue.get(&height.value()) {
-        if let SideEvent::BlockEvent(evt) = f(env.clone()) {
+        if let SideEvent::BlockEvent(evt) = f(env.clone(), height.clone()) {
             return evt;
         };
     }
@@ -96,7 +96,7 @@ fn create_block_event(queue: &EventQueue, height: &Height, env: &MockEnv) -> BTr
 
 fn create_tx_event(queue: &EventQueue, height: &Height, env: &MockEnv) -> Vec<tendermint::abci::Event> {
     if let Some(f) = queue.get(&height.value()) {
-        if let SideEvent::TxEvent(evt) = f(env.clone()) {
+        if let SideEvent::TxEvent(evt) = f(env.clone(), height.clone()) {
             return evt;
         };
     }
@@ -135,60 +135,3 @@ impl JSONRPC {
         Self { jsonrpc: "2.0".to_owned(), id: 0, result }
     }
 }
-
-// #[tokio::test]
-// async fn test() {
-//     start("oracle".to_owned()).await
-// }
-
-// #[tokio::test]
-// async fn test_ws_client() {
-//     let (mut ws_stream, _) = connect_async("ws://localhost:26657").await.expect("failed to connected");
-//     // ws_stream.send(Message::Text(self.provider.sub_event.clone().into())).await?;
-//     // Wrapper<DeEvent>
-//     let empty = r#"{"jsonrpc":"2.0","id":0,"result":{}}"#;
-//     loop {
-//         select! {
-//             Some(recv) = ws_stream.next() => {
-//                 // assert!(recv.is_ok(), "received");
-//                 if let Ok(Message::Text(utf8_bytes)) = recv {
-//                     let text = utf8_bytes.to_string();
-//                     if text == empty {
-//                         continue;
-//                     }
-//                     let event = serde_json::from_str::<Wrapper<DeEvent>>(&text).unwrap();
-//                     println!("{:?}", event)
-//                 }
-                
-//             }   
-//         }
-//     }
-// }
-
-// #[tokio::test]
-// async fn test_client() {
-//     // Connect to the Tendermint WebSocket endpoint
-//     let (client, driver) = WebSocketClient::new("ws://localhost:26657")
-//     .await
-//     .expect("Failed to connect to WebSocket");
-
-//     // Spawn the WebSocket driver in a separate task
-//     tokio::spawn(async move {
-//         let re =  driver.run().await;
-//         assert!(re.is_ok(), "websocket connected")
-//     });
-
-//     // Subscribe to NewBlock events
-//     let query = EventType::NewBlock.into();
-//     // let query = Query::from_str("/cosmos.bank.v1beta1.MsgSend").unwrap();
-
-//     let mut subscription = client.subscribe(query).await.expect("Subscription failed");
-//     // let mut subs = subscription.unwrap();
-//     loop {
-//         select! {
-//             Some(event) = subscription.next() => {
-//                 println!("Received {:?}", event);
-//             }
-//         }
-//     }
-// }

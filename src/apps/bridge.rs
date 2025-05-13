@@ -16,15 +16,18 @@ use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier};
 use crate::helper::mem_store;
 use crate::helper::store::Store;
 use crate::protocols::dkg::{DKGAdaptor, DKG};
+use crate::protocols::refresh::{ParticipantRefresher, RefreshAdaptor};
 use crate::protocols::sign::{SignAdaptor, StandardSigner};
 
-use super::SideEvent;
+use super::event::get_attribute_value;
+use super::{SideEvent, TaskInput};
 
 // #[derive(Debug)]
 pub struct BridgeApp {
     pub bitcoin_client: Client,
     pub keygen: DKG<KeygenHander>,
     pub signer: StandardSigner<SignatureHandler>,
+    pub refresh: ParticipantRefresher<RefreshHandler>
 }
 
 impl BridgeApp {
@@ -39,6 +42,7 @@ impl BridgeApp {
             bitcoin_client,
             keygen: DKG::new("bridge_dkg", KeygenHander{}),
             signer: StandardSigner::new("bridge_signing", SignatureHandler{}),
+            refresh: ParticipantRefresher::new("bridge_refresh", RefreshHandler{})
         }
     }  
 }
@@ -50,15 +54,17 @@ impl App for BridgeApp {
     fn on_message(&self, ctx: &mut Context, message: &SubscribeMessage) -> anyhow::Result<()> {
         // debug!("Received {:?}", message);
         self.keygen.on_message(ctx, message)?;
+        self.refresh.on_message(ctx, message)?;
         self.signer.on_message(ctx, message)
     }
     
     fn subscribe_topics(&self) -> Vec<IdentTopic> {
-        vec![self.keygen.topic(), self.signer.topic()]
+        vec![self.keygen.topic(), self.signer.topic(), self.refresh.topic()]
     }
     fn on_event(&self, ctx: &mut Context, event: &SideEvent) {
         self.keygen.on_event(ctx, event);
         self.signer.on_event(ctx, event);
+        self.refresh.on_event(ctx, event);
     }
     fn execute(&self, ctx: &mut Context, tasks: Vec<Task>) -> anyhow::Result<()> {
         self.signer.execute(ctx, &tasks);
@@ -104,7 +110,12 @@ impl DKGAdaptor for KeygenHander {
     }
     fn on_complete(&self, ctx: &mut Context, task: &mut Task, keys: Vec<(frost_adaptor_signature::keys::KeyPackage,frost_adaptor_signature::keys::PublicKeyPackage)>) {
         let (priv_key, pub_key) = keys.into_iter().next().unwrap();
-        let vaults = generate_vault_addresses(ctx, pub_key.clone(), priv_key.clone(), &task.dkg_input.tweaks, ctx.conf.bitcoin.network);
+        
+        let dkg_input = match &task.input {
+            TaskInput::DKG(i) => i,
+            _ => return
+        };
+        let vaults = generate_vault_addresses(ctx, pub_key.clone(), priv_key.clone(), &dkg_input.tweaks, ctx.conf.bitcoin.network);
         let id: u64 = task.id.replace("create-vault-", "").parse().unwrap();
         let mut sig_msg = id.to_be_bytes().to_vec();
 
@@ -192,7 +203,26 @@ impl SignAdaptor for SignatureHandler {
                     return Some(tasks);
                 }
             },
-            _ => {},
+            SideEvent::TxEvent(events) => {
+                let mut tasks = vec![];
+                for e in events.iter().filter(|e| e.kind == "initiate_signing_bridge") {
+                    let id = get_attribute_value(&e.attributes, "id")?;
+                    let s = get_attribute_value(&e.attributes, "signers")?;
+                    let h = get_attribute_value(&e.attributes, "sig_hashes")?;
+
+                    let mut inputs = vec![];
+                    s.split(",").zip(h.split(",")).for_each(|(signer, sig_hash)| {
+                        let participants = mem_store::count_task_participants(ctx, &signer.to_string());
+                        if participants.len() > 0 {
+                            let input = Input::new_with_message_mode(signer.to_string(), from_base64(sig_hash).unwrap(), participants, SignMode::SignWithTweak);
+                            inputs.push(input);
+                        }
+                    });
+                    tasks.push( Task::new_signing(id.to_string(), "", inputs));
+                }
+                return Some(tasks);
+            },
+
         }
         None
     }
@@ -202,7 +232,12 @@ impl SignAdaptor for SignatureHandler {
             return anyhow::Ok(());
         }
 
-        let signatures = task.sign_inputs.iter()
+        let sign_inputs = match &task.input {
+            TaskInput::SIGN(i) => i,
+            _ => return anyhow::Ok(()), 
+        };
+
+        let signatures = sign_inputs.iter()
             .map(|input| hex::encode(&input.signature.as_ref().unwrap().inner().serialize().unwrap()))
             .collect::<Vec<_>>();
         // submit signed psbt to side chain
@@ -217,9 +252,20 @@ impl SignAdaptor for SignatureHandler {
 
         task.submitted = true;
         // task.memo = to_base64(&psbt_bytes);
-        task.status = Status::SignComplete;
+        task.status = Status::Complete;
         ctx.task_store.save(&task.id, &task);
 
         anyhow::Ok(())
+    }
+}
+
+pub struct RefreshHandler;
+impl RefreshAdaptor for RefreshHandler {
+    fn new_task(&self, ctx: &mut Context, events: &SideEvent) -> Option<Vec<Task>> {
+        todo!()
+    }
+
+    fn on_complete(&self, ctx: &mut Context, task: &mut Task, keys: Vec<(frost_adaptor_signature::keys::KeyPackage, frost_adaptor_signature::keys::PublicKeyPackage)>) {
+        todo!()
     }
 }

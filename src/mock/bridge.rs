@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fs};
 use cosmrs::Any;
 use serde::{Deserialize, Serialize};
 use side_proto::side::btcbridge::MsgCompleteDkg;
-use tendermint::abci::{Event, EventAttribute};
+use tendermint::{abci::{Event, EventAttribute}, block::Height};
 
 use crate::{apps::SideEvent, mock::{fullpath, generate_mock_psbt}};
 
@@ -34,9 +34,9 @@ pub fn bridge_task_queue() -> EventQueue {
     queue
 }
 
-pub fn create_vault_event(env: MockEnv) -> SideEvent {
+pub fn create_vault_event(env: MockEnv, height: Height) -> SideEvent {
     let mut creation = BTreeMap::new();
-    creation.insert("create_bridge_vault.id".to_owned(), vec!["1".to_owned()]);
+    creation.insert("create_bridge_vault.id".to_owned(), vec![height.value().to_string()]);
     creation.insert("create_bridge_vault.participants".to_owned(), vec![env.participants.join(",")]);
     creation.insert("create_bridge_vault.batch_size".to_owned(), vec!["2".to_owned()]);
     creation.insert("create_bridge_vault.threshold".to_owned(), vec![(env.participants.len() * 2 / 3).to_string()]);
@@ -46,7 +46,7 @@ pub fn create_vault_event(env: MockEnv) -> SideEvent {
     SideEvent::BlockEvent(creation)
 }
 
-pub fn create_transaction_event(env: MockEnv) -> SideEvent {
+pub fn create_transaction_event(env: MockEnv, _height: Height) -> SideEvent {
 
     let mut events = vec![];
     if let Ok(txs) = fs::read_to_string(fullpath(&env.home, SINGING_FILE_NAME)) {

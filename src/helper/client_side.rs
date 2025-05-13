@@ -22,7 +22,7 @@ use side_proto::side::{
         query_client::QueryClient as BridgeQueryClient, QueryParamsRequest, QuerySigningRequestByTxHashRequest, QuerySigningRequestByTxHashResponse
     },
     tss::{
-        query_client::QueryClient as TssQueryClient, QuerySigningRequestsRequest, QuerySigningRequestsResponse, SigningStatus
+        query_client::QueryClient as TssQueryClient, QuerySigningRequestsRequest, QuerySigningRequestsResponse, SigningStatus, QueryParamsRequest as TssQueryParamsRequest, QueryParamsResponse as TssQueryParamsResponse
     },
     lending::{
         query_client::QueryClient as LendingQueryClient, QueryLoanDlcMetaRequest, QueryLoanDlcMetaResponse, QueryRedemptionRequest, QueryRedemptionResponse
@@ -211,6 +211,32 @@ pub async fn get_tss_signing_requests(host: &str) -> Result<Response<QuerySignin
     tss_client.signing_requests(QuerySigningRequestsRequest {
         module: "".to_string(),
         status: SigningStatus::Pending as i32,
+        pagination: None
+    }).await
+}
+
+pub async fn get_tss_params(host: &str) -> Result<Response<TssQueryParamsResponse>, Status>  {
+    let mut tss_client = match TssQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
+        }
+    };
+
+    tss_client.params(TssQueryParamsRequest{}).await
+}
+
+pub async fn get_tss_mosa_requests(host: &str) -> Result<Response<QuerySigningRequestsResponse>, Status> {
+    let mut tss_client = match TssQueryClient::connect(host.to_string()).await {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(Status::cancelled(format!("Failed to create btcbridge query client: {}", e)));
+        }
+    };
+
+    tss_client.signing_requests(QuerySigningRequestsRequest {
+        module: "".to_string(),
+        status: SigningStatus::Signed as i32,
         pagination: None
     }).await
 }

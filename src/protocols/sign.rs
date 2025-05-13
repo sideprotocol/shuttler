@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 pub use tracing::error;
 use usize as Index;
-use crate::{apps::{Context, FrostSignature, SideEvent, SignMode, Status, SubscribeMessage, Task}, config::VaultKeypair, 
+use crate::{apps::{Context, FrostSignature, SideEvent, SignMode, Status, SubscribeMessage, Task, TaskInput}, config::VaultKeypair, 
     helper::{
         bitcoin::convert_tweak, gossip::publish_topic_message, 
         store::Store
@@ -67,17 +67,22 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
     
     pub fn generate_commitments(&self, ctx: &mut Context, task: &Task) {
 
-        if task.status == Status::SignComplete {
+        if task.status == Status::Complete {
             return
         }
 
-        debug!("Start a new signing task: {}, {}", task.id, task.sign_inputs.len());
+        let sign_inputs = match &task.input {
+            TaskInput::SIGN(i) => i,
+            _ => return
+        };
+
+        debug!("Start a new signing task: {}, {}", task.id, sign_inputs.len());
 
         let mut nonces = BTreeMap::new();
         let mut commitments = BTreeMap::new();
         //let mut commitments = signer.get_signing_commitments(&task.id);
 
-        task.sign_inputs.iter().enumerate().for_each(|(index, input)| {
+        sign_inputs.iter().enumerate().for_each(|(index, input)| {
             let mut rng = thread_rng();
             let key = match ctx.keystore.get(&input.key) {
                 Some(k) => k,
@@ -220,11 +225,16 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
         if stored_nonces.len() == 0 {
             return;
         }
+        
+        let sign_inputs = match &task.input {
+            TaskInput::SIGN(i) => i,
+            _ => return
+        };
 
         let stored_remote_commitments = ctx.commitment_store.get(&task.id).unwrap_or_default();
 
         let mut broadcast_packages = BTreeMap::new();
-        for (index, input) in task.sign_inputs.iter().enumerate() {
+        for (index, input) in sign_inputs.iter().enumerate() {
             
             // filter packets from unknown parties
             if let Some(keypair) = ctx.keystore.get(&input.key) {
@@ -334,7 +344,11 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
         let stored_remote_signature_shares = ctx.signature_store.get(&task.id).unwrap_or_default();
         
         let mut verifies = vec![];
-        for (index, input) in task.sign_inputs.iter_mut().enumerate() {
+        let mut sign_inputs = match task.input.clone() {
+            TaskInput::SIGN(i) => i,
+            _ => return
+        };
+        for (index, input) in sign_inputs.iter_mut().enumerate() {
 
             let keypair = match ctx.keystore.get(&input.key) {
                 Some(keypair) => keypair,
@@ -395,10 +409,8 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
                             .collect::<Vec<_>>().join(" ");
         info!("Verify {}: {}", &task.id[..6], output );
 
-        // let psbt_bytes = psbt.serialize();
-        // let psbt_base64 = to_base64(&psbt_bytes);
-        // task.psbt = psbt_base64;
-        task.status = Status::SignComplete;
+        task.status = Status::Complete;
+        task.input = TaskInput::SIGN(sign_inputs);
         ctx.task_store.save(&task.id, &task);
         
         if let Err(e) = self.handler.on_complete(ctx, &mut task) {
