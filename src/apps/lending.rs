@@ -154,11 +154,11 @@ impl SignAdaptor for SignerHandler {
                         .zip(events.get("initiate_signing.option")?) {
     
                             let mut sign_mode = SignMode::Sign;                      
-                            if mode.eq(SigningType::SchnorrWithCommitment.as_str_name()) {
-                                if let Some(nonce_keypair) = ctx.keystore.get(&option) {    
+                            if mode.eq(&(SigningType::SchnorrWithCommitment as i32).to_string()) {
+                                if let Some(nonce_keypair) = ctx.keystore.get(&option) { 
                                     sign_mode = SignMode::SignWithGroupcommitment(nonce_keypair.pub_key.verifying_key().clone())
                                 }
-                            } else if mode.eq(SigningType::SchnorrAdaptor.as_str_name()) {
+                            } else if mode.eq(&(SigningType::SchnorrAdaptor as i32).to_string()) {
                                 let hex_adaptor = hex::decode(&option).ok()?;
                                 if let Ok(adaptor) = VerifyingKey::deserialize(&hex_adaptor) {
                                     // let mode = SignMode::SignWithAdaptorPoint(adaptor);    
