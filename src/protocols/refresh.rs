@@ -66,7 +66,7 @@ pub struct RefreshInput {
     pub keys: Vec<String>,
     pub threshold: u16,
     pub remove_participants: Vec<Identifier>,
-    pub add_participants: Vec<Identifier>,
+    pub new_participants: Vec<Identifier>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,7 +111,7 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
         };
 
         // make sure that all new participants have be added.
-        if !refresh_input.add_participants.contains(&ctx.identifier) {
+        if !refresh_input.new_participants.contains(&ctx.identifier) {
             return
         }
 
@@ -120,7 +120,7 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
         for _k in refresh_input.keys.iter() {
             if let Ok((secret_packet, round1_package)) = frost::keys::refresh::refresh_dkg_part1(
                 ctx.identifier.clone(),
-                refresh_input.add_participants.len() as u16,
+                refresh_input.new_participants.len() as u16,
                 refresh_input.threshold,
             ) {
                 debug!("round1_secret_package: {:?}", task.id );
@@ -158,7 +158,7 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
             _ => return Err(DKGError(format!("Error Input: {}", task_id))),
         };
 
-        if refresh_input.add_participants.len() as u16 != round1_packages.len() as u16 {
+        if refresh_input.new_participants.len() as u16 != round1_packages.len() as u16 {
             return Err(DKGError(format!("Have not received enough packages: {}", task_id)));
         }
 
@@ -267,9 +267,9 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
         };
 
         // Filter packages from valid participants.
-        local.retain(|id, _| refresh_input.add_participants.contains(id));
+        local.retain(|id, _| refresh_input.new_participants.contains(id));
 
-        if refresh_input.add_participants.len() == local.len() {
+        if refresh_input.new_participants.len() == local.len() {
             
             info!("Received round1 packets from all participants: {}", task_id);
             let round1_packages = local.clone().iter().map(|(k, v)| (k.clone(), v[0].clone())).collect::<BTreeMap<_,_>>();
@@ -319,9 +319,9 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
         };
 
         // Filter packages from valid participants.
-        received.retain(|id, _| refresh_input.add_participants.contains(id));
+        received.retain(|id, _| refresh_input.new_participants.contains(id));
 
-        if refresh_input.add_participants.len() == received.len() {
+        if refresh_input.new_participants.len() == received.len() {
             info!("Received round2 packets from all participants: {}", task.id);
 
             // initialize a batch of empty BTreeMap.

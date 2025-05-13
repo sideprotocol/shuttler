@@ -2,14 +2,14 @@
 
 use cosmrs::Any;
 use frost_adaptor_signature::VerifyingKey;
-use side_proto::side::tss::{MsgCompleteDkg, MsgSubmitSignatures, SigningType};
+use side_proto::side::tss::{MsgCompleteDkg, MsgCompleteRefreshing, MsgSubmitSignatures, SigningType};
 use tracing::debug;
 
 use crate::config::{VaultKeypair, APP_NAME_LENDING};
 use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier};
 use crate::helper::mem_store;
 use crate::helper::store::Store;
-use crate::protocols::refresh::{ParticipantRefresher, RefreshAdaptor};
+use crate::protocols::refresh::{ParticipantRefresher, RefreshAdaptor, RefreshInput};
 use crate::protocols::sign::{SignAdaptor, StandardSigner};
 use crate::protocols::dkg::{DKGAdaptor, DKG};
 
@@ -111,12 +111,11 @@ impl DKGAdaptor for KeygenHander {
 
         debug!("Oracle pubkey >>>: {:?}", pub_keys);
 
-        let id: u64 = task.id.replace("lending-dkg-", "").parse().unwrap();
-
         // save dkg id and keys for refresh
-        ctx.general_store.save(&format!("{}",id).as_str(), &pub_keys.join(","));
+        ctx.general_store.save(&format!("{}", task.id).as_str(), &pub_keys.join(","));
         
         // convert string array to bytes
+        let id: u64 = task.id.replace("lending-dkg-", "").parse().unwrap();
         let mut message_keys = id.to_be_bytes()[..].to_vec();
         for key in pub_keys.iter() {
             let key_bytes = hex::decode(key).unwrap();
@@ -264,94 +263,87 @@ impl RefreshAdaptor for RefreshHandler {
         match event {
             SideEvent::BlockEvent( events) => {
                 if events.contains_key("initiate_refresh.id") {
+                    println!("Events: {:?}", events);
                     let mut tasks = vec![];
-                    for (((id, dkg_id), removed), news) in events.get("initiate_refresh.id")?.iter()
+                    for ((id, dkg_id), removed) in events.get("initiate_refresh.id")?.iter()
                         .zip(events.get("initiate_refresh.dkg_id")?)
-                        .zip(events.get("initiate_refresh.removed_participants")?)
-                        .zip(events.get("initiate_refresh.new_participants")?) {
-    
-                            
+                        .zip(events.get("initiate_refresh.removed_participants")?){
+
+                            let dkg_keys = match ctx.general_store.get(&format!("lending-dkg-{}", dkg_id).as_str()) {
+                                Some(k) => k.split(',').map(|t| t.to_owned()).collect::<Vec<_>>(),
+                                None => continue,
+                            };
+
+                            let removed_ids = removed.split(",").map(|k| pubkey_to_identifier(&from_base64(k).unwrap())).collect::<Vec<_>>();
+                            if removed_ids.contains(&ctx.identifier) {
+                                dkg_keys.iter().for_each(|k| {ctx.keystore.remove(k);} );
+                                continue;
+                            }
+
+                            let first_key = match dkg_keys.get(0) {
+                                Some(k) => k,
+                                None => continue,
+                            };
+
+                            let first_key_pair = match ctx.keystore.get(&first_key.to_string()) {
+                                Some(k) => k,
+                                None => continue,
+                            };
+
+                            let participants = first_key_pair.pub_key.verifying_shares()
+                                .keys().filter(|i| !removed_ids.contains(i) ).map(|i| i.clone()).collect::<Vec<_>>();
+
+                            let task_id = format!("lending-refresh-{}", id);
+                            let input = RefreshInput{
+                                id: task_id.clone(),
+                                keys: dkg_keys,
+                                threshold: first_key_pair.priv_key.min_signers().clone() - 1,
+                                remove_participants: removed_ids,
+                                new_participants: participants,
+                            };
+                            tasks.push(Task::new_with_input(task_id, TaskInput::REFRESH(input), "".to_owned()));
                         };
                     return Some(tasks);
                 }
             },
-            SideEvent::TxEvent(events) => {
+            SideEvent::TxEvent(_events) => {
             }
         }
         None
     }
 
     fn on_complete(&self, ctx: &mut Context, task: &mut Task, keys: Vec<(frost_adaptor_signature::keys::KeyPackage, frost_adaptor_signature::keys::PublicKeyPackage)>) {
-        todo!()
+
+        if let Ok(id) = task.id.replace("lending-refresh-", "").parse::<u64>() {
+            let mut message_keys = id.to_be_bytes()[..].to_vec();
+            for (priv_key, key) in keys.iter() {
+                // let key_bytes = hex::decode(key).unwrap();
+                let key_bytes = key.verifying_key().serialize().unwrap();
+                
+                let tweak = None;
+                let hexkey = hex::encode(&key_bytes[1..]);
+                let keyshare = VaultKeypair {
+                    pub_key: key.clone(),
+                    priv_key: priv_key.clone(),
+                    tweak,
+                };
+                ctx.keystore.save(&hexkey, &keyshare);
+                message_keys.extend(key_bytes);
+            };
+            let message = hex::decode(hash(&message_keys)).unwrap();
+            let signature = hex::encode(ctx.node_key.sign(&message, None));
+    
+            let msg = MsgCompleteRefreshing {
+                id,
+                sender: ctx.conf.relayer_bitcoin_address(),
+                consensus_pubkey: ctx.id_base64.clone(),
+                signature,
+            };
+            let any = Any::from_msg(&msg).unwrap();
+            if let Err(e) = ctx.tx_sender.send(any) {
+                tracing::error!("{:?}", e)
+            }
+        }
+        
     }
 }
-
-// pub struct NonceHander{
-//     pub conf: Config,
-//     pub signer: StandardSigner<NonceSigningHandler>
-// }
-// impl DKGAdaptor for NonceHander {
-//     fn new_task(&self, ctx: &mut Context, event: &SideEvent) -> Option<Vec<Task>> {
-//         // tracing::debug!("event: {:?}", event);
-//         if let SideEvent::BlockEvent(events) = event {
-//             if events.contains_key("generate_nonce.id") {
-//                 let mut tasks = vec![];
-//                 for (id, oracle_key) in events.get("generate_nonce.id")?.iter()
-//                     .zip(events.get("generate_nonce.oracle_pub_key")?) {
-//                         if let Some(keypair) = ctx.keystore.get(&oracle_key) {
-//                             let participants = keypair.pub_key.verifying_shares().keys().map(|i| i.clone()).collect::<Vec<_>>();
-//                             let threshold = keypair.priv_key.min_signers().clone();
-//                             tasks.push(Task::new_dkg(format!("{}-{}", oracle_key , id ), participants , threshold));
-//                         }
-//                     };
-//                 return Some(tasks);
-//             }
-//         }
-//         None
-//     }
-    
-//     fn on_complete(&self, ctx: &mut Context, task: &mut Task, keys: Vec<(frost_adaptor_signature::keys::KeyPackage,frost_adaptor_signature::keys::PublicKeyPackage)>) {
-//         let (priv_key, pub_key) = keys.into_iter().next().unwrap();
-//         let tweak = None;
-//         let pubkey = pub_key.verifying_key().serialize().unwrap();
-//         let nonce = hex::encode(&pubkey[1..]);
-//         let keyshare = VaultKeypair {
-//             pub_key: pub_key.clone(),
-//             priv_key: priv_key.clone(),
-//             tweak,
-//         };
-//         ctx.keystore.save(&nonce, &keyshare);
-        
-//         let oracle_pubkey = task.id.split("-").collect::<Vec<_>>();
-
-//         let message = hex::decode(hash(&pubkey[1..])).unwrap();
-//         task.sign_inputs.insert(0, Input::new_with_message(oracle_pubkey[0].to_string(), message, task.dkg_input.participants.clone()));
-//         task.psbt = nonce; // store the nonce in PSBT, since PSBT dese not exists in this signing process.
-//         ctx.task_store.save(&task.id, task);    
-
-//         self.signer.generate_commitments(ctx, task);   
-//     }
-// }
-
-// pub struct NonceSigningHandler{}
-// impl SignAdaptor for NonceSigningHandler{
-//     fn new_task(&self, _ctx: &mut Context,  _event: &SideEvent) -> Option<Vec<Task>> {
-//         // no need to implement, because it share same task as nonce DKG
-//         None
-//     }
-//     fn on_complete(&self, ctx: &mut Context, task: &mut Task) -> anyhow::Result<()> {
-//         for (_, input) in task.sign_inputs.iter() {
-//             if let Some(FrostSignature::Standard(signature)) = input.signature  {
-//                 let cosm_msg = MsgSubmitNonce {
-//                     sender: ctx.conf.relayer_bitcoin_address(),
-//                     nonce: task.psbt.clone(),
-//                     signature: hex::encode(&signature.serialize()?),
-//                     oracle_pubkey: input.key.clone(),
-//                 };
-//                 let any = Any::from_msg(&cosm_msg)?;
-//                 ctx.tx_sender.send(any)?
-//             }
-//         };
-//         Ok(())
-//     }
-// }
