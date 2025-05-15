@@ -328,7 +328,7 @@ impl RefreshAdaptor for RefreshHandler {
                     tweak,
                 };
                 ctx.keystore.save(&hexkey, &keyshare);
-                message_keys.extend(key_bytes);
+                message_keys.extend(&key_bytes[1..]);
             };
             let message = hex::decode(hash(&message_keys)).unwrap();
             let signature = hex::encode(ctx.node_key.sign(&message, None));
