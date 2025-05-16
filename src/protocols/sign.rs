@@ -147,11 +147,6 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
             }
         }
 
-        // Ensure the message is from the participants
-        // if !mem_store::is_peer_trusted_peer(ctx, &msg.sender) {
-        //     return
-        // }
-
         let task_id = msg.task_id.clone();
         let first = 0;
 
@@ -180,7 +175,7 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
 
                 ctx.commitment_store.save(&task_id, &remote_commitments);
 
-                self.try_generate_signature_shares(ctx, &task_id);
+                self.try_generate_signature_shares(ctx, &task_id, &msg.sender);
 
             },
             SignPackage::Round2(sig_shares) => {
@@ -207,13 +202,13 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
 
                 ctx.signature_store.save(&task_id, &remote_sig_shares);
 
-                self.try_aggregate_signature_shares(ctx, &task_id);
+                self.try_aggregate_signature_shares(ctx, &task_id, &msg.sender);
                 
             }
         }
     }
 
-    fn try_generate_signature_shares(&self, ctx: &mut Context, task_id: &String) {
+    fn try_generate_signature_shares(&self, ctx: &mut Context, task_id: &String, sender: &Identifier) {
 
         // Ensure the task exists locally to prevent forged signature tasks. 
         let task = match ctx.task_store.get(task_id) {
@@ -238,6 +233,11 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
             
             // filter packets from unknown parties
             if let Some(keypair) = ctx.keystore.get(&input.key) {
+
+                if !keypair.pub_key.verifying_shares().contains_key(sender) {
+                    error!("Sender {:?} not in keypair: {:?}", sender, input.key);
+                    return;
+                }
 
                 let mut signing_commitments = match stored_remote_commitments.get(&index) {
                     Some(e) => e.clone(),
@@ -332,13 +332,17 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
 
     }
 
-    fn try_aggregate_signature_shares(&self, ctx: &mut Context, task_id: &String) {
+    fn try_aggregate_signature_shares(&self, ctx: &mut Context, task_id: &String, sender: &Identifier) {
 
         // Ensure the task exists locally to prevent forged signature tasks. 
         let mut task = match ctx.task_store.get(task_id) {
             Some(t) => t,
             None => return,
         };
+
+        if task.status == Status::Complete {
+            return
+        }
 
         let stored_remote_commitments = ctx.commitment_store.get(&task.id).unwrap_or_default();
         let stored_remote_signature_shares = ctx.signature_store.get(&task.id).unwrap_or_default();
@@ -357,6 +361,11 @@ impl<H> StandardSigner<H> where H: SignAdaptor{
                     return;
                 }
             };
+
+            if !keypair.pub_key.verifying_shares().contains_key(sender) {
+                error!("Sender {:?} not in keypair: {:?}", sender, input.key);
+                return;
+            }
 
             let mut signature_shares = match stored_remote_signature_shares.get(&index) {
                 Some(e) => e.clone(),

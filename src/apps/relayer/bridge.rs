@@ -101,7 +101,7 @@ pub async fn sync_signed_transactions(relayer: &Relayer) {
         }
 
         loop {
-            let mut sequence = SEQUENCE.load(Ordering::SeqCst);
+            let sequence = SEQUENCE.load(Ordering::SeqCst);
 
             info!("Start syncing signed transaction {}", sequence);
 
@@ -118,13 +118,11 @@ pub async fn sync_signed_transactions(relayer: &Relayer) {
                         if sr.status == SigningStatus::Confirmed as i32
                             || sr.status == SigningStatus::Failed as i32
                         {
-                            sequence += 1;
                             SEQUENCE.fetch_add(1, Ordering::SeqCst);
                             continue;
                         }
 
                         if sr.status != SigningStatus::Broadcasted as i32 || sr.psbt.len() == 0 {
-                            sequence += 1;
                             SEQUENCE.fetch_add(1, Ordering::SeqCst);
                             continue;
                         }
@@ -145,7 +143,6 @@ pub async fn sync_signed_transactions(relayer: &Relayer) {
 
                         match relayer.bitcoin_client.send_raw_transaction(&signed_tx) {
                             Ok(txid) => {
-                                sequence += 1;
                                 SEQUENCE.fetch_add(1, Ordering::SeqCst);
                                 
                                 info!("PSBT broadcasted to Bitcoin: {}", txid);
@@ -161,7 +158,6 @@ pub async fn sync_signed_transactions(relayer: &Relayer) {
                                     .to_string()
                                     .contains("Transaction already in block chain")
                                 {
-                                    sequence += 1;
                                     SEQUENCE.fetch_add(1, Ordering::SeqCst);
                                 }
 
@@ -169,7 +165,6 @@ pub async fn sync_signed_transactions(relayer: &Relayer) {
                                     .to_string()
                                     .contains("Transaction outputs already in utxo set")
                                 {
-                                    sequence += 1;
                                     SEQUENCE.fetch_add(1, Ordering::SeqCst);
                                 }
                             }

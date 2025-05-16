@@ -4,7 +4,7 @@ use ed25519_compact::SecretKey;
 use frost_adaptor_signature::{round1, round2, AdaptorSignature, Identifier, Signature};
 use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 use std::sync::mpsc::Sender;
 use tendermint::abci::Event as TxEvent;
 
@@ -221,7 +221,7 @@ pub struct Context {
     pub id_base64: String,
     pub conf: Config,
     pub keystore: DefaultStore<String, VaultKeypair>,
-    pub task_store: DefaultStore<String, Task>,
+    pub task_store: Arc<DefaultStore<String, Task>>,
     pub nonce_store: SignerNonceStore,
     pub commitment_store: CommitmentStore,
     pub signature_store: SignatureShareStore,
@@ -260,7 +260,7 @@ impl Context {
             node_key,
             id_base64,
             keystore: DefaultStore::new(conf.get_database_with_name("keypairs")),
-            task_store: DefaultStore::new(conf.get_database_with_name("tasks")),
+            task_store: Arc::new(DefaultStore::new(conf.get_database_with_name("tasks"))),
             nonce_store: SignerNonceStore::new(conf.get_database_with_name("nonces")),
             commitment_store: CommitmentStore::new(conf.get_database_with_name("commitments")),
             signature_store: SignatureShareStore::new(conf.get_database_with_name("signature_shares")),

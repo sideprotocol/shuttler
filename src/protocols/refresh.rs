@@ -313,15 +313,26 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
             Some(t) => t,
             None => return,
         };
+
         let refresh_input = match &task.input {
             TaskInput::REFRESH(i) => i,
             _ => return,
         };
 
+        // clean up the task if the sender is not in the new participants.
+        if !refresh_input.new_participants.contains(&ctx.identifier) {
+            ctx.db_round1.remove(task_id);
+            ctx.db_round2.remove(task_id);
+            ctx.clean_task_cache(task_id);
+            return
+        }
+
         // Filter packages from valid participants.
         received.retain(|id, _| refresh_input.new_participants.contains(id));
 
         if refresh_input.new_participants.len() == received.len() {
+
+
             info!("Received round2 packets from all participants: {}", task.id);
 
             // initialize a batch of empty BTreeMap.

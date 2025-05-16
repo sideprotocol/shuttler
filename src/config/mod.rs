@@ -25,7 +25,7 @@ lazy_static! {
 }
 
 fn default_rpc() -> String{
-    format!("127.0.0.1:8181")
+    format!("127.0.0.1:6780")
 }
 
 /// Threshold Signature Configuration
@@ -33,8 +33,9 @@ fn default_rpc() -> String{
 pub struct Config {
     #[serde(skip_serializing, skip_deserializing)]
     pub home: PathBuf,
-    // pub p2p_keypair: String,
+    // libp2p port
     pub port: u32,
+    pub enable_rpc: bool,
     #[serde(default = "default_rpc")]
     pub rpc_address: String,
     pub bootstrap_nodes: Vec<String>,
@@ -223,6 +224,7 @@ impl Config {
             home,
             // p2p_keypair ,
             port: port as u32,
+            enable_rpc: false,
             rpc_address: default_rpc(),
             bootstrap_nodes: vec![],
             log_level: "debug".to_string(),

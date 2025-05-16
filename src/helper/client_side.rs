@@ -10,7 +10,7 @@ use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_client::Service
 use futures::SinkExt;
 use tendermint::block::Height;
 use tendermint_rpc::{endpoint, Client, HttpClient};
-use tokio::sync::Mutex;
+use tokio::{select, signal, sync::Mutex};
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tonic::{Response, Status};
 
@@ -74,14 +74,22 @@ impl SigningRequestsResponse {
 pub async fn connect_ws_client(endpoint: &str) -> WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>> {
     let host= format!("{}/websocket", endpoint.replace("http", "ws"));
     let sub_msg = r#"{"jsonrpc":"2.0","method":"subscribe","id":0,"params":{"query":"tm.event='NewBlock'"}}"#;
+    // let mut a: Option<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>> = None;
     loop {
-        if let Ok((mut ws_stream , _)) = connect_async(&host).await {
-            if ws_stream.send(WebSocketMessage::Text(sub_msg.into())).await.is_ok() {
-                return ws_stream;
+        select! {
+            Ok((mut ws_stream , _)) = connect_async(&host) => {
+                if ws_stream.send(WebSocketMessage::Text(sub_msg.into())).await.is_ok() {
+                    // a = Some(ws_stream);
+                    return ws_stream;
+                }
+                tracing::error!("sidechain websocket client disconnected: {}", host);
+                thread::sleep(Duration::from_secs(5));
+            },
+            _ = signal::ctrl_c() => {
+                tracing::info!("Received Ctrl-C, shutting down websocket client...");
+                panic!("Ctrl-C received");
             }
         }
-        tracing::error!("sidechain websocket client disconnected: {}", host);
-        thread::sleep(Duration::from_secs(5));
     }
 }
 
