@@ -8,7 +8,7 @@ use side_proto::{prost::Message,
     };
 use tendermint::block::Height;
 
-use crate::{apps::SideEvent, helper::cipher::random_bytes};
+use crate::apps::SideEvent;
 
 use super::{fullpath, EventQueue, MockEnv};
 

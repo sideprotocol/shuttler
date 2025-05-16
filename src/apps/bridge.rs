@@ -261,11 +261,11 @@ impl SignAdaptor for SignatureHandler {
 
 pub struct RefreshHandler;
 impl RefreshAdaptor for RefreshHandler {
-    fn new_task(&self, ctx: &mut Context, events: &SideEvent) -> Option<Vec<Task>> {
+    fn new_task(&self, _ctx: &mut Context, _events: &SideEvent) -> Option<Vec<Task>> {
         todo!()
     }
 
-    fn on_complete(&self, ctx: &mut Context, task: &mut Task, keys: Vec<(frost_adaptor_signature::keys::KeyPackage, frost_adaptor_signature::keys::PublicKeyPackage)>) {
+    fn on_complete(&self, _ctx: &mut Context, _task: &mut Task, _keys: Vec<(frost_adaptor_signature::keys::KeyPackage, frost_adaptor_signature::keys::PublicKeyPackage)>) {
         todo!()
     }
 }

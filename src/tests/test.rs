@@ -1,4 +1,3 @@
-
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
@@ -9,17 +8,19 @@ use bitcoin::key::{Keypair, TapTweak, TweakedKeypair, UntweakedPublicKey};
 use bitcoin::locktime::absolute;
 use bitcoin::psbt::Input;
 use bitcoin::secp256k1::{self, ecdsa, schnorr, PublicKey};
-use bitcoin::secp256k1::{Message, Secp256k1, SecretKey, rand};
+use bitcoin::secp256k1::{rand, Message, Secp256k1, SecretKey};
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::sign_message::MessageSignature;
-use bitcoin::{transaction, Address, Amount, Network, OutPoint, Psbt, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness, XOnlyPublicKey
+use bitcoin::{
+    transaction, Address, Amount, Network, OutPoint, Psbt, ScriptBuf, Sequence, Transaction, TxIn,
+    TxOut, Txid, Witness, XOnlyPublicKey,
 };
-use frost_adaptor_signature::keys::KeyPackage;
 use frost_adaptor_signature as frost;
-use frost_adaptor_signature:: Field;
+use frost_adaptor_signature::keys::KeyPackage;
+use frost_adaptor_signature::Field;
 use rand::thread_rng;
-use tokio::{select, signal};
 use tokio::sync::mpsc;
+use tokio::{select, signal};
 
 use crate::helper::encoding;
 
@@ -52,7 +53,7 @@ async fn test_mpsc() {
 
 #[test]
 fn test_identifer_toid() {
-    let pubkey=  libp2p::identity::Keypair::generate_ed25519().public();
+    let pubkey = libp2p::identity::Keypair::generate_ed25519().public();
     let pk = pubkey.to_peer_id();
 
     let b = pubkey.encode_protobuf();
@@ -72,7 +73,8 @@ fn test_taproot_signature() {
         min_signers,
         frost::keys::IdentifierList::Default,
         &mut rng,
-    ).expect("msg");
+    )
+    .expect("msg");
     // ANCHOR_END: tkg_gen
 
     // Verifies the secret shares from the dealer and store them in a BTreeMap.
@@ -127,7 +129,10 @@ fn test_taproot_signature() {
     let mut signature_shares = BTreeMap::new();
     // ANCHOR: round2_package
     // let message = "message to sign".as_bytes();
-    let message = &[62, 162, 82, 27, 173, 124, 142, 221, 180, 230, 209, 237, 25, 178, 167, 37, 94, 168, 190, 180, 72, 239, 214, 130, 163, 127, 91, 247, 66, 58, 106, 188];
+    let message = &[
+        62, 162, 82, 27, 173, 124, 142, 221, 180, 230, 209, 237, 25, 178, 167, 37, 94, 168, 190,
+        180, 72, 239, 214, 130, 163, 127, 91, 247, 66, 58, 106, 188,
+    ];
 
     // In practice, the SigningPackage must be sent to all participants
     // involved in the current signing (at least min_signers participants),
@@ -147,7 +152,8 @@ fn test_taproot_signature() {
 
         // Each participant generates their signature share.
         // ANCHOR: round2_sign
-        let signature_share = frost::round2::sign(&signing_package, signer_nonces, key_package).expect("msg");
+        let signature_share =
+            frost::round2::sign(&signing_package, signer_nonces, key_package).expect("msg");
         // ANCHOR_END: round2_sign
 
         // In practice, the signature share must be sent to the Coordinator
@@ -162,9 +168,10 @@ fn test_taproot_signature() {
 
     // Aggregate (also verifies the signature shares)
     // ANCHOR: aggregate
-    let group_signature = frost_adaptor_signature::aggregate(&signing_package, &signature_shares, &pubkey_package).expect("msg");
+    let group_signature =
+        frost_adaptor_signature::aggregate(&signing_package, &signature_shares, &pubkey_package)
+            .expect("msg");
     // ANCHOR_END: aggregate
-
 
     // Check that the threshold signature can be verified by the group public
     // key (the verification key).
@@ -179,13 +186,12 @@ fn test_taproot_signature() {
     let pubkey_bytes = pubkey_package.verifying_key().serialize().unwrap();
     let pubk = bitcoin::PublicKey::from_slice(&pubkey_bytes).expect("unable to create pubkey");
 
-
     let secp = secp256k1::Secp256k1::new();
     let utpk = UntweakedPublicKey::from(pubk.inner);
     let (tpk, _) = utpk.tap_tweak(&secp, None);
     // let addr = Address::p2tr(&secp, tpk., None, Network::Bitcoin);
     let sig_b = group_signature.serialize().unwrap();
-    
+
     let sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&sig_b).unwrap();
     let msg = Message::from_digest_slice(message).unwrap();
     match secp.verify_schnorr(&sig, &msg, &tpk.to_inner()) {
@@ -208,20 +214,19 @@ fn test_taproot_signature() {
 
     // let msg_hash = frost::Secp256K1Sha256::H2(&m).to_bytes();
     // let msgh = Message::from_digest_slice(&msg_hash.to_vec()).expect("msg");
-
-
 }
 
 #[test]
 fn test_psbt() {
-
     let network = Network::Bitcoin;
     // p2wpkh address
     // let pubkey = CompressedPublicKey::from_str("021a0e6628db5d43b97a0a566b7aaed02930ad22695af7244922476ba564df71ce").expect("parse pubkey");
     // let address = Address::p2wpkh(&pubkey, network);
-    
+
     // taproot address
-    let pubkey = PublicKey::from_str("025c5fef49ca441b8f377b69ac70a65c084a8c1bd9dc6b731f38c3ffdabea54a30").expect("parse pubkey");
+    let pubkey =
+        PublicKey::from_str("025c5fef49ca441b8f377b69ac70a65c084a8c1bd9dc6b731f38c3ffdabea54a30")
+            .expect("parse pubkey");
     let internel_key = XOnlyPublicKey::from(pubkey);
     let secp = Secp256k1::new();
     let address = Address::p2tr(&secp, internel_key, None, network);
@@ -235,7 +240,9 @@ fn test_psbt() {
     };
 
     // Add an input (previously funded UTXO)
-    let prev_txid = bitcoin::Txid::from_str("4d3b1e3caa0f3c4bbd3d8b51b52d2f5b6769d14d9a72db9d9f5b2b3a4d2e8c1b").unwrap();
+    let prev_txid =
+        bitcoin::Txid::from_str("4d3b1e3caa0f3c4bbd3d8b51b52d2f5b6769d14d9a72db9d9f5b2b3a4d2e8c1b")
+            .unwrap();
     let prev_vout = 0;
     let prev_outpoint = OutPoint {
         txid: prev_txid,
@@ -248,7 +255,7 @@ fn test_psbt() {
     let script_sig = ScriptBuf::default();
     unsigned_tx.input.push(TxIn {
         previous_output: prev_outpoint,
-        script_sig ,
+        script_sig,
         sequence: Sequence::ZERO,
         witness: Witness::default(),
     });
@@ -277,28 +284,25 @@ fn test_psbt() {
         ..Default::default()
     };
 
-   // Serialize the PSBT to a base64 string
+    // Serialize the PSBT to a base64 string
     let psbt_bytes = psbt.serialize();
-    let psbt_base64 = base64::encode(&psbt_bytes); 
+    let psbt_base64 = base64::encode(&psbt_bytes);
 
     // Print the PSBT
     println!("PSBT (base64): {}", psbt_base64);
-
 }
 
 #[test]
 fn test_key_generation() {
     let secp = Secp256k1::new();
     let keypair = Keypair::new(&secp, &mut rand::thread_rng());
-    
+
     println!("priv: {:?}", keypair.secret_bytes().as_hex());
     println!("pub: {:?}", keypair.public_key().serialize().as_hex());
 }
 
-
 #[test]
 fn test_key_bitcoin() {
-
     const DUMMY_UTXO_AMOUNT: Amount = Amount::from_sat(20_000_000);
     const SPEND_AMOUNT: Amount = Amount::from_sat(5_000_000);
     const CHANGE_AMOUNT: Amount = Amount::from_sat(14_999_000); // 1000 sat fee.
@@ -308,7 +312,7 @@ fn test_key_bitcoin() {
     println!("{:?}", secret_key);
 
     let kp = Keypair::from_secret_key(&secp, &secret_key);
-    
+
     let (internal_key, _) = kp.x_only_public_key();
 
     let script_pubkey = ScriptBuf::new_p2tr(&secp, internal_key, None);
@@ -318,12 +322,15 @@ fn test_key_bitcoin() {
         vout: 0,
     };
 
-    let utxo = TxOut { value: DUMMY_UTXO_AMOUNT, script_pubkey };
-    let witness =  Witness::default();
+    let utxo = TxOut {
+        value: DUMMY_UTXO_AMOUNT,
+        script_pubkey,
+    };
+    let witness = Witness::default();
 
     // The input for the transaction we are constructing.
     let input = TxIn {
-        previous_output: out_point, // The dummy output we are spending.
+        previous_output: out_point,       // The dummy output we are spending.
         script_sig: ScriptBuf::default(), // For a p2tr script_sig is empty.
         sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
         witness, // Filled in after signing.
@@ -333,7 +340,10 @@ fn test_key_bitcoin() {
     let address = receivers_address();
 
     // The spend output is locked to a key controlled by the receiver.
-    let spend = TxOut { value: SPEND_AMOUNT, script_pubkey: address.script_pubkey() };
+    let spend = TxOut {
+        value: SPEND_AMOUNT,
+        script_pubkey: address.script_pubkey(),
+    };
 
     // The change output is locked to a key controlled by us.
     let change = TxOut {
@@ -372,7 +382,7 @@ fn test_key_bitcoin() {
     // let signature = bitcoin::taproot::Signature { sig: signature, hash_ty: sighash_type };
     // println!("{:?}", signature);
 
-   // Verifies the signature.
+    // Verifies the signature.
     // let pubkey = kp.x_only_public_key().0;
     // pubkey.verify(&secp, &msg, &signature.sig).expect("signature is invalid");
 
@@ -383,7 +393,6 @@ fn test_key_bitcoin() {
 
     // // BOOM! Transaction signed and ready to broadcast.
     // println!("{:#?}", tx);
-
 }
 
 /// A dummy address for the receiver.
@@ -400,32 +409,38 @@ pub fn receivers_address() -> Address {
 
 #[test]
 fn test_indentifier() {
-
     let zero = frost::Secp256K1ScalarField::serialize(&frost::Secp256K1ScalarField::one());
     println!("zero: {:?}", zero);
 
     let zero1 = frost::Secp256K1ScalarField::deserialize(&zero).unwrap();
     println!("zero1: {:?}", zero1);
 
-
     // let ident = frost::Identifier::new(frost::Secp256K1ScalarField::deserialize(&pubkey.as_bytes()).unwrap()).unwrap();
     // println!("{:?}", ident);
 
     // let byt = frost::Secp256K1ScalarField::serialize(&ident.());
     // println!("{:?}", byt);
-
-    
 }
 #[test]
 fn test_verification() {
     let msg = "bc877d681dff63a2195b9179f39f05ac1fb0fc709389c9e79804ceb952cdb95d";
     println!("msg: {:?}", msg);
     // let raw = hex::decode(msg).unwrap();
-    let raw = [62, 162, 82, 27, 173, 124, 142, 221, 180, 230, 209, 237, 25, 178, 167, 37, 94, 168, 190, 180, 72, 239, 214, 130, 163, 127, 91, 247, 66, 58, 106, 188];
+    let raw = [
+        62, 162, 82, 27, 173, 124, 142, 221, 180, 230, 209, 237, 25, 178, 167, 37, 94, 168, 190,
+        180, 72, 239, 214, 130, 163, 127, 91, 247, 66, 58, 106, 188,
+    ];
     // let raw = msg.as_bytes();
-    let key_raw = [2, 153, 225, 38, 191, 213, 138, 125, 173, 71, 138, 210, 28, 247, 70, 125, 41, 39, 54, 46, 168, 253, 74, 88, 220, 122, 200, 245, 253, 251, 33, 143, 171];
-    let signature_raw: [u8; 65] = [3, 41, 127, 214, 45, 77, 55, 14, 100, 209, 74, 255, 112, 240, 103, 107, 87, 62, 170, 202, 120, 138, 102, 19, 245, 66, 227, 2, 93, 228, 17, 154, 197, 65, 127, 196, 205, 207, 167, 203, 233, 102, 195, 1, 102, 90, 209, 87, 195, 75, 133, 225, 53, 73, 3, 168, 245, 179, 42, 252, 186, 49, 29, 11, 108];
-    
+    let key_raw = [
+        2, 153, 225, 38, 191, 213, 138, 125, 173, 71, 138, 210, 28, 247, 70, 125, 41, 39, 54, 46,
+        168, 253, 74, 88, 220, 122, 200, 245, 253, 251, 33, 143, 171,
+    ];
+    let signature_raw: [u8; 65] = [
+        3, 41, 127, 214, 45, 77, 55, 14, 100, 209, 74, 255, 112, 240, 103, 107, 87, 62, 170, 202,
+        120, 138, 102, 19, 245, 66, 227, 2, 93, 228, 17, 154, 197, 65, 127, 196, 205, 207, 167,
+        203, 233, 102, 195, 1, 102, 90, 209, 87, 195, 75, 133, 225, 53, 73, 3, 168, 245, 179, 42,
+        252, 186, 49, 29, 11, 108,
+    ];
 
     println!("raw: {:?}", hex::encode(raw));
     println!("key: {:?}", hex::encode(key_raw));
@@ -433,7 +448,7 @@ fn test_verification() {
 
     let msgb = Message::from_digest_slice(&raw).expect("Invalid message");
     println!("msgb: {:?}", msgb.as_ref());
-    
+
     // let sig_ecdsa = ecdsa::Signature::from_str(&hex::encode(&signature_raw[..64])).unwrap();
     // let pk = PublicKey::from_slice(&key_raw).unwrap();
     // println!("pk: {:?}", pk.serialize());
@@ -447,8 +462,6 @@ fn test_verification() {
     let pubkey = XOnlyPublicKey::from_slice(&key_raw[1..]).unwrap();
 
     assert_eq!(scep.verify_schnorr(&sig, &msgb, &pubkey), Ok(()));
-
-    
 }
 
 // We can use the following code to generate a transaction and sign it using the secp256k1 library.
@@ -460,8 +473,8 @@ fn test_transaction() {
     let secp = Secp256k1::new();
 
     // Generate a new key pair.
-    let keypair = Keypair::new(&secp, &mut rand::thread_rng() );
-    
+    let keypair = Keypair::new(&secp, &mut rand::thread_rng());
+
     let (xonlykey, _) = keypair.x_only_public_key();
     println!("xonly pubkey:{:?}", xonlykey.serialize());
     // Generate a new taproot address.
@@ -506,38 +519,53 @@ fn test_transaction() {
 
     // let sig = bitcoin::taproot::Signature { sig: signature, hash_ty: sighash_type };
 
-    match &xonlykey.verify(&secp, &Message::from_digest(sighash.to_byte_array()), &signature) {
+    match &xonlykey.verify(
+        &secp,
+        &Message::from_digest(sighash.to_byte_array()),
+        &signature,
+    ) {
         Ok(_) => println!("Signature is valid"),
         Err(e) => println!("Signature is invalid: {:?}", e),
     };
-
 }
 
 #[test]
 fn test_keys() {
     // XOnlyPublicKey::from_slice(data)
-    
+
     // Create a new secp256k1 context.
     let secp = Secp256k1::new();
 
-    let key_raw = [ 2, 199, 157, 245, 180, 116, 236, 171, 125, 55, 141, 30, 2, 193, 188, 55, 55, 49, 129, 24, 121, 106, 222, 12, 165, 158, 157, 232, 184, 176, 91, 179, 237];
+    let key_raw = [
+        2, 199, 157, 245, 180, 116, 236, 171, 125, 55, 141, 30, 2, 193, 188, 55, 55, 49, 129, 24,
+        121, 106, 222, 12, 165, 158, 157, 232, 184, 176, 91, 179, 237,
+    ];
     let pk = PublicKey::from_slice(&key_raw).unwrap();
 
     println!("pk: {:?}", pk);
 
-    let sig = [3, 91, 97, 68, 143, 100, 135, 36, 254, 83, 83, 52, 175, 9, 197, 73, 201, 237, 40, 169, 180, 171, 143, 214, 142, 38, 98, 170, 111, 140, 116, 117, 121, 112, 149, 24, 70, 172, 154, 220, 94, 116, 62, 67, 216, 6, 214, 168, 180, 47, 183, 15, 88, 20, 146, 204, 214, 168, 60, 103, 180, 17, 114, 181, 130];
-   
+    let sig = [
+        3, 91, 97, 68, 143, 100, 135, 36, 254, 83, 83, 52, 175, 9, 197, 73, 201, 237, 40, 169, 180,
+        171, 143, 214, 142, 38, 98, 170, 111, 140, 116, 117, 121, 112, 149, 24, 70, 172, 154, 220,
+        94, 116, 62, 67, 216, 6, 214, 168, 180, 47, 183, 15, 88, 20, 146, 204, 214, 168, 60, 103,
+        180, 17, 114, 181, 130,
+    ];
+
     let signature = ecdsa::Signature::from_compact(&sig).expect("Invalid Signatures");
     // keypair.public_key().verify(&secp, msg, sig)
-    let text = [181, 121, 244, 3, 218, 122, 170, 51, 38, 102, 122, 153, 179, 167, 118, 242, 174, 45, 157, 135, 155, 177, 158, 39, 134, 66, 84, 1, 56, 169, 227, 164];
-    
+    let text = [
+        181, 121, 244, 3, 218, 122, 170, 51, 38, 102, 122, 153, 179, 167, 118, 242, 174, 45, 157,
+        135, 155, 177, 158, 39, 134, 66, 84, 1, 56, 169, 227, 164,
+    ];
+
     // let xonlykey = XOnlyPublicKey::from_slice(&key).expect("invalid xonly key");
     // println!("xonly pubkey:{:?}", xonlykey);
     let message = Message::from_digest(text);
 
-    assert!( pk.verify(&secp, &message, &signature).expect("Invalid") == (), "invalid" )
-       
-
+    assert!(
+        pk.verify(&secp, &message, &signature).expect("Invalid") == (),
+        "invalid"
+    )
 }
 
 #[test]
@@ -549,11 +577,22 @@ fn verify_xonly_signatures() {
     // let sig = [162, 64, 13, 160, 112, 37, 113, 205, 110, 252, 79, 132, 29, 75, 34, 170, 3, 147, 187, 133, 177, 254, 129, 126, 40, 56, 31, 165, 248, 28, 242, 49, 87, 122, 202, 201, 237, 28, 27, 223, 170, 14, 129, 154, 98, 249, 107, 134, 250, 112, 166, 193, 201, 143, 42, 40, 54, 252, 77, 82, 149, 75, 195, 150];
 
     // key and signature from tss singer
-    let key = [ 2, 199, 157, 245, 180, 116, 236, 171, 125, 55, 141, 30, 2, 193, 188, 55, 55, 49, 129, 24, 121, 106, 222, 12, 165, 158, 157, 232, 184, 176, 91, 179, 237];
-    let sig = [ 3, 91, 97, 68, 143, 100, 135, 36, 254, 83, 83, 52, 175, 9, 197, 73, 201, 237, 40, 169, 180, 171, 143, 214, 142, 38, 98, 170, 111, 140, 116, 117, 121, 112, 149, 24, 70, 172, 154, 220, 94, 116, 62, 67, 216, 6, 214, 168, 180, 47, 183, 15, 88, 20, 146, 204, 214, 168, 60, 103, 180, 17, 114, 181, 130];
-    
-    let text = [181, 121, 244, 3, 218, 122, 170, 51, 38, 102, 122, 153, 179, 167, 118, 242, 174, 45, 157, 135, 155, 177, 158, 39, 134, 66, 84, 1, 56, 169, 227, 164];
-    
+    let key = [
+        2, 199, 157, 245, 180, 116, 236, 171, 125, 55, 141, 30, 2, 193, 188, 55, 55, 49, 129, 24,
+        121, 106, 222, 12, 165, 158, 157, 232, 184, 176, 91, 179, 237,
+    ];
+    let sig = [
+        3, 91, 97, 68, 143, 100, 135, 36, 254, 83, 83, 52, 175, 9, 197, 73, 201, 237, 40, 169, 180,
+        171, 143, 214, 142, 38, 98, 170, 111, 140, 116, 117, 121, 112, 149, 24, 70, 172, 154, 220,
+        94, 116, 62, 67, 216, 6, 214, 168, 180, 47, 183, 15, 88, 20, 146, 204, 214, 168, 60, 103,
+        180, 17, 114, 181, 130,
+    ];
+
+    let text = [
+        181, 121, 244, 3, 218, 122, 170, 51, 38, 102, 122, 153, 179, 167, 118, 242, 174, 45, 157,
+        135, 155, 177, 158, 39, 134, 66, 84, 1, 56, 169, 227, 164,
+    ];
+
     // let xonlykey = XOnlyPublicKey::from_slice(&key).expect("invalid xonly key");
     // println!("xonly pubkey:{:?}", xonlykey);
     let message = Message::from_digest(text);
@@ -571,15 +610,18 @@ fn verify_xonly_signatures() {
     // let verified = pk.verify(&secp, &message, &signature).is_ok();
     // assert!(verified, "verify failed");
 
-    // assert!( &xonlykey.verify(&secp, &message, &signature).is_ok(), "verify failed"); 
+    // assert!( &xonlykey.verify(&secp, &message, &signature).is_ok(), "verify failed");
 }
 
 #[test]
 fn test_rpc() {
     use bitcoincore_rpc::{Auth, Client, RpcApi};
 
-    let rpc = Client::new("149.28.156.79:18332",
-                          Auth::UserPass("side".to_string(), "12345678".to_string())).unwrap();
+    let rpc = Client::new(
+        "149.28.156.79:18332",
+        Auth::UserPass("side".to_string(), "12345678".to_string()),
+    )
+    .unwrap();
     let best_block_hash = rpc.get_block_count().unwrap();
     println!("best block hash: {}", best_block_hash);
 }

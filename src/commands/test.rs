@@ -56,7 +56,11 @@ pub async fn execute(bin: &'static str, n: u32, tx: u32, delay: u32, module: Str
         home_i.push(format!("home{}", i));
         
         fs::create_dir_all(home_i.clone()).expect("initial home i");
-        config::Config::default(home_i.to_str().unwrap(), port+(i as u32) , network).save().unwrap();
+        let mut conf = config::Config::default(home_i.to_str().unwrap(), port+(i as u32) , network);
+        if i == 1 {
+            conf.enable_rpc = true;
+        }
+        conf.save().unwrap();
 
         let text= serde_json::to_string_pretty(&v).unwrap();
         fs::write(home_i.join("priv_validator_key.json"), text).unwrap();

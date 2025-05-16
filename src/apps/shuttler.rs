@@ -20,7 +20,7 @@ use crate::{
     config::{candidate::Candidate, Config, APP_NAME_BRIDGE, APP_NAME_LENDING, TASK_INTERVAL},
     helper::{
         client_side::{self, connect_ws_client, send_cosmos_transaction}, encoding::{from_base64, pubkey_to_identifier}, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store, store::Store
-    },
+    }, rpc::run_rpc_server,
 };
 
 use super::{Input, SignMode, Task};
@@ -184,12 +184,16 @@ impl<'a> Shuttler<'a> {
         // Common Setting: Context and Heart Beat
         let mut context = Context::new(swarm, tx_sender, identifier, node_key, conf.clone()); 
 
-        // let rpc = conf.rpc_address.clone();
-        // tokio::spawn(async move{
-        //     run_rpc_server(rpc).await.expect("RPC Server stopped");
-        // });
-
         let mut ticker = tokio::time::interval_at(get_next_full_hour(), Duration::from_secs(5 * 60));
+
+        if conf.enable_rpc {
+            let task_store = context.task_store.clone();
+            let rpc_host = conf.rpc_address.clone();
+            spawn(async move {
+                run_rpc_server(rpc_host, task_store).await
+            });
+        }
+
         loop {
             select! {
                 recv = sidechain_event_stream.next() => {
@@ -257,6 +261,11 @@ impl<'a> Shuttler<'a> {
                         // debug!("Swarm event: {:?}", swarm_event);
                     },
                 },
+                // _ = run_rpc_server(conf.enable_rpc, conf.rpc_address.clone(), context.task_store.clone()) => {
+                //     if conf.enable_rpc {
+                //         info!("RPC server stopped.");
+                //     }
+                // },
                 _ = signal::ctrl_c() => {
                     info!("Received Ctrl-C, shutting down...");
                     break;
