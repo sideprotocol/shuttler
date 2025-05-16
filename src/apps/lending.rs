@@ -262,12 +262,12 @@ impl RefreshAdaptor for RefreshHandler {
     fn new_task(&self, ctx: &mut Context, event: &SideEvent) -> Option<Vec<Task>> {
         match event {
             SideEvent::BlockEvent( events) => {
-                if events.contains_key("initiate_refresh.id") {
+                if events.contains_key("initiate_refreshing.id") {
                     println!("Events: {:?}", events);
                     let mut tasks = vec![];
-                    for ((id, dkg_id), removed) in events.get("initiate_refresh.id")?.iter()
-                        .zip(events.get("initiate_refresh.dkg_id")?)
-                        .zip(events.get("initiate_refresh.removed_participants")?){
+                    for ((id, dkg_id), removed) in events.get("initiate_refreshing.id")?.iter()
+                        .zip(events.get("initiate_refreshing.dkg_id")?)
+                        .zip(events.get("initiate_refreshing.removed_participants")?){
 
                             let dkg_keys = match ctx.general_store.get(&format!("lending-dkg-{}", dkg_id).as_str()) {
                                 Some(k) => k.split(',').map(|t| t.to_owned()).collect::<Vec<_>>(),
@@ -328,7 +328,7 @@ impl RefreshAdaptor for RefreshHandler {
                     tweak,
                 };
                 ctx.keystore.save(&hexkey, &keyshare);
-                message_keys.extend(key_bytes);
+                message_keys.extend(&key_bytes[1..]);
             };
             let message = hex::decode(hash(&message_keys)).unwrap();
             let signature = hex::encode(ctx.node_key.sign(&message, None));
