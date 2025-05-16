@@ -1,38 +1,24 @@
 
 use std::sync::Arc;
 
-use axum::{Router, routing::get, extract::State};
+use axum::{routing::get, Router};
 use tracing::info;
 
-use crate::{apps::Task, helper::store::{DefaultStore, Store}};
+use crate::{apps::Task, helper::store::DefaultStore};
+
+pub mod service;
+
+pub use service::*;
 
 #[derive(Clone)]
 pub struct AppState {
-    task_store: Arc<DefaultStore<String, Task>>,
+    pub task_store: Arc<DefaultStore<String, Task>>,
 }
 
 impl AppState {
     pub fn new(task_store: Arc<DefaultStore<String, Task>>) -> Self {
         Self { task_store }
     }
-}
-
-pub async fn home() -> &'static str  {
-    "Welcome to Shuttler"
-}
-
-pub async fn health() -> &'static str {
-    "hello health"
-}
-pub async fn metrics(State(state): State<AppState>) -> String {
-    let list= state.task_store.list();
-    
-    format!("hello metrics: {}", list.len())
-}
-
-pub async fn addresses(_state: Arc<AppState>) -> &'static str {
-    // ...
-    "hello metrics"
 }
 
 pub async fn run_rpc_server(rpc: String, task_store: Arc<DefaultStore<String, Task>>) -> std::result::Result<(), std::io::Error>{
@@ -45,6 +31,7 @@ pub async fn run_rpc_server(rpc: String, task_store: Arc<DefaultStore<String, Ta
         .route("/metrics", get(metrics))
         // .route("path", get( async { let x= db.get(&"ss".to_string()); return "hello metrics"}))
         .route("/health", get(health))
+        .route("/peers", get(peers))
         // .layer(Extension(state2))
         .with_state(state2)
         .route("/", get(home));

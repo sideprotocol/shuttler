@@ -43,14 +43,6 @@ impl Candidate {
         if self.last_sync_time + 3600 > now() { 
             return 
         }
-        
-        // let validators: Vec<cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::Validator> = match client_side::get_latest_validators(&self.host).await {
-        //     Ok(r) => r.into_inner().validators,
-        //     Err(e) => {
-        //         warn!("failed to sync valdiators: {:?}", e);
-        //         return
-        //     },
-        // };
 
         let params = match client_side::get_tss_params(&self.host).await {
             Ok(r) => r.into_inner().params.unwrap(),
