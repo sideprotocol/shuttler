@@ -144,7 +144,7 @@ pub async fn sync_signed_transactions(relayer: &Relayer) {
                         match relayer.bitcoin_client.send_raw_transaction(&signed_tx) {
                             Ok(txid) => {
                                 SEQUENCE.fetch_add(1, Ordering::SeqCst);
-                                
+
                                 info!("PSBT broadcasted to Bitcoin: {}", txid);
                             }
                             Err(err) => {
@@ -232,7 +232,20 @@ pub async fn scan_vault_txs_by_height(relayer: &Relayer, height: u64) -> bool {
         }
     };
 
-    let vaults = get_cached_vaults(relayer).await;
+    let vaults = match get_vaults(relayer).await {
+        Ok(vaults) => {
+            if vaults.is_empty() {
+                debug!("no bridge vaults found");
+                return true;
+            }
+
+            vaults
+        }
+        Err(e) => {
+            error!("Failed to get bridge vaults, err: {}", e);
+            return false;
+        }
+    };
 
     for (i, tx) in block.txdata.iter().enumerate() {
         debug!(
@@ -481,7 +494,20 @@ pub async fn check_and_handle_tx_by_hash(relayer: &Relayer, hash: &Txid) {
         .position(|tx_in_block| tx_in_block == &tx)
         .expect("the tx should be included in the block");
 
-    let vaults = get_cached_vaults(relayer).await;
+    let vaults = match get_vaults(relayer).await {
+        Ok(vaults) => {
+            if vaults.is_empty() {
+                error!("no bridge vaults found");
+                return;
+            }
+
+            vaults
+        }
+        Err(e) => {
+            error!("Failed to get bridge vaults, err: {}", e);
+            return;
+        }
+    };
 
     check_and_handle_tx(relayer, &block_hash, &block, &tx, tx_index, &vaults).await;
 }
@@ -541,44 +567,34 @@ fn save_last_scanned_height(relayer: &Relayer, height: u64) {
         .insert(DB_KEY_BITCOIN_TIP, serde_json::to_vec(&height).unwrap());
 }
 
-async fn get_cached_vaults(relayer: &Relayer) -> Vec<String> {
+async fn get_vaults(relayer: &Relayer) -> anyhow::Result<Vec<String>> {
     if let Ok(Some(last_update)) = relayer.db_relayer.get(DB_KEY_VAULTS_LAST_UPDATE) {
         let last_update: u64 = serde_json::from_slice(&last_update).unwrap_or(0);
         let now = chrono::Utc::now().timestamp() as u64;
         if now - last_update < 60 * 60 * 24 {
             // 24 hours
             if let Ok(Some(vaults)) = relayer.db_relayer.get(DB_KEY_VAULTS) {
-                return serde_json::from_slice(&vaults).unwrap_or(vec![]);
+                return Ok(serde_json::from_slice(&vaults).unwrap_or(vec![]));
             };
         }
     }
 
-    let grpc = relayer.config().side_chain.grpc.clone();
-    let mut client = side_proto::side::btcbridge::query_client::QueryClient::connect(grpc)
-        .await
-        .unwrap();
-    let x = client
-        .query_params(QueryParamsRequest {})
-        .await
-        .unwrap()
-        .into_inner();
-    match x.params {
-        Some(params) => {
-            let vaults = params
-                .vaults
-                .iter()
-                .map(|v| v.address.clone())
-                .collect::<Vec<_>>();
-            let _ = relayer
-                .db_relayer
-                .insert(DB_KEY_VAULTS, serde_json::to_vec(&vaults).unwrap());
-            let _ = relayer.db_relayer.insert(
-                DB_KEY_VAULTS_LAST_UPDATE,
-                serde_json::to_vec(&chrono::Utc::now().timestamp()).unwrap(),
-            );
-            vaults
+    match client_side::get_bridge_vaults(&relayer.config().side_chain.grpc).await {
+        Ok(vaults) => {
+            if !vaults.is_empty() {
+                let _ = relayer
+                    .db_relayer
+                    .insert(DB_KEY_VAULTS, serde_json::to_vec(&vaults).unwrap());
+
+                let _ = relayer.db_relayer.insert(
+                    DB_KEY_VAULTS_LAST_UPDATE,
+                    serde_json::to_vec(&chrono::Utc::now().timestamp()).unwrap(),
+                );
+            }
+
+            Ok(vaults)
         }
-        None => vec![],
+        Err(e) => Err(e),
     }
 }
 

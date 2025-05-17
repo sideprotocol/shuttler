@@ -115,7 +115,6 @@ pub async fn get_bitcoin_block_header_on_side(host: &str, height: u64) -> Result
     client.query_block_header_by_height(QueryBlockHeaderByHeightRequest { height }).await
 }
 
-
 pub async fn get_confirmation_depth(host: &str) -> u64 {
     // TODO
     // use deposit confirmation depth for now
@@ -170,6 +169,20 @@ pub async fn get_withdraw_confirmation_depth(host: &str) -> u64 {
             return 6 as u64;
         }
     };
+}
+
+pub async fn get_bridge_vaults (host: &str) -> anyhow::Result<Vec<String>> {
+    let mut client = BridgeQueryClient::connect(host.to_string()).await?;
+    let res = client.query_params(QueryParamsRequest {}).await?;
+
+    match res.into_inner().params {
+        Some(params) => Ok(params
+            .vaults
+            .iter()
+            .map(|v| v.address.clone())
+            .collect::<Vec<_>>()),
+        None => Ok(vec![]),
+    }
 }
 
 pub async fn get_latest_validators(host: &str) -> Result<Response<GetLatestValidatorSetResponse>, Status> {
