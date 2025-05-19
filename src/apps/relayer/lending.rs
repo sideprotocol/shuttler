@@ -1,4 +1,7 @@
-use bitcoin::{consensus::Decodable, Block, BlockHash, Network, Transaction, Txid};
+use bitcoin::{
+    consensus::{encode, Decodable},
+    Block, BlockHash, Network, Transaction, Txid,
+};
 use bitcoincore_rpc::RpcApi;
 use futures::join;
 use tendermint::abci;
@@ -10,10 +13,11 @@ use tracing::{debug, error, info};
 use crate::{
     apps::relayer::Relayer,
     helper::{
-        bitcoin::{self as bitcoin_utils, build_psbt_from_signed_tx, get_signed_tx_from_psbt},
+        bitcoin::{self as bitcoin_utils, get_signed_tx_from_psbt},
         client_side::{
-            self, get_liquidation, get_loan_dlc_meta, get_redemption, send_cosmos_transaction
+            self, get_liquidation, get_loan_dlc_meta, get_redemption, send_cosmos_transaction,
         },
+        encoding::to_base64,
     },
 };
 
@@ -223,15 +227,12 @@ async fn parse_and_handle_redemption_txs(
 
     txs_results.unwrap_or(vec![]).iter().for_each(|result| {
         result.events.iter().for_each(|event| {
-            if event.kind == EVENT_TYPE_GENERATE_SIGNED_REDEMPTION_TRANSACTION{
+            if event.kind == EVENT_TYPE_GENERATE_SIGNED_REDEMPTION_TRANSACTION {
                 event.attributes.iter().for_each(|attr| {
                     if attr.key_str().unwrap() == EVENT_ATTRIBUTE_KEY_ID {
                         let id = attr.value_str().unwrap().parse().unwrap();
 
-                        debug!(
-                            "Signed redemption tx found on side, id: {}",
-                            id,
-                        );
+                        debug!("Signed redemption tx found on side, id: {}", id,);
                         redemption_ids.push(id);
                     }
                 });
@@ -395,7 +396,7 @@ pub async fn send_deposit_tx(
     let msg = MsgApprove {
         relayer: relayer.config().relayer_bitcoin_address(),
         vault,
-        deposit_tx: build_psbt_from_signed_tx(tx),
+        deposit_tx: to_base64(encode::serialize(tx).as_slice()),
         block_hash: block_hash.to_string(),
         proof,
     };
@@ -455,23 +456,19 @@ pub async fn handle_cet(relayer: &Relayer, loan_id: String, cet_type: String) {
 }
 
 pub async fn handle_redemption_tx(relayer: &Relayer, id: u64) {
-    let redemption =
-        match get_redemption(&relayer.config.side_chain.grpc, id).await {
-            Ok(resp) => match resp.into_inner().redemption {
-                Some(redemption) => redemption,
-                None => {
-                    error!("No redemption exists on side, id: {}", id);
-                    return;
-                }
-            },
-            Err(e) => {
-                error!(
-                    "Failed to query redemption, id: {}, err: {}",
-                    id, e
-                );
+    let redemption = match get_redemption(&relayer.config.side_chain.grpc, id).await {
+        Ok(resp) => match resp.into_inner().redemption {
+            Some(redemption) => redemption,
+            None => {
+                error!("No redemption exists on side, id: {}", id);
                 return;
             }
-        };
+        },
+        Err(e) => {
+            error!("Failed to query redemption, id: {}, err: {}", id, e);
+            return;
+        }
+    };
 
     let signed_tx = match get_signed_tx_from_psbt(&redemption.tx) {
         Ok(signed_tx) => signed_tx,

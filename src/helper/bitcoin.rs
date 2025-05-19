@@ -149,15 +149,6 @@ pub fn get_signed_tx_from_psbt(psbt_base64: &String) -> anyhow::Result<Transacti
     Ok(signed_tx)
 }
 
-pub fn build_psbt_from_signed_tx(tx: &Transaction) -> String {
-    let mut unsigned_tx = tx.clone();
-    unsigned_tx.input.iter_mut().for_each(|ti| {ti.script_sig = ScriptBuf::new(); ti.witness = witness::Witness::new()});
-    
-    let packet = Psbt::from_unsigned_tx(unsigned_tx).unwrap().serialize();
-
-    to_base64(packet.as_slice())
-}
-
 pub fn compute_tx_proof(txids: Vec<Txid>, index: usize) -> Vec<String> {
     merkle_proof::compute_tx_proof(txids, index)
 }
