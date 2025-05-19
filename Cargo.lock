@@ -542,8 +542,6 @@ dependencies = [
  "http 1.3.1",
  "http-body 1.0.1",
  "http-body-util",
- "hyper 1.6.0",
- "hyper-util",
  "itoa",
  "matchit 0.7.3",
  "memchr",
@@ -552,15 +550,10 @@ dependencies = [
  "pin-project-lite",
  "rustversion",
  "serde",
- "serde_json",
- "serde_path_to_error",
- "serde_urlencoded",
  "sync_wrapper 1.0.2",
- "tokio",
  "tower 0.5.2",
  "tower-layer",
  "tower-service",
- "tracing",
 ]
 
 [[package]]
@@ -615,7 +608,6 @@ dependencies = [
  "sync_wrapper 1.0.2",
  "tower-layer",
  "tower-service",
- "tracing",
 ]
 
 [[package]]
@@ -5986,7 +5978,7 @@ dependencies = [
  "anyhow",
  "async-std",
  "async-trait",
- "axum 0.7.9",
+ "axum 0.8.4",
  "base64 0.22.1",
  "bech32",
  "bip39",
@@ -6043,9 +6035,9 @@ dependencies = [
 
 [[package]]
 name = "side-proto"
-version = "2.0.0-alpha.12"
+version = "2.0.0-alpha.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b0221a8dec612556523b479d67189b9ee5fc48c2817bbdc18a490b23cc9b10a"
+checksum = "688b952e8d30a5f5ea2fde6cade7e8a9f9900c933351f257fd06f29128353ca6"
 dependencies = [
  "cosmos-sdk-proto 0.27.0",
  "cosmrs 0.22.0",
