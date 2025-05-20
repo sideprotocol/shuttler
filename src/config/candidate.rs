@@ -58,7 +58,7 @@ impl Candidate {
         self.identifiers.clear();
 
         params.allowed_dkg_participants.iter().for_each(|v| {
-            if let Ok(pk ) = from_base64(v) {
+            if let Ok(pk ) = from_base64(&v.consensus_pubkey) {
                 let id = pubkey_to_identifier(&pk);
                 debug!("added {:?} in white list", id);
                 self.peers.push(identifier_to_peer_id(&id ));
