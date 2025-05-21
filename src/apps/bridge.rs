@@ -2,11 +2,11 @@
 use cosmrs::Any;
 use libp2p::gossipsub::IdentTopic;
 use tracing::{error, info};
-use bitcoin::{Network, TapNodeHash, XOnlyPublicKey};
+use bitcoin::{key, Network, TapNodeHash, XOnlyPublicKey};
 use bitcoincore_rpc::{Auth, Client};
 use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 
-use side_proto::side::btcbridge::{MsgCompleteDkg, MsgSubmitSignatures};
+use side_proto::side::btcbridge::{MsgCompleteDkg, MsgCompleteRefreshing, MsgSubmitSignatures};
 
 use crate::apps::{App, Context, Input, SignMode, Status, SubscribeMessage, Task };
 use crate::config::{Config, VaultKeypair, APP_NAME_BRIDGE};
@@ -16,7 +16,7 @@ use crate::helper::encoding::{from_base64, hash, pubkey_to_identifier};
 use crate::helper::mem_store;
 use crate::helper::store::Store;
 use crate::protocols::dkg::{DKGAdaptor, DKG};
-use crate::protocols::refresh::{ParticipantRefresher, RefreshAdaptor};
+use crate::protocols::refresh::{ParticipantRefresher, RefreshAdaptor, RefreshInput};
 use crate::protocols::sign::{SignAdaptor, StandardSigner};
 
 use super::event::get_attribute_value;
@@ -115,7 +115,10 @@ impl DKGAdaptor for KeygenHander {
             TaskInput::DKG(i) => i,
             _ => return
         };
+        
         let vaults = generate_vault_addresses(ctx, pub_key.clone(), priv_key.clone(), &dkg_input.tweaks, ctx.conf.bitcoin.network);
+
+        ctx.general_store.save(&format!("{}", task.id).as_str(), &vaults.join(","));
         let id: u64 = task.id.replace("create-vault-", "").parse().unwrap();
         let mut sig_msg = id.to_be_bytes().to_vec();
 
@@ -261,11 +264,99 @@ impl SignAdaptor for SignatureHandler {
 
 pub struct RefreshHandler;
 impl RefreshAdaptor for RefreshHandler {
-    fn new_task(&self, _ctx: &mut Context, _events: &SideEvent) -> Option<Vec<Task>> {
+    fn new_task(&self, ctx: &mut Context, event: &SideEvent) -> Option<Vec<Task>> {
+        match event {
+            SideEvent::BlockEvent( events) => {
+                if events.contains_key("initiate_refreshing_bridge.id") {
+                    println!("Events: {:?}", events);
+                    let mut tasks = vec![];
+                    for ((id, dkg_id), removed) in events.get("initiate_refreshing_bridge.id")?.iter()
+                        .zip(events.get("initiate_refreshing_bridge.dkg_id")?)
+                        .zip(events.get("initiate_refreshing_bridge.removed_participants")?){
+
+                            let vault_addrs = match ctx.general_store.get(&format!("create-vault-{}", dkg_id).as_str()) {
+                                Some(k) => k.split(',').map(|t| t.to_owned()).collect::<Vec<_>>(),
+                                None => continue,
+                            };
+
+                            let removed_ids = removed.split(",").map(|k| pubkey_to_identifier(&from_base64(k).unwrap())).collect::<Vec<_>>();
+                            if removed_ids.contains(&ctx.identifier) {
+                                vault_addrs.iter().for_each(|k| {ctx.keystore.remove(k);} );
+                                continue;
+                            }
+
+                            let first_key = match vault_addrs.get(0) {
+                                Some(k) => k,
+                                None => continue,
+                            };
+
+                            let first_key_pair = match ctx.keystore.get(&first_key.to_string()) {
+                                Some(k) => k,
+                                None => continue,
+                            };
+
+                            let participants = first_key_pair.pub_key.verifying_shares()
+                                .keys().filter(|i| !removed_ids.contains(i) ).map(|i| i.clone()).collect::<Vec<_>>();
+
+                            let task_id = format!("bridge-refresh-{}", id);
+                            let input = RefreshInput{
+                                id: task_id.clone(),
+                                keys: vault_addrs,
+                                threshold: first_key_pair.priv_key.min_signers().clone() - 1,
+                                remove_participants: removed_ids,
+                                new_participants: participants,
+                            };
+                            tasks.push(Task::new_with_input(task_id, TaskInput::REFRESH(input), "".to_owned()));
+                        };
+                    return Some(tasks);
+                }
+            },
+            SideEvent::TxEvent(_events) => {
+            }
+        }
         None
     }
 
-    fn on_complete(&self, _ctx: &mut Context, _task: &mut Task, _keys: Vec<(frost_adaptor_signature::keys::KeyPackage, frost_adaptor_signature::keys::PublicKeyPackage)>) {
+    fn on_complete(&self, ctx: &mut Context, task: &mut Task, keys: Vec<(frost_adaptor_signature::keys::KeyPackage, frost_adaptor_signature::keys::PublicKeyPackage)>) {
+
+        if let Ok(id) = task.id.replace("lending-refresh-", "").parse::<u64>() {
+
+            if keys.len() == 0 {
+                return;
+            }
+            
+            if let Some(new_key) = keys.iter().next() {
+                
+                let vault_addrs = match ctx.general_store.get(&format!("create-vault-{}", task.id).as_str()) {
+                    Some(k) => k.split(',').map(|t| t.to_owned()).collect::<Vec<_>>(),
+                    None => return,
+                };
+
+                vault_addrs.iter().for_each(|k| {
+                    if let Some(vault) = ctx.keystore.get(k).as_mut() {
+                        vault.priv_key = new_key.0.clone();
+                        vault.pub_key = new_key.1.clone();
+                        ctx.keystore.save(k, &vault);
+                    };
+                } );
+            };
+            
+            let message_keys = id.to_be_bytes()[..].to_vec();
+
+            let message = hex::decode(hash(&message_keys)).unwrap();
+            let signature = hex::encode(ctx.node_key.sign(&message, None));
+
+            let msg = MsgCompleteRefreshing {
+                id,
+                sender: ctx.conf.relayer_bitcoin_address(),
+                consensus_pubkey: ctx.id_base64.clone(),
+                signature,
+            };
+            let any = Any::from_msg(&msg).unwrap();
+            if let Err(e) = ctx.tx_sender.send(any) {
+                tracing::error!("{:?}", e)
+            }
+        }
         
     }
 }
