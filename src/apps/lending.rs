@@ -163,6 +163,8 @@ impl SignAdaptor for SignerHandler {
                                     // let mode = SignMode::SignWithAdaptorPoint(adaptor);    
                                     sign_mode = SignMode::SignWithAdaptorPoint(adaptor)
                                 }
+                            } else if mode.eq(&(SigningType::SchnorrWithTweak as i32).to_string()) {
+                                sign_mode = SignMode::SignWithTweak
                             };
     
                             let participants = mem_store::count_task_participants(ctx, pub_key);
