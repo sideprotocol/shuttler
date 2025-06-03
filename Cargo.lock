@@ -6044,9 +6044,9 @@ dependencies = [
 
 [[package]]
 name = "side-proto"
-version = "2.0.0-alpha.15"
+version = "2.0.0-alpha.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "327eba78f6833631c8aa7f449fd1470686a743e289e98af6226c36c62187dec5"
+checksum = "1265b9a35677fb01061b686c11732b7284b53f3012cfc0a0c025f9863007bf8a"
 dependencies = [
  "cosmos-sdk-proto 0.27.0",
  "cosmrs 0.22.0",

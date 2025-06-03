@@ -22,7 +22,7 @@ use crate::{
 };
 
 use cosmos_sdk_proto::{cosmos::tx::v1beta1::BroadcastTxResponse, Any};
-use side_proto::side::{lending::MsgApprove, liquidation::LiquidationStatus};
+use side_proto::side::{lending::MsgSubmitDepositTransaction, liquidation::LiquidationStatus};
 
 const EVENT_TYPE_APPLY: &str = "apply";
 const EVENT_ATTRIBUTE_KEY_VAULT: &str = "vault";
@@ -393,7 +393,7 @@ pub async fn send_deposit_tx(
     block_hash: &BlockHash,
     proof: Vec<String>,
 ) -> Result<Response<BroadcastTxResponse>, Status> {
-    let msg = MsgApprove {
+    let msg = MsgSubmitDepositTransaction {
         relayer: relayer.config().relayer_bitcoin_address(),
         vault,
         deposit_tx: to_base64(encode::serialize(tx).as_slice()),
