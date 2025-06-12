@@ -66,6 +66,8 @@ impl DKGAdaptor for KeygenHander {
                 if events.contains_key("initiate_dkg.id") {
                     println!("Events: {:?}", events);
 
+                    let live_peers = mem_store::alive_participants();
+
                     let mut tasks = vec![];
                     for (((id, ps), t), b) in events.get("initiate_dkg.id")?.iter()
                         .zip(events.get("initiate_dkg.participants")?)
@@ -74,8 +76,13 @@ impl DKGAdaptor for KeygenHander {
                         
                             let mut participants = vec![];
                             for p in ps.split(",") {
-                                if let Ok(identifier) = from_base64(p) {
-                                    participants.push(pubkey_to_identifier(&identifier));
+                                if let Ok(keybytes) = from_base64(p) {
+                                    let identifier = pubkey_to_identifier(&keybytes);
+                                    // not have enough participants
+                                    if !live_peers.contains(&identifier) {
+                                        break;
+                                    }
+                                    participants.push(identifier);
                                 }
                             };
                             if let Ok(threshold) = t.parse() {
@@ -267,6 +274,7 @@ impl RefreshAdaptor for RefreshHandler {
                 if events.contains_key("initiate_refreshing.id") {
                     println!("Events: {:?}", events);
                     let mut tasks = vec![];
+                    let live_peers = mem_store::alive_participants();
                     for ((id, dkg_id), removed) in events.get("initiate_refreshing.id")?.iter()
                         .zip(events.get("initiate_refreshing.dkg_id")?)
                         .zip(events.get("initiate_refreshing.removed_participants")?){
@@ -294,6 +302,10 @@ impl RefreshAdaptor for RefreshHandler {
 
                             let participants = first_key_pair.pub_key.verifying_shares()
                                 .keys().filter(|i| !removed_ids.contains(i) ).map(|i| i.clone()).collect::<Vec<_>>();
+
+                            if participants.iter().any(|i| !live_peers.contains(&i)) {
+                                continue;
+                            }
 
                             let task_id = format!("lending-refresh-{}", id);
                             let input = RefreshInput{

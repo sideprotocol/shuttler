@@ -2,7 +2,7 @@
 use cosmrs::Any;
 use libp2p::gossipsub::IdentTopic;
 use tracing::{error, info};
-use bitcoin::{key, Network, TapNodeHash, XOnlyPublicKey};
+use bitcoin::{Network, TapNodeHash, XOnlyPublicKey};
 use bitcoincore_rpc::{Auth, Client};
 use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 
@@ -79,6 +79,7 @@ impl DKGAdaptor for KeygenHander {
             SideEvent::BlockEvent(events) => {
                 if events.contains_key("initiate_dkg_bridge.id") {
                     // println!("Events: {:?}", events);
+                    let live_peers = mem_store::alive_participants();
                     let mut tasks = vec![];
                     for (((id, ps), tks ), t)in events.get("initiate_dkg_bridge.id")?.iter()
                         .zip(events.get("initiate_dkg_bridge.participants")?)
@@ -87,8 +88,12 @@ impl DKGAdaptor for KeygenHander {
                         
                             let mut participants = vec![];
                             for p in ps.split(",") {
-                                if let Ok(identifier) = from_base64(p) {
-                                    participants.push(pubkey_to_identifier(&identifier));
+                                if let Ok(key_bytes) = from_base64(p) {
+                                    let identifier = pubkey_to_identifier(&key_bytes);
+                                    if !live_peers.contains(&identifier) {
+                                        break;
+                                    }
+                                    participants.push(identifier);
                                 }
                             };
                             if let Ok(size) = tks.parse::<i32>() {
@@ -269,6 +274,7 @@ impl RefreshAdaptor for RefreshHandler {
             SideEvent::BlockEvent( events) => {
                 if events.contains_key("initiate_refreshing_bridge.id") {
                     println!("Events: {:?}", events);
+                    let live_peers = mem_store::alive_participants();
                     let mut tasks = vec![];
                     for ((id, dkg_id), removed) in events.get("initiate_refreshing_bridge.id")?.iter()
                         .zip(events.get("initiate_refreshing_bridge.dkg_id")?)
@@ -297,6 +303,10 @@ impl RefreshAdaptor for RefreshHandler {
 
                             let participants = first_key_pair.pub_key.verifying_shares()
                                 .keys().filter(|i| !removed_ids.contains(i) ).map(|i| i.clone()).collect::<Vec<_>>();
+
+                            if participants.iter().any(|i| !live_peers.contains(&i)) {
+                                continue;
+                            }
 
                             let task_id = format!("bridge-refresh-{}", id);
                             let input = RefreshInput{
