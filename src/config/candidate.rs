@@ -4,7 +4,7 @@ use frost_adaptor_signature::Identifier;
 use libp2p::PeerId;
 use tracing::{debug, warn};
 
-use crate::helper::{client_side, encoding::{from_base64, identifier_to_peer_id, pubkey_to_identifier}, now};
+use crate::helper::{client_side, encoding::{from_base64, identifier_to_peer_id, pubkey_to_identifier}, mem_store, now};
 
 #[derive(Debug)]
 pub struct Candidate {
@@ -61,6 +61,7 @@ impl Candidate {
             if let Ok(pk ) = from_base64(&v.consensus_pubkey) {
                 let id = pubkey_to_identifier(&pk);
                 debug!("added {:?} in white list", id);
+                mem_store::add_moniker(&id, v.moniker.clone());
                 self.peers.push(identifier_to_peer_id(&id ));
                 self.identifiers.push( id );
             }

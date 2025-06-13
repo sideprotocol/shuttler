@@ -30,6 +30,9 @@ lazy_static! {
     pub static ref TaskParticipants: Mutex<BTreeMap<String,Vec<Identifier>>> = {
         Mutex::new(BTreeMap::new())
     };
+    pub static ref Monikers: Mutex<BTreeMap<Identifier, String>> = {
+        Mutex::new(BTreeMap::new())
+    };
 }
 
 pub fn alive_participants() -> Vec<Identifier> {
@@ -37,6 +40,18 @@ pub fn alive_participants() -> Vec<Identifier> {
         // tracing::debug!("alive: {:?}", table);
         table.keys()
             .map(|k| k.clone())
+            .collect::<Vec<_>>()
+}
+
+pub fn alive_participants_monikers() -> Vec<String> {
+    let table= AliveTable.lock().unwrap();
+    let monikers =  Monikers.lock().unwrap();
+        // tracing::debug!("alive: {:?}", table);
+        table.keys()
+            .map(|k| match monikers.get(k) {
+                Some(m) => m.clone(),
+                None => crate::helper::encoding::to_base64(&k.serialize()),
+            })
             .collect::<Vec<_>>()
 }
 
@@ -84,6 +99,11 @@ pub fn is_peer_trusted_peer( ctx: &Context, identifier: &Identifier) -> bool {
     } else {
         false
     }
+}
+
+pub fn add_moniker(identifier: &Identifier, moniker: String) {
+    let mut map = Monikers.lock().unwrap();
+    map.insert(identifier.clone(), moniker);
 }
 
 pub fn get_dkg_round1_secret_packet(task_id: &str) -> Option<Vec<dkg::round1::SecretPackage>> {
