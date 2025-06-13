@@ -19,7 +19,7 @@ use crate::{
     },
     config::{candidate::Candidate, Config, APP_NAME_BRIDGE, APP_NAME_LENDING, TASK_INTERVAL},
     helper::{
-        client_side::{self, connect_ws_client, send_cosmos_transaction}, encoding::{from_base64, pubkey_to_identifier}, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store, store::Store
+        client_side::{self, send_cosmos_transaction}, encoding::{from_base64, pubkey_to_identifier}, gossip::{sending_heart_beat, subscribe_gossip_topics, HeartBeatMessage, SubscribeTopic}, mem_store, store::Store
     }, rpc::run_rpc_server,
 };
 
@@ -179,11 +179,9 @@ impl<'a> Shuttler<'a> {
             }
         });
 
-        // Connect to the Tendermint WebSocket endpoint
-        let mut sidechain_event_stream = connect_ws_client(&conf.side_chain.rpc).await;
+
         // Common Setting: Context and Heart Beat
         let mut context = Context::new(swarm, tx_sender, identifier, node_key, conf.clone()); 
-
         let mut ticker = tokio::time::interval_at(get_next_full_hour(), Duration::from_secs(5 * 60));
 
         if conf.enable_rpc {
@@ -194,18 +192,44 @@ impl<'a> Shuttler<'a> {
             });
         }
 
+        // Connect to the Tendermint WebSocket endpoint
+        let mut client = crate::helper::websocket::WebSocketClient::builder()
+            .with_channel_capacity(200)
+            .with_connection_timeout(Duration::from_secs(5))
+            .with_auto_reconnect(true)
+            .with_reconnect_delay(Duration::from_secs(5))
+            .with_max_reconnect_attempts(10)
+            .build();
+        if client.connect(format!("{}/websocket", conf.side_chain.rpc.replace("http", "ws"))).await.is_ok() {
+            tracing::info!("connected to websocket")
+        };
+
         loop {
             select! {
-                recv = sidechain_event_stream.next() => {
-                    match recv {
-                        Some(Ok(msg)) => {
-                            self.handle_block_event(&mut context, msg);
-                        },
-                        _ => {
-                            sidechain_event_stream = connect_ws_client(&conf.side_chain.rpc).await;
+                Some(msg) = client.receive_message() => {
+                    // tracing::info!("msg {:?}", msg);
+                    if self.handle_block_event(&mut context, msg) {
+                        tracing::error!("websocket connection closed, reconnecting...");
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        if client.reconnect().await.is_err() {
+                            tracing::error!("Failed to reconnect to websocket");
+                            break;
+                        } else {
+                            tracing::info!("Reconnected to websocket");
                         }
-                    }
+                    };
                 }
+                // recv = sidechain_event_stream.next() => {
+                //     match recv {
+                //         Some(Ok(msg)) => {
+                //             self.handle_block_event(&mut context, msg);
+                //         },
+                //         _ => {
+                //             tracing::error!("websocket error!");
+                //             sidechain_event_stream = connect_ws_client(&conf.side_chain.rpc).await;
+                //         }
+                //     }
+                // }
                 _ = ticker.tick() => {
                     self.handle_missed_tss_signing_request(&mut context).await;
                     self.handle_missed_bridge_signing_request(&mut context).await;
@@ -290,19 +314,33 @@ impl<'a> Shuttler<'a> {
         }
     }
 
-    fn handle_block_event(&self, ctx: &mut Context,  message: tokio_tungstenite::tungstenite::Message) {
+    fn handle_block_event(&self, ctx: &mut Context,  message: tokio_tungstenite::tungstenite::Message) -> bool {
 
-        let event: DeEvent = if let tokio_tungstenite::tungstenite::Message::Text(msg_bytes) = message {
-            match serde_json::from_slice::<Wrapper<DeEvent>>(msg_bytes.as_bytes()) {
-                Ok(wrap) => match wrap.into_result() {
-                    Ok(e) => e,
-                    Err(_) => return,
-                },
-                Err(_) => return,
-            }
-        } else {
-            return;
-        };   
+        let event: DeEvent = match message {
+            tokio_tungstenite::tungstenite::Message::Text(msg_bytes) => {
+                match serde_json::from_slice::<Wrapper<DeEvent>>(msg_bytes.as_bytes()) {
+                    Ok(wrap) => {
+                        match wrap.into_result() {
+                            Ok(e) => e,
+                            Err(e) => {
+                                tracing::error!("Failed to into event: {:?}", e);
+                                return true
+                            },
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!("Failed to parse event: {:?}", e);
+                        return false
+                    }
+                }
+            },
+            tokio_tungstenite::tungstenite::Message::Close(_close) => {
+                tracing::error!("connection closed");
+                return false
+            },
+            _ => return false
+        };
+
 
         if let Some(events) = event.events {
             let e: super::SideEvent = crate::apps::SideEvent::BlockEvent(events);
@@ -325,6 +363,7 @@ impl<'a> Shuttler<'a> {
             }
             _ => debug!("Does not support {}", event.query),
         }
+        false
     }
 
     // TODO: Handle missed signing request

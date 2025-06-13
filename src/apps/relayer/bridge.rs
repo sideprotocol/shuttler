@@ -23,7 +23,7 @@ use crate::{
 
 use side_proto::side::btcbridge::{
     MsgSubmitDepositTransaction, MsgSubmitFeeRate, MsgSubmitWithdrawTransaction,
-    QueryParamsRequest, SigningStatus,
+    SigningStatus,
 };
 use side_proto::{
     cosmos::base::query::v1beta1::PageRequest,

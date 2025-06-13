@@ -19,6 +19,7 @@ use frost_adaptor_signature as frost;
 use frost_adaptor_signature::keys::KeyPackage;
 use frost_adaptor_signature::Field;
 use rand::thread_rng;
+use tendermint_rpc::WebSocketConfig;
 use tokio::sync::mpsc;
 use tokio::{select, signal};
 
@@ -299,6 +300,8 @@ fn test_key_generation() {
 
     println!("priv: {:?}", keypair.secret_bytes().as_hex());
     println!("pub: {:?}", keypair.public_key().serialize().as_hex());
+
+    
 }
 
 #[test]
