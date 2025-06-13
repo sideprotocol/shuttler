@@ -75,16 +75,24 @@ impl DKGAdaptor for KeygenHander {
                         .zip(events.get("initiate_dkg.batch_size")?) {
                         
                             let mut participants = vec![];
+                            let mut names = vec![];
+                            let mut down = 0;
                             for p in ps.split(",") {
                                 if let Ok(keybytes) = from_base64(p) {
                                     let identifier = pubkey_to_identifier(&keybytes);
                                     // not have enough participants
                                     if !live_peers.contains(&identifier) {
-                                        break;
+                                        down += 1;
                                     }
                                     participants.push(identifier);
+                                    names.push(mem_store::get_participant_moniker(&identifier));
                                 }
                             };
+
+                            if down > 0 {
+                                debug!("lending dkg task {} has {} down participants {:?}, skip", id, down, names);
+                                continue;
+                            }
                             if let Ok(threshold) = t.parse() {
                                 if threshold as usize * 3 >= participants.len() * 2  {
                                     if let Ok(batch_size) = b.parse() {

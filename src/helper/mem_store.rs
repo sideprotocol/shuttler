@@ -55,6 +55,14 @@ pub fn alive_participants_monikers() -> Vec<String> {
             .collect::<Vec<_>>()
 }
 
+pub fn get_participant_moniker(id: &Identifier) -> String {
+    let monikers =  Monikers.lock().unwrap();
+        // tracing::debug!("alive: {:?}", table);
+    monikers.get(id)
+        .cloned()
+        .unwrap_or_else(|| crate::helper::encoding::to_base64(&id.serialize()))
+}
+
 pub fn update_alive_table(self_identifier: &Identifier, alive: HeartBeatMessage) {
 
     // tracing::debug!("{:?} {}, {} ", alive.payload.identifier, alive.payload.block_height, if alive.payload.last_seen > now() {alive.payload.last_seen - now()} else {0} );
