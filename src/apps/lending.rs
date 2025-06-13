@@ -89,7 +89,7 @@ impl DKGAdaptor for KeygenHander {
                                 }
                             };
 
-                            debug!("lending dkg task {} has {} down participants {:?}, skip", id, down, names);
+                            tracing::info!("lending dkg task {} has {} down participants {:?}, skip", id, down, names);
                             if down > 0 {
                                 continue;
                             }
