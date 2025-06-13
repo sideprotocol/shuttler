@@ -4,11 +4,8 @@ use std::sync::Arc;
 
 use axum::{extract::State, Json};
 use frost_adaptor_signature::Identifier;
-use tracing::info;
 
 use crate::helper::{mem_store, store::Store};
-
-
 
 pub async fn home() -> &'static str  {
     "Welcome to Shuttler"

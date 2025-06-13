@@ -1,4 +1,3 @@
-use std::{thread, time::Duration};
 
 use bitcoin::{hashes::{Hash, sha256d, HashEngine}, consensus::Encodable, key::Secp256k1, secp256k1::Message, sign_message::BITCOIN_SIGNED_MSG_PREFIX, PrivateKey};
 use cosmrs::{ crypto::secp256k1::SigningKey, tx::{self, Fee, ModeInfo, Raw, SignDoc, SignerInfo, SignerPublicKey}, Coin};
@@ -7,11 +6,9 @@ use cosmos_sdk_proto::{Any, cosmos::{
     tx::v1beta1::{service_client::ServiceClient as TxServiceClient, BroadcastMode, BroadcastTxRequest, BroadcastTxResponse}
 }};
 use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::service_client::ServiceClient as TendermintServiceClient;
-use futures::SinkExt;
 use tendermint::block::Height;
 use tendermint_rpc::{endpoint, Client, HttpClient};
-use tokio::{select, signal, sync::Mutex};
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio::sync::Mutex;
 use tonic::{Response, Status};
 
 use side_proto::side::{
@@ -32,7 +29,6 @@ use side_proto::side::{
     },
 };
 
-use tokio_tungstenite::tungstenite::protocol::Message as WebSocketMessage;
 
 use lazy_static::lazy_static;
 
@@ -71,27 +67,37 @@ impl SigningRequestsResponse {
     }
 }
 
-pub async fn connect_ws_client(endpoint: &str) -> WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>> {
-    let host= format!("{}/websocket", endpoint.replace("http", "ws"));
-    let sub_msg = r#"{"jsonrpc":"2.0","method":"subscribe","id":0,"params":{"query":"tm.event='NewBlock'"}}"#;
-    // let mut a: Option<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>> = None;
-    loop {
-        select! {
-            Ok((mut ws_stream , _)) = connect_async(&host) => {
-                if ws_stream.send(WebSocketMessage::Text(sub_msg.into())).await.is_ok() {
-                    // a = Some(ws_stream);
-                    return ws_stream;
-                }
-                tracing::error!("sidechain websocket client disconnected: {}", host);
-                thread::sleep(Duration::from_secs(5));
-            },
-            _ = signal::ctrl_c() => {
-                tracing::info!("Received Ctrl-C, shutting down websocket client...");
-                panic!("Ctrl-C received");
-            }
-        }
-    }
-}
+// pub async fn connect_ws_client(endpoint: &str) -> WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>> {
+// pub async fn connect_ws_client(endpoint: &str) -> TcpStream {
+
+//     let sub_msg = r#"{"jsonrpc":"2.0","method":"subscribe","id":0,"params":{"query":"tm.event='NewBlock'"}}"#;
+//     let host= format!("{}/websocket", endpoint.replace("http", "ws"));
+    
+//     tracing::info!("Connect... to {}", host);
+
+//     // loop {
+//     //     if let Ok(mut stream) = TcpStream::connect(endpoint.replace("http:://", "")) {
+//     //         stream.set_read_timeout(Some(Duration::from_secs(5)));
+//     //         stream.write(sub_msg.as_bytes());
+//     //         return stream
+//     //     }
+//     // }
+
+    
+//     // let mut a: Option<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>> = None;
+//     // let x = tokio::time::timeout(Duration::from_secs(5), connect_async(&host)).await
+//     // loop {
+//     //    match tokio::time::timeout(Duration::from_secs(5),connect_async(&host)).await {
+//     //       Ok(Ok((mut ws_stream, _s))) => {
+//     //         if ws_stream.send(WebSocketMessage::Text(sub_msg.into())).await.is_ok() {
+//     //             // a = Some(ws_stream);
+//     //             return ws_stream;
+//     //         }
+//     //       },
+//     //       _ => thread::sleep(Duration::from_secs(5)),
+//     //    };
+//     // }
+// }
 
 pub async fn get_bitcoin_tip_on_side(host: &str) -> Result<Response<QueryChainTipResponse>, Status> {
     let mut client = match OracleQueryClient::connect(host.to_string()).await {

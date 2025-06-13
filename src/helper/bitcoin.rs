@@ -1,7 +1,7 @@
 
 use anyhow::anyhow;
 use bitcoin::sighash::{Prevouts, SighashCache};
-use bitcoin::{witness, Psbt};
+use bitcoin::Psbt;
 use bitcoin::{hashes::Hash,
     consensus::encode::serialize, key::Secp256k1, opcodes, Address, Network, PublicKey, ScriptBuf, TapNodeHash, TapSighashType, Transaction, Txid, XOnlyPublicKey
 };
@@ -11,7 +11,7 @@ use ordinals::SpacedRune;
 use tracing::info;
 
 use crate::apps::{Context, Input, SignMode, Task};
-use crate::helper::encoding::{from_base64, to_base64};
+use crate::helper::encoding::from_base64;
 use crate::helper::mem_store;
 use crate::helper::store::Store;
 
