@@ -197,8 +197,8 @@ impl<'a> Shuttler<'a> {
             .with_channel_capacity(200)
             .with_connection_timeout(Duration::from_secs(5))
             .with_auto_reconnect(true)
-            .with_reconnect_delay(Duration::from_secs(5))
-            .with_max_reconnect_attempts(10)
+            .with_reconnect_delay(Duration::from_secs(30))
+            .with_max_reconnect_attempts(5000)
             .build();
         if client.connect(format!("{}/websocket", conf.side_chain.rpc.replace("http", "ws"))).await.is_ok() {
             tracing::info!("connected to websocket")
