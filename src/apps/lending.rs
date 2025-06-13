@@ -89,10 +89,11 @@ impl DKGAdaptor for KeygenHander {
                                 }
                             };
 
+                            debug!("lending dkg task {} has {} down participants {:?}, skip", id, down, names);
                             if down > 0 {
-                                debug!("lending dkg task {} has {} down participants {:?}, skip", id, down, names);
                                 continue;
                             }
+
                             if let Ok(threshold) = t.parse() {
                                 if threshold as usize * 3 >= participants.len() * 2  {
                                     if let Ok(batch_size) = b.parse() {
