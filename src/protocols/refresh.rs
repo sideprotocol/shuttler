@@ -254,7 +254,7 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
         local.insert(packets.sender, packets.data);
         ctx.db_round1.save(&task_id, &local);
 
-        debug!("Received round1 packets: {} {:?}", &task_id, local.keys().map(|k| mem_store::get_participant_moniker(k)));
+        debug!("Received round1 packets: {} {:?}", &task_id, local.keys().map(|k| mem_store::get_participant_moniker(k)).collect::<Vec<_>>());
 
         let mut task = match ctx.task_store.get(&task_id) {
             Some(t) => t,
@@ -307,7 +307,7 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
         received.insert(packets.sender, round2_packages);
         ctx.db_round2.save(&task_id, &received);
 
-        debug!("Received round2 packets: {} {:?}", task_id, received.keys().map(|k| mem_store::get_participant_moniker(k)));
+        debug!("Received round2 packets: {} {:?}", task_id, received.keys().map(|k| mem_store::get_participant_moniker(k)).collect::<Vec<_>>());
 
         let mut task = match ctx.task_store.get(&task_id) {
             Some(t) => t,
