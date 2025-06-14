@@ -167,7 +167,7 @@ impl<'a> Shuttler<'a> {
         let conf2 = conf.clone();
         spawn(async move {
             while let Ok(message) = tx_receiver.recv() {
-                println!("Received: {:?}", message);
+                // println!("Received: {:?}", message);
                 match send_cosmos_transaction(&conf2, message).await {
                     Ok(resp) => {
                         if let Some(inner) = resp.into_inner().tx_response {
