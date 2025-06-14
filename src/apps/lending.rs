@@ -64,7 +64,6 @@ impl DKGAdaptor for KeygenHander {
         match event {
             SideEvent::BlockEvent(events) => {
                 if events.contains_key("initiate_dkg.id") {
-                    println!("Events: {:?}", events);
 
                     let live_peers = mem_store::alive_participants();
 
@@ -75,22 +74,20 @@ impl DKGAdaptor for KeygenHander {
                         .zip(events.get("initiate_dkg.batch_size")?) {
                         
                             let mut participants = vec![];
-                            let mut names = vec![];
-                            let mut down = 0;
+                            let mut down_peers = vec![];
                             for p in ps.split(",") {
                                 if let Ok(keybytes) = from_base64(p) {
                                     let identifier = pubkey_to_identifier(&keybytes);
                                     // not have enough participants
                                     if !live_peers.contains(&identifier) {
-                                        down += 1;
+                                        down_peers.push(mem_store::get_participant_moniker(&identifier));
                                     }
                                     participants.push(identifier);
-                                    names.push(mem_store::get_participant_moniker(&identifier));
                                 }
                             };
 
-                            tracing::info!("lending dkg task {} has {} down participants {:?}, skip", id, down, names);
-                            if down > 0 {
+                            tracing::debug!("Task {} has {} down participants {:?}, threshold {}", id, down_peers.len(), down_peers, t);
+                            if down_peers.len() > 0 {
                                 continue;
                             }
 

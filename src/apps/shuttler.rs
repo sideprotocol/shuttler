@@ -350,7 +350,7 @@ impl<'a> Shuttler<'a> {
             tendermint_rpc::event::v0_38::DeEventData::NewBlock { block, result_finalize_block , ..} => {
                 if let Some(b) = block { 
                     let height = b.header.height.value();
-                    debug!("Received New block: #{:?}, {:?}", height, mem_store::alive_participants_monikers());
+                    debug!("Block: #{:?}, live peers: {:?}", height, mem_store::alive_participants_monikers());
                     sending_heart_beat(ctx, height);
                 }
                 if let Some(finalize_block) = result_finalize_block {

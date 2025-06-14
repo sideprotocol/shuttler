@@ -272,7 +272,7 @@ impl<H> DKG<H> where H: DKGAdaptor {
         ctx.db_round1.save(&task_id, &received);
 
         // let k = local.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
-        debug!("Received round1 packets: {} {:?}", &task_id, received.keys());
+        debug!("Received round1 packets: {} {:?}", &task_id, received.keys().map(|k| mem_store::get_participant_moniker(k)));
 
         let mut task = match ctx.task_store.get(&task_id) {
             Some(t) => t,
@@ -320,7 +320,7 @@ impl<H> DKG<H> where H: DKGAdaptor {
         received.insert(packets.sender, received_round2_package);
         ctx.db_round2.save(&task_id, &received);
 
-        debug!("Received round2 packets: {} {:?}", task_id, received.keys()); 
+        debug!("Received round2 packets: {} {:?}", task_id, received.keys().map(|k| mem_store::get_participant_moniker(k))); 
 
         let mut task = match ctx.task_store.get(&task_id) {
             Some(t) => t,
