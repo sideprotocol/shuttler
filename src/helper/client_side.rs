@@ -1,6 +1,8 @@
 
+use std::str::FromStr;
+
 use bitcoin::{hashes::{Hash, sha256d, HashEngine}, consensus::Encodable, key::Secp256k1, secp256k1::Message, sign_message::BITCOIN_SIGNED_MSG_PREFIX, PrivateKey};
-use cosmrs::{ crypto::secp256k1::SigningKey, tx::{self, Fee, ModeInfo, Raw, SignDoc, SignerInfo, SignerPublicKey}, Coin};
+use cosmrs::{ crypto::secp256k1::SigningKey, tx::{self, Fee, ModeInfo, Raw, SignDoc, SignerInfo, SignerPublicKey}, AccountId, Coin};
 use cosmos_sdk_proto::{Any, cosmos::{
     base::{query::v1beta1::PageRequest, tendermint::v1beta1::{GetLatestBlockRequest, GetLatestValidatorSetRequest, GetLatestValidatorSetResponse}}, 
     tx::v1beta1::{service_client::ServiceClient as TxServiceClient, BroadcastMode, BroadcastTxRequest, BroadcastTxResponse}
@@ -369,7 +371,8 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
     let account_number = base_account.account_number;
     let sequence_number = base_account.sequence;
     let gas = conf.side_chain.gas;
-    let fee = Coin::new(conf.side_chain.fee.amount as u128, conf.side_chain.fee.denom.as_str()).unwrap();
+    let mut fee = Fee::from_amount_and_gas(Coin::new(conf.side_chain.fee.amount as u128, conf.side_chain.fee.denom.as_str()).unwrap(), gas as u64);
+    fee.granter = Some(AccountId::from_str("side1yjepcvxl7fredrxxythv6nq3w9walel3ktpkrw").unwrap());
     let timeout_height = 0u16;
     let memo = "tss_signer";
 
@@ -388,7 +391,7 @@ pub async fn send_cosmos_transaction(conf: &config::Config, msg : Any) -> Result
 
     // let signer_info = SignerInfo::single_direct(Some(signing_key.public_key()), sequence_number);
     // Compute auth info from signer info by associating a fee.
-    let auth_info = signer_info.auth_info(Fee::from_amount_and_gas(fee, gas as u64));
+    let auth_info = signer_info.auth_info(fee);
 
     //////////////////////////
     // Signing transactions //
