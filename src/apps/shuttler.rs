@@ -276,8 +276,7 @@ impl<'a> Shuttler<'a> {
                             let _ = context.swarm.disconnect_peer_id(peer_id);
                         }
                         
-                        let identifier = pubkey_to_identifier(&peer_id.to_bytes());
-                        info!("Connected to {}", mem_store::get_participant_moniker(&identifier))
+                        info!("Connected to {}", peer_id)
 
                         // info!("Connected peers {:?}", context.swarm.connected_peers().map(|i|).collect::<Vec<_>>());
                     },
