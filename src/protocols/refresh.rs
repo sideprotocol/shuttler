@@ -275,7 +275,7 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
 
         if refresh_input.new_participants.len() == local.len() {
             
-            info!("Received round1 packets from all participants: {}", task_id);
+            info!("#{} round1 completed", task_id);
             let round1_packages = local.clone().iter().map(|(k, v)| (k.clone(), v[0].clone())).collect::<BTreeMap<_,_>>();
             match self.generate_round2_packages(ctx,  &task, round1_packages) {
                 Ok(_) => {
@@ -341,8 +341,7 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
 
         if refresh_input.new_participants.len() == received.len() {
 
-
-            info!("Received round2 packets from all participants: {}", task.id);
+            info!("#{} round2 completed", task_id);
 
             // initialize a batch of empty BTreeMap.
             let mut batch = refresh_input.keys.iter().map(|i| (i.to_string(), BTreeMap::new()) ).collect::<Vec<_>>();

@@ -9,6 +9,7 @@ use futures::stream::StreamExt;
 use libp2p::{
     gossipsub, identify, identity::Keypair, kad::{self, store::MemoryStore}, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, Multiaddr, PeerId, Swarm
 };
+use tendermint::chain::id;
 use tendermint_rpc::{event::v0_38::DeEvent, response::Wrapper};
 use tokio::{select, signal, spawn, time::Instant};
 use tracing::{debug, info, warn, error};
@@ -165,10 +166,11 @@ impl<'a> Shuttler<'a> {
         // Tx Sender for Tx Quene
         let (tx_sender, tx_receiver) = std::sync::mpsc::channel::<Any>();
         let conf2 = conf.clone();
+        let identifier2 = identifier.clone();
         spawn(async move {
             while let Ok(message) = tx_receiver.recv() {
                 // println!("Received: {:?}", message);
-                match send_cosmos_transaction(&conf2, message).await {
+                match send_cosmos_transaction(&identifier2, &conf2, message).await {
                     Ok(resp) => {
                         if let Some(inner) = resp.into_inner().tx_response {
                             debug!("Submited {}, {}, {}", inner.txhash, inner.code, inner.raw_log)

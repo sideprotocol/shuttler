@@ -293,7 +293,7 @@ impl<H> DKG<H> where H: DKGAdaptor {
 
         if dkg_input.participants.len() == received.len() {
             
-            info!("Received round1 packets from all participants: {}", task_id);
+            info!("#{} round1 completed", task_id);
             match self.generate_round2_packages(ctx,  &task, received) {
                 Ok(_) => {
                     task.status = Status::Round2;
@@ -365,7 +365,7 @@ impl<H> DKG<H> where H: DKGAdaptor {
 
             });
 
-            info!("Received round2 packages from all participants: {}", task_id);
+            info!("#{} round2 completed", task_id);
 
             // compute the threshold key
             let round2_secret_package = match mem_store::get_dkg_round2_secret_packet(task_id) {
