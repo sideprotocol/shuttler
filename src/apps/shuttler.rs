@@ -179,7 +179,6 @@ impl<'a> Shuttler<'a> {
             }
         });
 
-
         // Common Setting: Context and Heart Beat
         let mut context = Context::new(swarm, tx_sender, identifier, node_key, conf.clone()); 
         let mut ticker = tokio::time::interval_at(get_next_full_hour(), Duration::from_secs(5 * 60));
@@ -276,7 +275,11 @@ impl<'a> Shuttler<'a> {
                         } else {
                             let _ = context.swarm.disconnect_peer_id(peer_id);
                         }
-                        info!("Connected peers {:?}", context.swarm.connected_peers().collect::<Vec<_>>());
+                        
+                        let identifier = pubkey_to_identifier(&peer_id.to_bytes());
+                        info!("Connected to {}", mem_store::get_participant_moniker(&identifier))
+
+                        // info!("Connected peers {:?}", context.swarm.connected_peers().map(|i|).collect::<Vec<_>>());
                     },
                     SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                         info!("Disconnected {peer_id}: {:?}", cause);
