@@ -275,8 +275,8 @@ impl<H> DKG<H> where H: DKGAdaptor {
 
         // merge packets with local
         received.insert(packets.sender, packets.data);
+        ctx.db_round1.save(&task_id, &received);
 
-        // let k = local.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
         debug!("Received round1 packets: {} {:?}", &task_id, received.keys().map(|k| mem_store::get_participant_moniker(k)).collect::<Vec<_>>());
 
         let mut task = match ctx.task_store.get(&task_id) {
@@ -289,11 +289,7 @@ impl<H> DKG<H> where H: DKGAdaptor {
             _ => return
         };
 
-        if received.len() == dkg_input.participants.len() {
-            // already received all round1 packages
-            debug!("duplicated round1 packages: {}", task_id);
-            return;
-        }
+        received.retain(|id, _| dkg_input.participants.contains(id));
 
         if dkg_input.participants.len() == received.len() {
             
