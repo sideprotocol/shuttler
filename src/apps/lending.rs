@@ -75,18 +75,22 @@ impl DKGAdaptor for KeygenHander {
                         
                             let mut participants = vec![];
                             let mut down_peers = vec![];
+                            let mut names = vec![];
                             for p in ps.split(",") {
                                 if let Ok(keybytes) = from_base64(p) {
                                     let identifier = pubkey_to_identifier(&keybytes);
                                     // not have enough participants
+                                    let moniker = mem_store::get_participant_moniker(&identifier);
                                     if !live_peers.contains(&identifier) {
-                                        down_peers.push(mem_store::get_participant_moniker(&identifier));
-                                    }
+                                        down_peers.push(moniker);
+                                    } 
+                                    names.push(moniker);
+                                    
                                     participants.push(identifier);
                                 }
                             };
 
-                            tracing::debug!("Task {} has {} down participants {:?}, threshold {}", id, down_peers.len(), down_peers, t);
+                            tracing::debug!("Task {} has {} down participants {:?} {:?}, threshold {}", id, down_peers.len(), down_peers, names, t);
                             if down_peers.len() > 0 {
                                 continue;
                             }
