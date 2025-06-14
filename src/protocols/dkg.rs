@@ -7,7 +7,7 @@ use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 use libp2p::gossipsub::IdentTopic;
 use rand::thread_rng;
 use serde::de::DeserializeOwned;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 
 use frost_adaptor_signature as frost;
@@ -267,9 +267,14 @@ impl<H> DKG<H> where H: DKGAdaptor {
         // store round 1 packets
         let mut received = ctx.db_round1.get(task_id).map_or(BTreeMap::new(), |v|v);
         
+        if received.contains_key(&packets.sender) {
+            // already received this sender's round1 package
+            warn!("duplicated round1 package from {:?}: {}", packets.sender, task_id);
+            return;
+        }
+
         // merge packets with local
         received.insert(packets.sender, packets.data);
-        ctx.db_round1.save(&task_id, &received);
 
         // let k = local.keys().map(|k| to_base64(&k.serialize()[..])).collect::<Vec<_>>();
         debug!("Received round1 packets: {} {:?}", &task_id, received.keys().map(|k| mem_store::get_participant_moniker(k)).collect::<Vec<_>>());
@@ -283,7 +288,12 @@ impl<H> DKG<H> where H: DKGAdaptor {
             TaskInput::DKG(i) => i,
             _ => return
         };
-        received.retain(|id, _| dkg_input.participants.contains(id));
+
+        if received.len() == dkg_input.participants.len() {
+            // already received all round1 packages
+            debug!("duplicated round1 packages: {}", task_id);
+            return;
+        }
 
         if dkg_input.participants.len() == received.len() {
             
@@ -317,6 +327,11 @@ impl<H> DKG<H> where H: DKGAdaptor {
             received_round2_package.push(data);
         }
         let mut received = ctx.db_round2.get(task_id).unwrap_or(BTreeMap::new()); 
+        if received.contains_key(&packets.sender) {
+            // already received this sender's round1 package
+            warn!("duplicated round2 package from {:?}: {}", packets.sender, task_id);
+            return;
+        }
         received.insert(packets.sender, received_round2_package);
         ctx.db_round2.save(&task_id, &received);
 

@@ -6,7 +6,7 @@ use ed25519_compact::x25519;
 use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
 use libp2p::gossipsub::IdentTopic;
 use serde::de::DeserializeOwned;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 
 use frost_adaptor_signature as frost;
@@ -249,7 +249,11 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
         let task_id = &packets.task_id;
         // store round 1 packets
         let mut local = ctx.db_round1.get(task_id).map_or(BTreeMap::new(), |v|v);
-        
+        if local.contains_key(&packets.sender) {
+            // already received this sender's round1 package
+            warn!("duplicated round1 package from {:?}: {}", packets.sender, task_id);
+            return;
+        }
         // merge packets with local
         local.insert(packets.sender, packets.data);
         ctx.db_round1.save(&task_id, &local);
@@ -304,6 +308,11 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
         }
 
         let mut received = ctx.db_round2.get(task_id).unwrap_or(BTreeMap::new()); 
+        if received.contains_key(&packets.sender) {
+            // already received this sender's round2 package
+            warn!("duplicated round2 package from {:?}: {}", packets.sender, task_id);
+            return;
+        }
         received.insert(packets.sender, round2_packages);
         ctx.db_round2.save(&task_id, &received);
 
