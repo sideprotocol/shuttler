@@ -97,7 +97,7 @@ impl<H> DKG<H> where H: DKGAdaptor {
         let signature = ctx.node_key.sign(raw, None).to_vec();
         
         let msg = DKGMessage{ sender: ctx.identifier, payload, signature };
-        debug!("Broadcasting: {:?}", msg);
+        // debug!("Broadcasting: {:?}", msg);
         let bytes = serde_json::to_vec(&msg).expect("Failed to serialize DKG package");
         publish_topic_message(ctx, IdentTopic::new(&self.name), bytes);
     }
