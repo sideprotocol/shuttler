@@ -82,7 +82,7 @@ impl DKGAdaptor for KeygenHander {
                                     // not have enough participants
                                     let moniker = mem_store::get_participant_moniker(&identifier);
                                     if !live_peers.contains(&identifier) {
-                                        down_peers.push(moniker);
+                                        down_peers.push(moniker.clone());
                                     } 
                                     names.push(moniker);
                                     
