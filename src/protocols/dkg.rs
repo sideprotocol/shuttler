@@ -123,7 +123,7 @@ impl<H> DKG<H> where H: DKGAdaptor {
                 dkg_input.threshold,
                 &mut rng,
             ) {
-                debug!("round1_secret_package: {:?}", &task.id);
+                // debug!("round1_secret_package: {:?}", &task.id);
                 // mem_store::set_dkg_round1_secret_packet(&store_key, secret_packet);
                 secrets.push(secret_packet);
 
