@@ -392,8 +392,8 @@ impl WebSocketClient {
                     None
                 }
                 None => {
-                    error!("Error receiving message: None");
                     self.is_connected = false;
+                    let _ = self.reconnect().await;
                     None
                 }
             }
