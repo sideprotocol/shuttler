@@ -3,10 +3,11 @@ use std::time::Duration;
 
 use axum::body::Bytes;
 use futures::{SinkExt, StreamExt};
+use libp2p::multihash::Error;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tracing::{debug, error, info, warn};
 use tokio::sync::{mpsc};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinError, JoinHandle};
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::connect_async_tls_with_config;
@@ -348,8 +349,6 @@ impl WebSocketClient {
 
         info!("Connected to WebSocket server");
 
-        // Create channels for message passing with configured capacity
-        let (tx_sender, mut rx_sender) = mpsc::channel::<Message>(self.config.channel_capacity);
         let (tx_receiver, rx_receiver) = mpsc::channel::<Message>(self.config.channel_capacity);
 
         // Split connection into sender and receiver
@@ -358,54 +357,35 @@ impl WebSocketClient {
 
         let _x = ws_sender.send(Message::Text(r#"{"jsonrpc":"2.0","method":"subscribe","id":0,"params":{"query":"tm.event='NewBlock'"}}"#.to_string().into())).await;
 
-        // Task for handling outgoing messages
-        let send_task = tokio::spawn(async move {
-            while let Some(message) = rx_sender.recv().await {
-
-                match ws_sender.send(message).await {
-                    Ok(_) => info!("Message sent"),
-                    Err(e) => {
-                        error!("Error sending message: {}", e);
-                        break;
-                    }
-                }
-            }
-            // Close WebSocket connection
-            let _ = ws_sender.close().await;
-        });
-
         // Task for handling incoming messages
         let receive_task = tokio::spawn(async move {
             while let Some(msg) = ws_receiver.next().await {
-                match msg {
-                    Ok(msg) => {
-                        
-                        if let Err(_) = tx_receiver.send(msg).await {
-                            // Channel closed - receiver has been dropped, which is normal during shutdown
-                            debug!("Receiver channel closed, stopping message forwarding");
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        error!("Error receiving message: {}", e);
-                        break;
-                    }
+                // let m = msg.unwrap();
+                if let Err(_) = tx_receiver.send(msg.unwrap()).await {
+                    // Channel closed - receiver has been dropped, which is normal during shutdown
+                    debug!("Receiver channel closed, stopping message forwarding");
+                    break;
                 }
             }
         });
 
         // Combine tasks with select to handle termination
-        let handle = tokio::spawn(async move {
-            tokio::select! {
-                _ = send_task => info!("Send task completed"),
-                _ = receive_task => info!("Receive task completed"),
-            }
-        });
+        // let handle = tokio::spawn(async move {
+        //     tokio::select! {
+        //         _ = send_task => Ok(()),
+        //         re = receive_task => {
+        //             match re {
+        //                 Ok(_) => Ok(()),
+        //                 Err(e) => return Err(e),
+        //             }
+        //         }
+        //     }
+        // });
 
         // Update client state
-        self.sender = Some(tx_sender);
+        // self.sender = Some(tx_sender);
         self.receiver = Some(rx_receiver);
-        self.ws_handle = Some(handle);
+        self.ws_handle = Some(receive_task);
         self.is_connected = true;
 
         Ok(())
