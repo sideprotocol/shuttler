@@ -333,7 +333,7 @@ impl<'a> Shuttler<'a> {
                     },
                     Err(e) => {
                         tracing::error!("Failed to parse event: {:?}", e);
-                        return true
+                        return false
                     }
                 }
             },
