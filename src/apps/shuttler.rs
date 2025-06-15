@@ -9,7 +9,6 @@ use futures::stream::StreamExt;
 use libp2p::{
     gossipsub, identify, identity::Keypair, kad::{self, store::MemoryStore}, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, Multiaddr, PeerId, Swarm
 };
-use tendermint::chain::id;
 use tendermint_rpc::{event::v0_38::DeEvent, response::Wrapper};
 use tokio::{select, signal, spawn, time::Instant};
 use tracing::{debug, info, warn, error};
@@ -249,7 +248,7 @@ impl<'a> Shuttler<'a> {
                         // info!(" @@(Received) Discovered new peer: {peer_id} with info: {connection_id} {:?}", info);
                         info.listen_addrs.iter().for_each(|addr| {
                             if !addr.to_string().starts_with("/ip4/127.0.0.1") {
-                                tracing::debug!("Discovered: {addr}/p2p/{peer_id}");
+                                // tracing::debug!("Discovered: {addr}/p2p/{peer_id}");
                                 context.swarm
                                     .behaviour_mut()
                                     .kad
@@ -334,13 +333,13 @@ impl<'a> Shuttler<'a> {
                     },
                     Err(e) => {
                         tracing::error!("Failed to parse event: {:?}", e);
-                        return false
+                        return true
                     }
                 }
             },
             tokio_tungstenite::tungstenite::Message::Close(_close) => {
                 tracing::error!("connection closed");
-                return false
+                return true
             },
             _ => return false
         };
@@ -424,8 +423,7 @@ impl<'a> Shuttler<'a> {
                         tasks.push(task);
                     }
                 };
-            });
-            
+            });    
         }
         
         if let Some(lending) = self.apps.iter().find(|a| a.name() == APP_NAME_LENDING) {

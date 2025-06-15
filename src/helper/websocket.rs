@@ -219,37 +219,47 @@ impl WebSocketClient {
         // Save connection parameters for potential reconnection
         self.server_url = server_url;
 
-        // Handle connection with retries
-        let mut current_attempt = 0;
         loop {
+
+            match self.connect_internal(&self.server_url.clone(), 0).await {
+                Ok(_) => {
+                    return Ok(());
+                }
+                Err(e) => {
+                    error!("Connection attempt failed: {}", e);
+                    tokio::time::sleep(self.config.reconnect_delay).await;
+                    continue;
+                }
+            };
+
             // Perform the connection attempt
-            let result = self
-                .connect_internal(
-                    &self.server_url.clone(),
-                    current_attempt,
-                )
-                .await;
+            // let result = self
+            //     .connect_internal(
+            //         &self.server_url.clone(),
+            //         current_attempt,
+            //     )
+            //     .await;
 
             // Check if we need to retry based on the special error
-            match result {
-                Err(e) => {
-                    let err_str = e.to_string();
-                    if err_str.starts_with("__RETRY_CONNECTION_") {
-                        // Parse the attempt number
-                        if let Ok(next_attempt) = err_str
-                            .trim_start_matches("__RETRY_CONNECTION_")
-                            .parse::<u32>()
-                        {
-                            current_attempt = next_attempt;
-                            // Wait before retrying
-                            tokio::time::sleep(self.config.reconnect_delay).await;
-                            continue;
-                        }
-                    }
-                    return Err(e);
-                }
-                Ok(_) => return Ok(()),
-            }
+            // match result {
+            //     Err(e) => {
+            //         let err_str = e.to_string();
+            //         if err_str.starts_with("__RETRY_CONNECTION_") {
+            //             // Parse the attempt number
+            //             if let Ok(next_attempt) = err_str
+            //                 .trim_start_matches("__RETRY_CONNECTION_")
+            //                 .parse::<u32>()
+            //             {
+            //                 current_attempt = next_attempt;
+            //                 // Wait before retrying
+            //                 tokio::time::sleep(self.config.reconnect_delay).await;
+            //                 continue;
+            //             }
+            //         }
+            //         return Err(e);
+            //     }
+            //     Ok(_) => return Ok(()),
+            // }
         }
     }
 
@@ -373,13 +383,7 @@ impl WebSocketClient {
                         }
                     }
                     Err(e) => {
-                        let err_str = e.to_string();
-                        // Check if this is a TLS close_notify error (common during normal connection closure)
-                        if err_str.contains("peer closed connection without sending TLS close_notify") {
-                            warn!("Connection closed without TLS close_notify (normal during quick disconnection)");
-                        } else {
-                            error!("Error receiving message: {}", e);
-                        }
+                        error!("Error receiving message: {}", e);
                         break;
                     }
                 }

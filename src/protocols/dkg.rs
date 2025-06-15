@@ -1,6 +1,7 @@
 
 
 use core::fmt;
+use std::thread::Thread;
 use std::{collections::BTreeMap, fmt::Debug};
 use ed25519_compact::x25519;
 use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
@@ -144,7 +145,8 @@ impl<H> DKG<H> where H: DKGAdaptor {
         }
 
         // save the round1 secret packages
-        mem_store::set_dkg_round1_secret_packet(&task.id, secrets);
+        // mem_store::set_dkg_round1_secret_packet(&task.id, secrets);
+        ctx.sec_round1.save(&task.id, &secrets);
         // ctx.db_round1.save(&task.id, &payload_data);
 
         let data = Data{task_id: task.id.clone(), sender: ctx.identifier.clone(), data: payload_data};
@@ -157,7 +159,7 @@ impl<H> DKG<H> where H: DKGAdaptor {
 
         let task_id = task.id.clone();
 
-        let secret_packages = match mem_store::get_dkg_round1_secret_packet(&task_id) {
+        let secret_packages = match ctx.sec_round1.get(&task_id) {
             Some(secret_packet) => secret_packet,
             None => {
                 return Err(DKGError(format!("No secret packet found for DKG: {}", task_id)));
@@ -221,7 +223,8 @@ impl<H> DKG<H> where H: DKGAdaptor {
             return Err(DKGError(format!("No round2 package generated: {}", task_id)));
         }
         // store the round2 secret packages
-        mem_store::set_dkg_round2_secret_packet(&task_id, round2_secret_packages);
+        // mem_store::set_dkg_round2_secret_packet(&task_id, round2_secret_packages);
+        ctx.sec_round2.save(&task_id, &round2_secret_packages);
         let data  = Data{task_id, sender: ctx.identifier.clone(), data: round2_public_packages};
         // self.received_round2_packages(ctx, data.clone()); // broadcast to self
         self.broadcast_dkg_packages(ctx, DKGPayload::Round2(data)); // broadcast to all others
@@ -268,53 +271,64 @@ impl<H> DKG<H> where H: DKGAdaptor {
         let mut received = ctx.db_round1.get(task_id).map_or(BTreeMap::new(), |v|v);
         
         if received.contains_key(&packets.sender) {
-            // already received this sender's round1 package
+            // reject duplicated round1 package
             warn!("duplicated round1 package from {:?}: {}", packets.sender, task_id);
             return;
         }
 
         // merge packets with local
         received.insert(packets.sender, packets.data);
-        ctx.db_round1.save(&task_id, &received);
 
-        debug!("Received round1 packets: {} {:?}", &task_id, received.keys().map(|k| mem_store::get_participant_moniker(k)).collect::<Vec<_>>());
+        match ctx.task_store.get(&task_id) {
+            None => {
+                ctx.db_round1.save(&task_id, &received);
+                return
+            },
+            Some(mut task) => {
+                let dkg_input = match &task.input {
+                    TaskInput::DKG(i) => i,
+                    _ => return
+                };
 
-        let mut task = match ctx.task_store.get(&task_id) {
-            Some(t) => t,
-            None => return,
-        };
+                if !dkg_input.participants.contains(&ctx.identifier) {
+                    ctx.clean_dkg_cache(&task_id);
+                    debug!("Received round1 package from {:?} but not a participant in task: {}", packets.sender, task_id);
+                    return;
+                } else {
+                    debug!("Received round1 packets: {} {:?}", &task_id, received.keys().map(|k| mem_store::get_participant_moniker(k)).collect::<Vec<_>>());
+                }
 
-        let dkg_input = match &task.input {
-            TaskInput::DKG(i) => i,
-            _ => return
-        };
-
-        received.retain(|id, _| dkg_input.participants.contains(id));
-
-        if dkg_input.participants.len() == received.len() {
+                received.retain(|id, _| dkg_input.participants.contains(id));
+                ctx.db_round1.save(&task_id, &received);
+                
+                if dkg_input.participants.len() == received.len() {
             
-            info!("#{} round1 completed", task_id);
-            match self.generate_round2_packages(ctx,  &task, received) {
-                Ok(_) => {
-                    task.status = Status::Round2;
-                    ctx.task_store.save(&task.id, &task);
+                    info!("#{} round1 completed", task_id);
+                    match self.generate_round2_packages(ctx,  &task, received) {
+                        Ok(_) => {
+                            task.status = Status::Round2;
+                            ctx.task_store.save(&task.id, &task);
+                        }
+                        Err(e) => {
+                            task.status = Status::Complete;
+                            ctx.task_store.save(&task.id, &task);
+                            error!("Failed to generate round2 packages: {} - {:?}", task.id, e);
+                        }
+                    }
+                    return;
                 }
-                Err(e) => {
-                    task.status = Status::Complete;
-                    ctx.task_store.save(&task.id, &task);
-                    error!("Failed to generate round2 packages: {} - {:?}", task.id, e);
-                }
-            }
-            return;
-        }
+            },
+        };
+
     }
 
     fn received_round2_packages(&self, ctx: &mut Context, packets: Data<Vec<BTreeMap<Identifier, Vec<u8>>>>) {
 
         let task_id = &packets.task_id;
-        // store round 1 packets
 
         let mut received_round2_package = vec![];
+
+        // filter data that receiver is the current participant
         for round2_data in packets.data {    
             let data = match round2_data.get(&ctx.identifier) {
                 Some(t) => t.clone(),
@@ -322,6 +336,7 @@ impl<H> DKG<H> where H: DKGAdaptor {
             };
             received_round2_package.push(data);
         }
+
         let mut received = ctx.db_round2.get(task_id).unwrap_or(BTreeMap::new()); 
         if received.contains_key(&packets.sender) {
             // already received this sender's round1 package
@@ -329,80 +344,91 @@ impl<H> DKG<H> where H: DKGAdaptor {
             return;
         }
         received.insert(packets.sender, received_round2_package);
-        ctx.db_round2.save(&task_id, &received);
 
-        debug!("Received round2 packets: {} {:?}", task_id, received.keys().map(|k| mem_store::get_participant_moniker(k)).collect::<Vec<_>>()); 
+        match ctx.task_store.get(&task_id) {
+            None => {
+                ctx.db_round2.save(&task_id, &received);
+            },
+            Some(mut task) => {
 
-        let mut task = match ctx.task_store.get(&task_id) {
-            Some(t) => t,
-            None => return,
-        };
+                let dkg_input = match &task.input {
+                    TaskInput::DKG(i) => i,
+                    _ => return
+                };
 
-        let dkg_input = match &task.input {
-            TaskInput::DKG(i) => i,
-            _ => return
-        };
-        received.retain(|id, _| dkg_input.participants.contains(id));
-
-        if dkg_input.participants.len() == received.len() + 1 {
-            // info!("Received round2 packets from all participants: {}", task.id);
-
-            // initialize a batch of empty BTreeMap.
-            let mut batch = (0..dkg_input.batch_size).map(|_i| BTreeMap::new() ).collect::<Vec<_>>();
-            
-            // let mut round2_packages = BTreeMap::new();
-            received.iter().filter(|(k, _)| *k != &ctx.identifier ).for_each(|(sender, packet)| {
-                
-                let bz = sender.serialize();
-                let source = x25519::PublicKey::from_ed25519(&ed25519_compact::PublicKey::from_slice(bz.as_slice()).unwrap()).unwrap();
-                let share_key = source.dh(&x25519::SecretKey::from_ed25519(&ctx.node_key).unwrap()).unwrap();
-
-                for (round2_packages, p) in batch.iter_mut().zip(packet.iter()) {
-                    let p = decrypt(p, share_key.as_slice().try_into().unwrap());
-                    let received_round2_package = frost::keys::dkg::round2::Package::deserialize(&p).unwrap();
-                    round2_packages.insert(sender.clone(), received_round2_package);
-                }
-
-            });
-
-            info!("#{} round2 completed", task_id);
-
-            // compute the threshold key
-            let round2_secret_package = match mem_store::get_dkg_round2_secret_packet(task_id) {
-                Some(secret_package) => secret_package,
-                None => {
-                    error!("No secret packet found for DKG: {}", task_id);
+                if !dkg_input.participants.contains(&ctx.identifier) {
+                    ctx.clean_dkg_cache(&task_id);
+                    debug!("Received round1 package from {:?} but not a participant in task: {}", packets.sender, task_id);
                     return;
+                } else {
+                    debug!("Received round2 packets: {} {:?}", task_id, received.keys().map(|k| mem_store::get_participant_moniker(k)).collect::<Vec<_>>()); 
                 }
-            };
+                received.retain(|id, _| dkg_input.participants.contains(id));
 
-            let mut round1_packages = ctx.db_round1.get(task_id).unwrap_or(BTreeMap::new());
+                ctx.db_round2.save(&task_id, &received);
 
-            // frost does not need its own package to compute the threshold key
-            round1_packages.remove(&ctx.identifier);
+                if dkg_input.participants.len() == received.len() + 1 {
+                    // info!("Received round2 packets from all participants: {}", task.id);
 
-            let mut keys = vec![];
-            batch.iter().zip(round2_secret_package).enumerate().for_each(|(i, (round2_packages,round2_secret_package ))| {
-                // extract the ith round1 package
-                let mut ith_round1_packages = BTreeMap::new();
-                for (k, v) in round1_packages.iter_mut() {
-                    if v.len() >= i {
-                        ith_round1_packages.insert(k.clone(), v[i].clone());
-                    }
-                } 
-                match frost::keys::dkg::part3(&round2_secret_package, &ith_round1_packages, &round2_packages ) {
-                    Ok((priv_key, pub_key)) => {
-                        keys.push((priv_key, pub_key));
-                    },
-                    Err(e) => {
-                        error!("Failed to compute threshold key: {} {:?}", task_id, e);
-                    }
-                }; 
-            });
+                    // initialize a batch of empty BTreeMap.
+                    let mut batch = (0..dkg_input.batch_size).map(|_i| BTreeMap::new() ).collect::<Vec<_>>();
+                    
+                    // let mut round2_packages = BTreeMap::new();
+                    received.iter().filter(|(k, _)| *k != &ctx.identifier ).for_each(|(sender, packet)| {
+                        
+                        let bz = sender.serialize();
+                        let source = x25519::PublicKey::from_ed25519(&ed25519_compact::PublicKey::from_slice(bz.as_slice()).unwrap()).unwrap();
+                        let share_key = source.dh(&x25519::SecretKey::from_ed25519(&ctx.node_key).unwrap()).unwrap();
 
-            self.handler.on_complete(ctx, &mut task, keys);
-       
-        }
+                        for (round2_packages, p) in batch.iter_mut().zip(packet.iter()) {
+                            let p = decrypt(p, share_key.as_slice().try_into().unwrap());
+                            let received_round2_package = frost::keys::dkg::round2::Package::deserialize(&p).unwrap();
+                            round2_packages.insert(sender.clone(), received_round2_package);
+                        }
+
+                    });
+
+                    info!("#{} round2 completed", task_id);
+
+                    // compute the threshold key
+                    let round2_secret_package = match ctx.sec_round2.get(task_id) {
+                        Some(secret_package) => secret_package,
+                        None => {
+                            error!("No secret packet found for DKG: {}", task_id);
+                            return;
+                        }
+                    };
+
+                    let mut round1_packages = ctx.db_round1.get(task_id).unwrap_or(BTreeMap::new());
+
+                    // frost does not need its own package to compute the threshold key
+                    round1_packages.remove(&ctx.identifier);
+
+                    let mut keys = vec![];
+                    batch.iter().zip(round2_secret_package).enumerate().for_each(|(i, (round2_packages,round2_secret_package ))| {
+                        // extract the ith round1 package
+                        let mut ith_round1_packages = BTreeMap::new();
+                        for (k, v) in round1_packages.iter_mut() {
+                            if v.len() >= i {
+                                ith_round1_packages.insert(k.clone(), v[i].clone());
+                            }
+                        } 
+                        match frost::keys::dkg::part3(&round2_secret_package, &ith_round1_packages, &round2_packages ) {
+                            Ok((priv_key, pub_key)) => {
+                                keys.push((priv_key, pub_key));
+                            },
+                            Err(e) => {
+                                error!("Failed to compute threshold key: {} {:?}", task_id, e);
+                            }
+                        }; 
+                    });
+
+                    self.handler.on_complete(ctx, &mut task, keys);
+            
+                }
+            }
+        };
+        
     }
 }
 

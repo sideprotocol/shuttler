@@ -92,10 +92,15 @@ pub struct MockEnv {
 
 impl MockEnv {
     pub fn new(home: String, module: String, participants: Vec<String>) -> Self {
+        let x = if participants.len() > 3 {
+            participants[1..].to_vec()
+        } else {
+            participants
+        };
         Self {
             home,
             module,
-            participants,
+            participants: x,
         }
     }
 }

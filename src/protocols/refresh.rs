@@ -135,7 +135,9 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
             return
         }
 
-        mem_store::set_dkg_round1_secret_packet(&task.id, secrets);
+        // mem_store::set_dkg_round1_secret_packet(&task.id, secrets);
+        ctx.sec_round1.save(&task.id, &secrets);
+
         let data = Data{task_id: task.id.clone(), sender: ctx.identifier.clone(), data: packages};
         self.received_round1_packages(ctx, data.clone());
         self.broadcast_dkg_packages(ctx, RefreshPayload::Round1(data));
@@ -146,7 +148,7 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
 
         let task_id = task.id.clone();
 
-        let secret_packages = match mem_store::get_dkg_round1_secret_packet(&task_id) {
+        let secret_packages = match ctx.sec_round1.get(&task_id) {
             Some(secret_packet) => secret_packet,
             None => {
                 return Err(DKGError(format!("No secret packet found for DKG: {}", task_id)));
@@ -202,9 +204,9 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
             return Err(DKGError("No package generated".to_string()))
         }
 
-
-        mem_store::set_dkg_round2_secret_packet(&task_id, secrets);
-        // ctx.db_round2.save(&task.id, &local);
+        debug!("round2_secret_package: {:?}", secrets);
+        // mem_store::set_dkg_round2_secret_packet(&task_id, secrets);
+        ctx.sec_round2.save(&task_id, &secrets);
     
         let data  = Data{task_id, sender: ctx.identifier.clone(), data: packages};
         self.received_round2_packages(ctx, data.clone());
@@ -273,6 +275,8 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
         // Filter packages from valid participants.
         local.retain(|id, _| refresh_input.new_participants.contains(id));
 
+        debug!("required: {}, received: {}", refresh_input.new_participants.len(), local.len());
+
         if refresh_input.new_participants.len() == local.len() {
             
             info!("#{} round1 completed", task_id);
@@ -284,7 +288,7 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
                 }
                 Err(e) => {
                     task.status = Status::Complete;
-                    ctx.task_store.save(&task.id, &task);
+                    // ctx.task_store.save(&task.id, &task);
                     error!("Failed to generate round2 packages: {} - {:?}", task.id, e);
                 }
             }
@@ -363,7 +367,7 @@ impl<H> ParticipantRefresher<H> where H: RefreshAdaptor {
 
             // frost does not need its own package to compute the threshold key
             round1_packages.remove(&ctx.identifier);
-            let round2_secret_package = match mem_store::get_dkg_round2_secret_packet(task_id) {
+            let round2_secret_package = match ctx.sec_round2.get(task_id) {
                 Some(secret_package) => secret_package,
                 None => {
                     error!("No secret packet found for DKG: {}", task_id);
