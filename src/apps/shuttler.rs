@@ -206,18 +206,34 @@ impl<'a> Shuttler<'a> {
 
         loop {
             select! {
-                Some(msg) = client.receive_message() => {
-                    // tracing::info!("msg {:?}", msg);
-                    if self.handle_block_event(&mut context, msg) {
-                        tracing::error!("websocket connection closed, reconnecting...");
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                        if client.reconnect().await.is_err() {
-                            tracing::error!("Failed to reconnect to websocket");
-                            break;
-                        } else {
-                            tracing::info!("Reconnected to websocket");
-                        }
-                    };
+                recv = client.receive_message() => {
+                    match recv {
+                        Some(Ok(msg)) => {
+                            if self.handle_block_event(&mut context, msg) {
+                                tracing::error!("websocket connection closed, reconnecting...");
+                                tokio::time::sleep(Duration::from_secs(5)).await;
+                                if client.reconnect().await.is_err() {
+                                    tracing::error!("Failed to reconnect to websocket");
+                                    break;
+                                } else {
+                                    tracing::info!("Reconnected to websocket");
+                                }
+                            };
+                        },
+                        Some(Err(e)) => {
+                            tracing::error!("websocket error: {:?}", e);
+                        },
+                        None => {
+                            tracing::error!("websocket connection closed, reconnecting...");
+                            tokio::time::sleep(Duration::from_secs(5)).await;
+                            if client.reconnect().await.is_err() {
+                                tracing::error!("Failed to reconnect to websocket");
+                                break;
+                            } else {
+                                tracing::info!("Reconnected to websocket");
+                            }
+                        },
+                    }
                 }
                 // recv = sidechain_event_stream.next() => {
                 //     match recv {

@@ -379,24 +379,9 @@ impl WebSocketClient {
     ///
     /// * `Some(MessageType)` - The received message (text or binary)
     /// * `None` - If not connected or the connection was closed
-    pub async fn receive_message(&mut self) -> Option<Message> {
+    pub async fn receive_message(&mut self) -> Option<std::result::Result<tokio_tungstenite::tungstenite::Message, tokio_tungstenite::tungstenite::Error>> {
         if let Some(receiver) = &mut self.receiver {
-            match receiver.next().await {
-                Some(Ok(message)) => {
-                    // Convert the message to the appropriate type
-                    debug!("Received message: {:?}", message);
-                    Some(message)
-                }
-                Some(Err(e)) => {
-                    error!("Error receiving message: {}", e);
-                    None
-                }
-                None => {
-                    self.is_connected = false;
-                    let _ = self.reconnect().await;
-                    None
-                }
-            }
+            receiver.next().await 
         } else {
             None
         }
