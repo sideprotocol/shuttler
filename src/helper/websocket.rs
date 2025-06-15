@@ -2,6 +2,7 @@
 use std::time::Duration;
 
 use axum::body::Bytes;
+use futures::stream::SplitStream;
 use futures::{SinkExt, StreamExt};
 use libp2p::multihash::Error;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -10,7 +11,7 @@ use tokio::sync::{mpsc};
 use tokio::task::{JoinError, JoinHandle};
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::connect_async_tls_with_config;
+use tokio_tungstenite::{connect_async_tls_with_config, WebSocketStream};
 
 // const SUB: Message = Message::Text(r#"{"jsonrpc":"2.0","method":"subscribe","id":0,"params":{"query":"tm.event='NewBlock'"}}"#.to_string().into());
 // 
@@ -163,7 +164,7 @@ impl WebSocketClientBuilder {
 
 pub struct WebSocketClient {
     sender: Option<mpsc::Sender<Message>>,
-    receiver: Option<mpsc::Receiver<Message>>,
+    receiver: Option<SplitStream<WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>>,
     ws_handle: Option<JoinHandle<()>>,
     is_connected: bool,
     server_url: String,
@@ -345,25 +346,25 @@ impl WebSocketClient {
 
         info!("Connected to WebSocket server");
 
-        let (tx_receiver, rx_receiver) = mpsc::channel::<Message>(self.config.channel_capacity);
+        // let (tx_receiver, rx_receiver) = mpsc::channel::<Message>(self.config.channel_capacity);
 
         // Split connection into sender and receiver
-        let (mut ws_sender, mut ws_receiver) = ws_stream.split();
+        let (mut ws_sender, ws_receiver) = ws_stream.split();
 
 
         let _x = ws_sender.send(Message::Text(r#"{"jsonrpc":"2.0","method":"subscribe","id":0,"params":{"query":"tm.event='NewBlock'"}}"#.to_string().into())).await;
 
         // Task for handling incoming messages
-        let receive_task = tokio::spawn(async move {
-            while let Some(msg) = ws_receiver.next().await {
-                // let m = msg.unwrap();
-                if let Err(_) = tx_receiver.send(msg.unwrap()).await {
-                    // Channel closed - receiver has been dropped, which is normal during shutdown
-                    debug!("Receiver channel closed, stopping message forwarding");
-                    break;
-                }
-            }
-        });
+        // let receive_task = tokio::spawn(async move {
+        //     while let Some(msg) = ws_receiver.next().await {
+        //         // let m = msg.unwrap();
+        //         if let Err(_) = tx_receiver.send(msg.unwrap()).await {
+        //             // Channel closed - receiver has been dropped, which is normal during shutdown
+        //             debug!("Receiver channel closed, stopping message forwarding");
+        //             break;
+        //         }
+        //     }
+        // });
 
         // Combine tasks with select to handle termination
         // let handle = tokio::spawn(async move {
@@ -380,8 +381,8 @@ impl WebSocketClient {
 
         // Update client state
         // self.sender = Some(tx_sender);
-        self.receiver = Some(rx_receiver);
-        self.ws_handle = Some(receive_task);
+        self.receiver = Some(ws_receiver);
+        // self.ws_handle = Some(receive_task);
         self.is_connected = true;
 
         Ok(())
@@ -473,7 +474,21 @@ impl WebSocketClient {
     /// * `None` - If not connected or the connection was closed
     pub async fn receive_message(&mut self) -> Option<Message> {
         if let Some(receiver) = &mut self.receiver {
-            receiver.recv().await
+            match receiver.next().await {
+                Some(Ok(message)) => {
+                    // Convert the message to the appropriate type
+                    Some(message)
+                }
+                Some(Err(e)) => {
+                    error!("Error receiving message: {}", e);
+                    None
+                }
+                None => {
+                    // Stream ended, connection closed
+                    self.is_connected = false;
+                    None
+                }
+            }
         } else {
             None
         }
@@ -492,16 +507,16 @@ impl WebSocketClient {
     /// * `Ok(Some(MessageType))` - A message was received
     /// * `Ok(None)` - No message received (not connected)
     /// * `Err(_)` - Timeout occurred
-    pub async fn receive_message_timeout(
-        &mut self,
-        timeout_duration: Duration,
-    ) -> Result<Option<Message>, tokio::time::error::Elapsed> {
-        if let Some(receiver) = &mut self.receiver {
-            timeout(timeout_duration, receiver.recv()).await
-        } else {
-            Ok(None)
-        }
-    }
+    // pub async fn receive_message_timeout(
+    //     &mut self,
+    //     timeout_duration: Duration,
+    // ) -> Result<Option<Message>, tokio::time::error::Elapsed> {
+    //     if let Some(receiver) = &mut self.receiver {
+    //         timeout(timeout_duration, receiver.recv()).await
+    //     } else {
+    //         Ok(None)
+    //     }
+    // }
 
     /// Checks if the client is connected to a WebSocket server.
     ///
