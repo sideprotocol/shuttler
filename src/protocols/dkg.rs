@@ -170,6 +170,10 @@ impl<H> DKG<H> where H: DKGAdaptor {
             _ => return Err(DKGError("umatched input".to_string()))
         };
 
+        if dkg_input.participants.contains(&ctx.identifier) == false {
+            return Err(DKGError(format!("not in participants of {}", task_id)));
+        }
+
         if dkg_input.participants.len() as u16 != round1_packages.len() as u16 {
             return Err(DKGError(format!("Have not received enough packages: {}", task_id)));
         }
@@ -289,6 +293,10 @@ impl<H> DKG<H> where H: DKGAdaptor {
                     _ => return
                 };
 
+                if !dkg_input.participants.contains(&packets.sender) {
+                    return;
+                }
+
                 if !dkg_input.participants.contains(&ctx.identifier) {
                     ctx.clean_dkg_cache(&task_id);
                     debug!("Received round1 package from {:?} but not a participant in task: {}", packets.sender, task_id);
@@ -354,6 +362,10 @@ impl<H> DKG<H> where H: DKGAdaptor {
                     TaskInput::DKG(i) => i,
                     _ => return
                 };
+
+                if !dkg_input.participants.contains(&packets.sender) {
+                    return;
+                }
 
                 if !dkg_input.participants.contains(&ctx.identifier) {
                     ctx.clean_dkg_cache(&task_id);

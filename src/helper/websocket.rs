@@ -234,34 +234,6 @@ impl WebSocketClient {
                 }
             };
 
-            // Perform the connection attempt
-            // let result = self
-            //     .connect_internal(
-            //         &self.server_url.clone(),
-            //         current_attempt,
-            //     )
-            //     .await;
-
-            // Check if we need to retry based on the special error
-            // match result {
-            //     Err(e) => {
-            //         let err_str = e.to_string();
-            //         if err_str.starts_with("__RETRY_CONNECTION_") {
-            //             // Parse the attempt number
-            //             if let Ok(next_attempt) = err_str
-            //                 .trim_start_matches("__RETRY_CONNECTION_")
-            //                 .parse::<u32>()
-            //             {
-            //                 current_attempt = next_attempt;
-            //                 // Wait before retrying
-            //                 tokio::time::sleep(self.config.reconnect_delay).await;
-            //                 continue;
-            //             }
-            //         }
-            //         return Err(e);
-            //     }
-            //     Ok(_) => return Ok(()),
-            // }
         }
     }
 
@@ -293,24 +265,14 @@ impl WebSocketClient {
                     Err(e) => {
                         error!("Connection error: {}", e);
 
-                        // Handle reconnection if enabled
-                        if self.config.auto_reconnect
-                            && attempt < self.config.max_reconnect_attempts
-                        {
-                            warn!(
-                                "Reconnection attempt {}/{} in {}s",
-                                attempt + 1,
-                                self.config.max_reconnect_attempts,
-                                self.config.reconnect_delay.as_secs()
-                            );
+                        warn!(
+                            "Reconnection attempt {} in {}s",
+                            attempt + 1,
+                            self.config.reconnect_delay.as_secs()
+                        );
 
-                            // Wait before attempting to reconnect
-                            tokio::time::sleep(self.config.reconnect_delay).await;
-
-                            // Rather than making a recursive call, we'll return a special error
-                            // that indicates we should retry the connection
-                            return Err(format!("__RETRY_CONNECTION_{}", attempt + 1).into());
-                        }
+                        // Wait before attempting to reconnect
+                        tokio::time::sleep(self.config.reconnect_delay).await;
 
                         return Err(e.into());
                     }
@@ -408,61 +370,6 @@ impl WebSocketClient {
 
     }
 
-    /// Sends a message to the connected WebSocket server.
-    ///
-    /// # Parameters
-    ///
-    /// * `message` - The message to send (text or binary)
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` if the message was queued for sending, or an error if not connected.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the client is not connected or if the message cannot be sent.
-    pub async fn send_message(
-        &self,
-        message: Message,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(sender) = &self.sender {
-            sender.send(message).await?;
-            Ok(())
-        } else {
-            Err("Not connected to WebSocket server".into())
-        }
-    }
-
-    /// Sends a text message to the connected WebSocket server.
-    ///
-    /// This is a convenience method that wraps send_message.
-    ///
-    /// # Parameters
-    ///
-    /// * `text` - The text message to send
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` if the message was queued for sending, or an error if not connected.
-    pub async fn send_text(&self, text: String) -> Result<(), Box<dyn std::error::Error>> {
-        self.send_message(Message::Text(text.into())).await
-    }
-
-    /// Sends a binary message to the connected WebSocket server.
-    ///
-    /// This is a convenience method that wraps send_message.
-    ///
-    /// # Parameters
-    ///
-    /// * `data` - The binary data to send
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` if the message was queued for sending, or an error if not connected.
-    pub async fn send_binary(&self, data: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
-        self.send_message(Message::Binary(data.into())).await
-    }
-
     /// Receives a message from the WebSocket server.
     ///
     /// This method waits for the next message from the server. If no message
@@ -477,6 +384,7 @@ impl WebSocketClient {
             match receiver.next().await {
                 Some(Ok(message)) => {
                     // Convert the message to the appropriate type
+                    debug!("Received message: {:?}", message);
                     Some(message)
                 }
                 Some(Err(e)) => {
@@ -484,7 +392,7 @@ impl WebSocketClient {
                     None
                 }
                 None => {
-                    // Stream ended, connection closed
+                    error!("Error receiving message: None");
                     self.is_connected = false;
                     None
                 }

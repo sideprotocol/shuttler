@@ -90,7 +90,7 @@ impl DKGAdaptor for KeygenHander {
                                 }
                             };
 
-                            tracing::debug!("Task {} has {} down participants {:?} {:?}, threshold {}", id, down_peers.len(), down_peers, names, t);
+                            tracing::debug!("Task {} has {} offline participants {:?} {:?}, threshold {}", id, down_peers.len(), down_peers, names, t);
                             if down_peers.len() > 0 {
                                 continue;
                             }
@@ -126,7 +126,7 @@ impl DKGAdaptor for KeygenHander {
             pub_keys.push(hexkey);
         });
 
-        debug!("Oracle pubkey >>>: {:?}", pub_keys);
+        // debug!("Oracle pubkey >>>: {:?}", pub_keys);
 
         // save dkg id and keys for refresh
         ctx.general_store.save(&format!("{}", task.id).as_str(), &pub_keys.join(","));
