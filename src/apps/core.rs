@@ -1,7 +1,7 @@
 use bitcoincore_rpc::{Auth, Client as BitcoinClient};
 use cosmrs::Any;
 use ed25519_compact::SecretKey;
-use frost_adaptor_signature::{round1, round2, AdaptorSignature, Identifier, Secp256K1Sha256TR, Signature};
+use frost_adaptor_signature::{round1, round2, AdaptorSignature, Identifier, Signature};
 use libp2p::{gossipsub::IdentTopic, Swarm};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
@@ -14,7 +14,7 @@ use crate::{
     helper::{
         encoding::to_base64,
         now,
-        store::{DefaultStore, MemStore, Store},
+        store::{DefaultStore, Store},
     }, protocols::refresh::RefreshInput,
 };
 
@@ -288,7 +288,7 @@ impl Context {
         self.sec_round1.remove(task_id);
         self.sec_round2.remove(task_id);
     }
-    
+
     pub fn clean_task_cache(&self, task_id: &String) {
         self.task_store.remove(task_id);
         self.nonce_store.remove(task_id);

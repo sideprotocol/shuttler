@@ -1,7 +1,6 @@
 use std::{collections::BTreeMap, marker::PhantomData, path::Path};
 
 use serde::{Deserialize, Serialize};
-use serde_json::de;
 use sled::Db;
 
 pub trait Store<K, V> where K: AsRef<[u8]>, V: Serialize + for<'a> Deserialize<'a> {

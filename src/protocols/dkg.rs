@@ -1,7 +1,6 @@
 
 
 use core::fmt;
-use std::thread::Thread;
 use std::{collections::BTreeMap, fmt::Debug};
 use ed25519_compact::x25519;
 use frost_adaptor_signature::keys::{KeyPackage, PublicKeyPackage};
