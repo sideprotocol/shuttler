@@ -223,7 +223,11 @@ impl WebSocketClient {
 
             match self.connect_internal(&self.server_url.clone(), 0).await {
                 Ok(_) => {
-                    return Ok(());
+                    
+                    error!("Connection exited, and reconnecting...");
+                    tokio::time::sleep(self.config.reconnect_delay).await;
+                    continue;
+                    // return Ok(());
                 }
                 Err(e) => {
                     error!("Connection attempt failed: {}", e);
