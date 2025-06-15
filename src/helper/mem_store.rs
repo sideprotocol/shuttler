@@ -55,6 +55,16 @@ pub fn alive_participants_monikers() -> Vec<String> {
             .collect::<Vec<_>>()
 }
 
+pub fn offline_participants_monikers() -> Vec<String> {
+    let table= AliveTable.lock().unwrap();
+    let monikers =  Monikers.lock().unwrap();
+        // tracing::debug!("alive: {:?}", table);
+    monikers.iter()
+        .filter(|(id, _)| !table.contains_key(id))
+        .map(|(_, m)| m.clone())
+        .collect::<Vec<_>>()
+}
+
 pub fn get_participant_moniker(id: &Identifier) -> String {
     let monikers =  Monikers.lock().unwrap();
         // tracing::debug!("alive: {:?}", table);
