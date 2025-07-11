@@ -454,7 +454,7 @@ pub async fn check_and_handle_tx(
     return true;
 }
 
-pub async fn check_and_handle_tx_by_hash(relayer: &Relayer, hash: &Txid) {
+pub async fn check_and_handle_bitcoin_tx_by_hash(relayer: &Relayer, hash: &Txid) {
     let tx_info = match relayer.bitcoin_client.get_raw_transaction_info(&hash, None) {
         Ok(tx_info) => tx_info,
         Err(e) => {
