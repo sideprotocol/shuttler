@@ -62,8 +62,6 @@ side-proto = {version="2.0.0-alpha.16", features = ["grpc"]}
 axum = "*"
 tower = "*"
 
-websocket = "0.27.1"
-
 # Optional dependencies
 ed25519-consensus = "2.1.0"
 ord = "0.22.1"
@@ -73,9 +71,9 @@ tonic = { version = "0.12.3", default-features = true, features = ["codegen", "p
 void = "1.0"
 
 [dev-dependencies]
+# websocket = "0.27.1"
 criterion = "0.5"
 insta = {version = "1.31.0", features = ["yaml"]}
-
 proptest = "1.0"
 rand_chacha = "0.3"
 
@@ -84,3 +82,4 @@ default = ["cheater-detection"]
 nightly = []
 ## Enable cheater detection
 cheater-detection = ["frost-adaptor-signature/cheater-detection"]
+mock = []

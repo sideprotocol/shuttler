@@ -39,6 +39,8 @@ pub enum Commands {
     },
     Address,
     Reset,
+
+    #[cfg(feature = "mock")]
     Test {
         #[clap(long, default_value = "target/debug/shuttler")]
         bin: String,
@@ -58,4 +60,5 @@ pub mod start;
 pub mod address;
 pub mod reset;
 pub mod submit_tx;
+#[cfg(test)]
 pub mod test;
