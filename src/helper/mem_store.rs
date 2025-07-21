@@ -81,12 +81,12 @@ pub fn update_alive_table(self_identifier: &Identifier, alive: HeartBeatMessage)
 
     let mut table= AliveTable.lock().unwrap();
 
+    table.insert(alive.payload.identifier, alive.payload.block_height);
+
     let self_height = table.get(&self_identifier).unwrap_or(&0).clone();
     if self_height > 0 {
         table.retain(|_, v| v.abs_diff(self_height) <= BLOCK_TOLERENCE);
     }
-
-    table.insert(alive.payload.identifier, alive.payload.block_height);
 
     // metrics::counter!("heart_beat", "moniker"=> get_moniker(&alive.payload.identifier), "version"=>alive.payload.v.unwrap_or("unknown".to_owned())).absolute(alive.payload.block_height);
     metrics::counter!("heart_beat", "moniker"=> get_moniker(&alive.payload.identifier), "version"=> alive.version.unwrap_or("unknown".to_owned())).absolute(alive.payload.block_height);
