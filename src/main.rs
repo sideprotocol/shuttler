@@ -1,7 +1,10 @@
 use clap::Parser;
 use shuttler::commands::{
-    address, init, reset, start, test,
+    address, init, reset, start,
     submit_tx, Cli, Commands};
+
+#[cfg(feature = "mock")]
+use shuttler::commands::test;
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
@@ -23,6 +26,7 @@ async fn main() {
         Commands::SubmitTx { hash} => {
             submit_tx::execute(&cli.home, &hash).await;
         }
+        #[cfg(feature = "mock")]
         Commands::Test {bin, n, tx, delay, module} => {
             test::execute(bin.clone().leak(), n, tx, delay, module).await;
         }

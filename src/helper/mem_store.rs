@@ -13,7 +13,7 @@ use crate::apps::Context;
 use crate::config::BLOCK_TOLERENCE;
 use crate::helper::encoding::identifier_to_base64;
 use super::store::Store;
-use super::{gossip::HeartBeatMessage, now};
+use super::gossip::HeartBeatMessage;
 
 lazy_static! {
     static ref DkgRound1SecretPacket: Mutex<BTreeMap<String, Vec<dkg::round1::SecretPackage>>> = {
@@ -77,16 +77,16 @@ pub fn get_participant_moniker(id: &Identifier) -> String {
 pub fn update_alive_table(self_identifier: &Identifier, alive: HeartBeatMessage) {
 
     // tracing::debug!("{:?} {}, {} ", get_moniker(&alive.payload.identifier), alive.payload.block_height, if alive.payload.last_seen > now() {alive.payload.last_seen - now()} else {0} );
-    if alive.payload.last_seen < now() { return }
+    // if alive.payload.last_seen < now() { return }
 
     let mut table= AliveTable.lock().unwrap();
 
-    if let Some(t) = table.get(&self_identifier) {
-        if alive.payload.block_height.abs_diff(t.clone()) > BLOCK_TOLERENCE { return }
-    }
-
     table.insert(alive.payload.identifier, alive.payload.block_height);
-    table.retain(|_, v| v.abs_diff(alive.payload.block_height) <= BLOCK_TOLERENCE);
+
+    let self_height = table.get(&self_identifier).unwrap_or(&0).clone();
+    if self_height > 0 {
+        table.retain(|_, v| v.abs_diff(self_height) <= BLOCK_TOLERENCE);
+    }
 
     // metrics::counter!("heart_beat", "moniker"=> get_moniker(&alive.payload.identifier), "version"=>alive.payload.v.unwrap_or("unknown".to_owned())).absolute(alive.payload.block_height);
     metrics::counter!("heart_beat", "moniker"=> get_moniker(&alive.payload.identifier), "version"=> alive.version.unwrap_or("unknown".to_owned())).absolute(alive.payload.block_height);
