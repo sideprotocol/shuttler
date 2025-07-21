@@ -60,5 +60,5 @@ pub mod start;
 pub mod address;
 pub mod reset;
 pub mod submit_tx;
-#[cfg(test)]
+#[cfg(feature = "mock")]
 pub mod test;

@@ -4,7 +4,7 @@ pub mod config;
 pub mod helper;
 #[cfg(test)]
 pub mod tests;
-#[cfg(test)]
+#[cfg(feature = "mock")]
 pub mod mock;
 pub mod protocols;
 pub mod rpc;
